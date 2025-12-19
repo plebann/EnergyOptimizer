@@ -1,0 +1,18 @@
+target-version = "py312"
+
+[lint]
+select = [
+    "E",  # pycodestyle
+    "W",  # pycodestyle
+    "F",  # Pyflakes
+    "UP",  # pyupgrade
+    "B",  # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "I",  # isort
+]
+ignore = [
+    "E501",  # line too long
+]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]

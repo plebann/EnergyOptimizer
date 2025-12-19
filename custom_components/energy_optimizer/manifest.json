@@ -1,0 +1,14 @@
+{
+  "domain": "energy_optimizer",
+  "name": "Energy Optimizer",
+  "codeowners": [
+    "@plebann"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/plebann/EnergyOptimizer",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/plebann/EnergyOptimizer/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

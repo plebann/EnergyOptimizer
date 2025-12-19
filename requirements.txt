@@ -1,0 +1,4 @@
+ruff
+homeassistant
+pytest
+pytest-homeassistant-custom-component

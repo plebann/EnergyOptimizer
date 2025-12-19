@@ -1,0 +1,17 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Energy Optimizer",
+        "description": "Set up the Energy Optimizer integration.",
+        "data": {}
+      }
+    },
+    "error": {
+      "already_configured": "Energy Optimizer is already configured"
+    },
+    "abort": {
+      "already_configured": "Energy Optimizer is already configured"
+    }
+  }
+}
