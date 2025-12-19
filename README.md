@@ -8,13 +8,9 @@
 
 _Integration to optimize energy usage in Home Assistant._
 
-**This integration will set up the following platforms.**
+**This is a template integration for HACS. Customize it to add your platforms and functionality.**
 
-Platform | Description
--- | --
-`binary_sensor` | Show something `True` or `False`.
-`sensor` | Show info from Energy Optimizer API.
-`switch` | Switch something `True` or `False`.
+The integration is ready to be extended with platforms like `sensor`, `binary_sensor`, `switch`, etc.
 
 ## Installation
 
