@@ -61,20 +61,64 @@
       },
       "control_entities": {
         "title": "Control Entity Configuration",
-        "description": "Select entities for controlling battery/inverter behavior",
+        "description": "Select entities for controlling battery/inverter behavior. Configure either a single target SOC entity or use time-based programs in the next step.",
         "data": {
-          "target_soc_entity": "Target SOC Control",
+          "target_soc_entity": "Target SOC Control (Optional)",
           "work_mode_entity": "Work Mode Control (Optional)",
           "charge_current_entity": "Charge Current Control (Optional)",
           "discharge_current_entity": "Discharge Current Control (Optional)",
           "grid_charge_switch": "Grid Charge Switch (Optional)"
         },
         "data_description": {
-          "target_soc_entity": "Entity to set battery charge target (required)",
+          "target_soc_entity": "Entity to set battery charge target. Leave empty if using time-based programs.",
           "work_mode_entity": "Entity to switch inverter work modes",
           "charge_current_entity": "Entity to control charge current limit",
           "discharge_current_entity": "Entity to control discharge current limit",
           "grid_charge_switch": "Switch to enable/disable grid charging"
+        }
+      },
+      "time_programs": {
+        "title": "Time-Based Programs (Optional)",
+        "description": "Configure multiple SOC targets for different time slots. Ideal for Solarman inverters (DEYE/Sunsynk/SolArk) with 6 programmable charging periods. Skip this step if using single target entity.",
+        "data": {
+          "prog1_soc_entity": "Program 1 SOC Target",
+          "prog1_time_start": "Program 1 Start Time",
+          "prog1_time_end": "Program 1 End Time",
+          "prog2_soc_entity": "Program 2 SOC Target",
+          "prog2_time_start": "Program 2 Start Time",
+          "prog2_time_end": "Program 2 End Time",
+          "prog3_soc_entity": "Program 3 SOC Target",
+          "prog3_time_start": "Program 3 Start Time",
+          "prog3_time_end": "Program 3 End Time",
+          "prog4_soc_entity": "Program 4 SOC Target",
+          "prog4_time_start": "Program 4 Start Time",
+          "prog4_time_end": "Program 4 End Time",
+          "prog5_soc_entity": "Program 5 SOC Target",
+          "prog5_time_start": "Program 5 Start Time",
+          "prog5_time_end": "Program 5 End Time",
+          "prog6_soc_entity": "Program 6 SOC Target",
+          "prog6_time_start": "Program 6 Start Time",
+          "prog6_time_end": "Program 6 End Time"
+        },
+        "data_description": {
+          "prog1_soc_entity": "Entity to set SOC target for time slot 1 (e.g., number.deye_hybrid_prog1_capacity)",
+          "prog1_time_start": "Start time for program 1 charging window",
+          "prog1_time_end": "End time for program 1 charging window",
+          "prog2_soc_entity": "Entity to set SOC target for time slot 2",
+          "prog2_time_start": "Start time for program 2 charging window",
+          "prog2_time_end": "End time for program 2 charging window",
+          "prog3_soc_entity": "Entity to set SOC target for time slot 3",
+          "prog3_time_start": "Start time for program 3 charging window",
+          "prog3_time_end": "End time for program 3 charging window",
+          "prog4_soc_entity": "Entity to set SOC target for time slot 4",
+          "prog4_time_start": "Start time for program 4 charging window",
+          "prog4_time_end": "End time for program 4 charging window",
+          "prog5_soc_entity": "Entity to set SOC target for time slot 5",
+          "prog5_time_start": "Start time for program 5 charging window",
+          "prog5_time_end": "End time for program 5 charging window",
+          "prog6_soc_entity": "Entity to set SOC target for time slot 6",
+          "prog6_time_start": "Start time for program 6 charging window",
+          "prog6_time_end": "End time for program 6 charging window"
         }
       },
       "pv_load_config": {
@@ -122,6 +166,7 @@
       "not_binary_sensor": "Entity must be a binary sensor.",
       "not_number_entity": "Entity must be a number entity.",
       "min_greater_than_max": "Minimum SOC must be less than maximum SOC.",
+      "no_target_configured": "You must configure either a single target SOC entity or at least one time-based program.",
       "cannot_connect": "Failed to connect.",
       "unknown": "Unexpected error occurred."
     },

@@ -31,6 +31,24 @@ from .const import (
     CONF_MIN_SOC,
     CONF_OUTSIDE_TEMP_SENSOR,
     CONF_PRICE_SENSOR,
+    CONF_PROG1_SOC_ENTITY,
+    CONF_PROG1_TIME_END,
+    CONF_PROG1_TIME_START,
+    CONF_PROG2_SOC_ENTITY,
+    CONF_PROG2_TIME_END,
+    CONF_PROG2_TIME_START,
+    CONF_PROG3_SOC_ENTITY,
+    CONF_PROG3_TIME_END,
+    CONF_PROG3_TIME_START,
+    CONF_PROG4_SOC_ENTITY,
+    CONF_PROG4_TIME_END,
+    CONF_PROG4_TIME_START,
+    CONF_PROG5_SOC_ENTITY,
+    CONF_PROG5_TIME_END,
+    CONF_PROG5_TIME_START,
+    CONF_PROG6_SOC_ENTITY,
+    CONF_PROG6_TIME_END,
+    CONF_PROG6_TIME_START,
     CONF_PV_FORECAST_REMAINING,
     CONF_PV_FORECAST_TODAY,
     CONF_PV_FORECAST_TOMORROW,
@@ -179,7 +197,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): vol.All(vol.Coerce(float), vol.Range(min=1, max=1000)),
                 vol.Required(
                     CONF_BATTERY_VOLTAGE, default=DEFAULT_BATTERY_VOLTAGE
-                ): vol.All(vol.Coerce(float), vol.Range(min=12, max=400)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=12, max=600)),
                 vol.Required(
                     CONF_BATTERY_EFFICIENCY, default=DEFAULT_BATTERY_EFFICIENCY
                 ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
@@ -209,11 +227,11 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors = await self._validate_control_entities(user_input)
             if not errors:
                 self._data.update(user_input)
-                return await self.async_step_pv_load_config()
+                return await self.async_step_time_programs()
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_TARGET_SOC_ENTITY): selector.EntitySelector(
+                vol.Optional(CONF_TARGET_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_WORK_MODE_ENTITY): selector.EntitySelector(
@@ -233,6 +251,57 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="control_entities", data_schema=schema, errors=errors
+        )
+
+    async def async_step_time_programs(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle time-based program configuration (optional)."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            errors = await self._validate_program_entities(user_input)
+            if not errors:
+                self._data.update(user_input)
+                return await self.async_step_pv_load_config()
+
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_PROG1_SOC_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(CONF_PROG1_TIME_START): selector.TimeSelector(),
+                vol.Optional(CONF_PROG1_TIME_END): selector.TimeSelector(),
+                vol.Optional(CONF_PROG2_SOC_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(CONF_PROG2_TIME_START): selector.TimeSelector(),
+                vol.Optional(CONF_PROG2_TIME_END): selector.TimeSelector(),
+                vol.Optional(CONF_PROG3_SOC_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(CONF_PROG3_TIME_START): selector.TimeSelector(),
+                vol.Optional(CONF_PROG3_TIME_END): selector.TimeSelector(),
+                vol.Optional(CONF_PROG4_SOC_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(CONF_PROG4_TIME_START): selector.TimeSelector(),
+                vol.Optional(CONF_PROG4_TIME_END): selector.TimeSelector(),
+                vol.Optional(CONF_PROG5_SOC_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(CONF_PROG5_TIME_START): selector.TimeSelector(),
+                vol.Optional(CONF_PROG5_TIME_END): selector.TimeSelector(),
+                vol.Optional(CONF_PROG6_SOC_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(CONF_PROG6_TIME_START): selector.TimeSelector(),
+                vol.Optional(CONF_PROG6_TIME_END): selector.TimeSelector(),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="time_programs", data_schema=schema, errors=errors
         )
 
     async def async_step_pv_load_config(
@@ -318,6 +387,18 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "Battery Voltage": f"{self._data.get(CONF_BATTERY_VOLTAGE, 0)} V",
         }
 
+        # Count configured programs
+        program_count = sum(
+            1 for key in [
+                CONF_PROG1_SOC_ENTITY, CONF_PROG2_SOC_ENTITY, CONF_PROG3_SOC_ENTITY,
+                CONF_PROG4_SOC_ENTITY, CONF_PROG5_SOC_ENTITY, CONF_PROG6_SOC_ENTITY
+            ]
+            if self._data.get(key)
+        )
+
+        if program_count > 0:
+            review_data["Time Programs"] = f"{program_count} configured"
+
         description = "Review your configuration:\n\n" + "\n".join(
             [f"- **{k}**: {v}" for k, v in review_data.items()]
         )
@@ -388,12 +469,60 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Validate control entity configuration."""
         errors = {}
 
-        # Check target SOC entity exists and is writable
-        target_state = self.hass.states.get(user_input[CONF_TARGET_SOC_ENTITY])
-        if not target_state:
-            errors[CONF_TARGET_SOC_ENTITY] = "entity_not_found"
-        elif target_state.domain != "number":
-            errors[CONF_TARGET_SOC_ENTITY] = "not_number_entity"
+        # Check target SOC entity if provided (now optional)
+        if CONF_TARGET_SOC_ENTITY in user_input and user_input[CONF_TARGET_SOC_ENTITY]:
+            target_state = self.hass.states.get(user_input[CONF_TARGET_SOC_ENTITY])
+            if not target_state:
+                errors[CONF_TARGET_SOC_ENTITY] = "entity_not_found"
+            elif target_state.domain != "number":
+                errors[CONF_TARGET_SOC_ENTITY] = "not_number_entity"
+
+        return errors
+
+    async def _validate_program_entities(
+        self, user_input: dict[str, Any]
+    ) -> dict[str, str]:
+        """Validate time-based program entity configuration."""
+        errors = {}
+
+        # Check that at least one targeting method is configured
+        has_single_target = self._data.get(CONF_TARGET_SOC_ENTITY)
+        has_programs = False
+
+        # Validate each configured program
+        program_configs = [
+            (CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START, CONF_PROG1_TIME_END),
+            (CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START, CONF_PROG2_TIME_END),
+            (CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START, CONF_PROG3_TIME_END),
+            (CONF_PROG4_SOC_ENTITY, CONF_PROG4_TIME_START, CONF_PROG4_TIME_END),
+            (CONF_PROG5_SOC_ENTITY, CONF_PROG5_TIME_START, CONF_PROG5_TIME_END),
+            (CONF_PROG6_SOC_ENTITY, CONF_PROG6_TIME_START, CONF_PROG6_TIME_END),
+        ]
+
+        for soc_key, start_key, end_key in program_configs:
+            soc_entity = user_input.get(soc_key)
+            start_time = user_input.get(start_key)
+            end_time = user_input.get(end_key)
+
+            if soc_entity:
+                has_programs = True
+                # Check entity exists and is writable
+                prog_state = self.hass.states.get(soc_entity)
+                if not prog_state:
+                    errors[soc_key] = "entity_not_found"
+                elif prog_state.domain != "number":
+                    errors[soc_key] = "not_number_entity"
+
+                # Warn if time windows not configured (optional but recommended)
+                if not start_time or not end_time:
+                    _LOGGER.warning(
+                        "%s configured without time windows - will be used for manual control only",
+                        soc_key
+                    )
+
+        # Ensure at least one targeting method is configured
+        if not has_single_target and not has_programs:
+            errors["base"] = "no_target_configured"
 
         return errors
 

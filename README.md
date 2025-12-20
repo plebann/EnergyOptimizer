@@ -144,6 +144,62 @@ pv_forecast_tomorrow: sensor.solcast_pv_forecast_forecast_tomorrow
 pv_forecast_remaining: sensor.solcast_pv_forecast_forecast_remaining_today
 ```
 
+### Multi-Program Configuration (Solarman Inverters)
+
+For Solarman-compatible inverters (DEYE/Sunsynk/SolArk) with multiple time-based charging programs, you can configure up to 6 programmable SOC targets instead of a single entity. The integration will automatically select the appropriate program entity based on the current time.
+
+**When to Use Multi-Program Mode:**
+- Your inverter supports time-slot based charging (common in DEYE/Sunsynk/SolArk)
+- You want different SOC targets for different times of day
+- You're using the Solarman integration which exposes program entities
+
+**Configuration Example:**
+```yaml
+# Leave target_soc_entity empty or unconfigured
+
+# Program 1 - Night charging (cheap electricity)
+prog1_soc_entity: number.deye_hybrid_prog1_capacity
+prog1_time_start: "22:00"
+prog1_time_end: "06:00"
+
+# Program 2 - Morning (after cheap tariff)
+prog2_soc_entity: number.deye_hybrid_prog2_capacity
+prog2_time_start: "06:00"
+prog2_time_end: "10:00"
+
+# Program 3 - Afternoon (peak solar)
+prog3_soc_entity: number.deye_hybrid_prog3_capacity
+prog3_time_start: "14:00"
+prog3_time_end: "18:00"
+
+# Programs 4-6 can be configured similarly
+```
+
+**How It Works:**
+1. During configuration, optionally configure time-based programs in addition to or instead of single target entity
+2. When `calculate_charge_soc` service runs, it checks the current time against all configured programs
+3. If a matching time window is found, the corresponding program SOC entity is updated
+4. If no program matches, it falls back to the single `target_soc_entity` (if configured)
+5. Time windows can cross midnight (e.g., 22:00 to 06:00)
+
+**Entity Naming Patterns:**
+
+Solarman integration typically creates entities like:
+- `number.deye_hybrid_prog1_capacity` (SOC target for slot 1)
+- `number.deye_hybrid_prog2_capacity` (SOC target for slot 2)
+- `time.deye_hybrid_prog1_time` (Start time for slot 1)
+- etc.
+
+Check your Solarman integration entities for the exact naming pattern.
+
+**Migration from Single Entity:**
+
+Existing configurations using `target_soc_entity` will continue to work without changes. To migrate:
+1. Go to Integrations → Energy Optimizer → Configure
+2. Navigate to the Time Programs step
+3. Configure your desired program entities and time windows
+4. Optionally clear `target_soc_entity` if you only want program-based control
+
 ## Services
 
 ### `energy_optimizer.calculate_charge_soc`

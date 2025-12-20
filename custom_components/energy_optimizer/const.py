@@ -27,6 +27,28 @@ CONF_CHARGE_CURRENT_ENTITY = "charge_current_entity"
 CONF_DISCHARGE_CURRENT_ENTITY = "discharge_current_entity"
 CONF_GRID_CHARGE_SWITCH = "grid_charge_switch"
 
+# Time-based program SOC entities (for Solarman inverters with multiple time slots)
+CONF_PROG1_SOC_ENTITY = "prog1_soc_entity"
+CONF_PROG2_SOC_ENTITY = "prog2_soc_entity"
+CONF_PROG3_SOC_ENTITY = "prog3_soc_entity"
+CONF_PROG4_SOC_ENTITY = "prog4_soc_entity"
+CONF_PROG5_SOC_ENTITY = "prog5_soc_entity"
+CONF_PROG6_SOC_ENTITY = "prog6_soc_entity"
+
+# Time window entities for each program
+CONF_PROG1_TIME_START = "prog1_time_start"
+CONF_PROG1_TIME_END = "prog1_time_end"
+CONF_PROG2_TIME_START = "prog2_time_start"
+CONF_PROG2_TIME_END = "prog2_time_end"
+CONF_PROG3_TIME_START = "prog3_time_start"
+CONF_PROG3_TIME_END = "prog3_time_end"
+CONF_PROG4_TIME_START = "prog4_time_start"
+CONF_PROG4_TIME_END = "prog4_time_end"
+CONF_PROG5_TIME_START = "prog5_time_start"
+CONF_PROG5_TIME_END = "prog5_time_end"
+CONF_PROG6_TIME_START = "prog6_time_start"
+CONF_PROG6_TIME_END = "prog6_time_end"
+
 CONF_DAILY_LOAD_SENSOR = "daily_load_sensor"
 CONF_PV_FORECAST_TODAY = "pv_forecast_today"
 CONF_PV_FORECAST_TOMORROW = "pv_forecast_tomorrow"

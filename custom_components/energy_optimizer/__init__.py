@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -91,6 +92,94 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await async_setup_entry(hass, entry)
 
 
+def get_active_program_entity(
+    config: dict[str, Any], current_time: datetime
+) -> str | None:
+    """Determine which program SOC entity should be updated based on time.
+    
+    Args:
+        config: Configuration dictionary containing program entities and time windows
+        current_time: Current datetime to check against time windows
+        
+    Returns:
+        Entity ID of the active program, or None if no programs configured or no match
+    """
+    from datetime import time as dt_time
+    from .const import (
+        CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START, CONF_PROG1_TIME_END,
+        CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START, CONF_PROG2_TIME_END,
+        CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START, CONF_PROG3_TIME_END,
+        CONF_PROG4_SOC_ENTITY, CONF_PROG4_TIME_START, CONF_PROG4_TIME_END,
+        CONF_PROG5_SOC_ENTITY, CONF_PROG5_TIME_START, CONF_PROG5_TIME_END,
+        CONF_PROG6_SOC_ENTITY, CONF_PROG6_TIME_START, CONF_PROG6_TIME_END,
+    )
+    
+    programs = [
+        (CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START, CONF_PROG1_TIME_END),
+        (CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START, CONF_PROG2_TIME_END),
+        (CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START, CONF_PROG3_TIME_END),
+        (CONF_PROG4_SOC_ENTITY, CONF_PROG4_TIME_START, CONF_PROG4_TIME_END),
+        (CONF_PROG5_SOC_ENTITY, CONF_PROG5_TIME_START, CONF_PROG5_TIME_END),
+        (CONF_PROG6_SOC_ENTITY, CONF_PROG6_TIME_START, CONF_PROG6_TIME_END),
+    ]
+    
+    current_time_only = current_time.time()
+    
+    for soc_key, start_key, end_key in programs:
+        soc_entity = config.get(soc_key)
+        start_time = config.get(start_key)
+        end_time = config.get(end_key)
+        
+        # Skip if program not configured or missing time windows
+        if not soc_entity or not start_time or not end_time:
+            continue
+            
+        try:
+            # Convert time strings/objects to time objects
+            if isinstance(start_time, str):
+                start_parts = start_time.split(":")
+                start_dt = dt_time(int(start_parts[0]), int(start_parts[1]))
+            elif isinstance(start_time, dt_time):
+                start_dt = start_time
+            else:
+                _LOGGER.warning("Invalid start_time format for %s: %s", soc_key, start_time)
+                continue
+                
+            if isinstance(end_time, str):
+                end_parts = end_time.split(":")
+                end_dt = dt_time(int(end_parts[0]), int(end_parts[1]))
+            elif isinstance(end_time, dt_time):
+                end_dt = end_time
+            else:
+                _LOGGER.warning("Invalid end_time format for %s: %s", soc_key, end_time)
+                continue
+            
+            # Check if current time falls within this program's window
+            if start_dt <= end_dt:
+                # Normal case: window doesn't cross midnight
+                if start_dt <= current_time_only < end_dt:
+                    _LOGGER.debug(
+                        "Current time %s matches program %s window %s-%s",
+                        current_time_only, soc_key, start_dt, end_dt
+                    )
+                    return soc_entity
+            else:
+                # Window crosses midnight
+                if current_time_only >= start_dt or current_time_only < end_dt:
+                    _LOGGER.debug(
+                        "Current time %s matches program %s window %s-%s (crosses midnight)",
+                        current_time_only, soc_key, start_dt, end_dt
+                    )
+                    return soc_entity
+                    
+        except (ValueError, AttributeError, IndexError) as err:
+            _LOGGER.warning("Error parsing time window for %s: %s", soc_key, err)
+            continue
+    
+    _LOGGER.debug("No active program found for current time %s", current_time_only)
+    return None
+
+
 async def async_register_services(hass: HomeAssistant) -> None:
     """Register Energy Optimizer services."""
 
@@ -154,22 +243,46 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 )
                 charge_energy = soc_to_kwh(target_soc - current_soc, capacity_ah, voltage)
 
-            # Write target SOC to control entity
-            target_soc_entity = config.get("target_soc_entity")
-            if target_soc_entity:
+            # Determine which SOC entity to update (program-aware or single entity)
+            target_entity = None
+            
+            # First, try to find active program entity
+            current_time = datetime.now()
+            program_entity = get_active_program_entity(config, current_time)
+            
+            if program_entity:
+                target_entity = program_entity
+                _LOGGER.info("Using program entity: %s", program_entity)
+            else:
+                # Fall back to single target entity
+                target_entity = config.get("target_soc_entity")
+                if target_entity:
+                    _LOGGER.info("Using single target entity: %s", target_entity)
+                else:
+                    _LOGGER.warning("No target SOC entity configured (neither program nor single)")
+            
+            # Write target SOC to the determined entity
+            if target_entity:
                 await hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": target_soc_entity, "value": target_soc},
+                    {"entity_id": target_entity, "value": target_soc},
                     blocking=True,
                 )
-
-            _LOGGER.info(
-                "Calculated charge target: %s%% (current: %s%%, energy: %s kWh)",
-                target_soc,
-                current_soc,
-                charge_energy,
-            )
+                _LOGGER.info(
+                    "Set %s to %s%% (current: %s%%, charge energy: %.2f kWh)",
+                    target_entity,
+                    target_soc,
+                    current_soc,
+                    charge_energy,
+                )
+            else:
+                _LOGGER.info(
+                    "Calculated charge target: %s%% (current: %s%%, energy: %.2f kWh) - no entity to update",
+                    target_soc,
+                    current_soc,
+                    charge_energy,
+                )
 
         except (ValueError, TypeError) as err:
             _LOGGER.error("Error calculating charge SOC: %s", err)
