@@ -93,11 +93,12 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 def get_active_program_entity(
-    config: dict[str, Any], current_time: datetime
+    hass: HomeAssistant, config: dict[str, Any], current_time: datetime
 ) -> str | None:
     """Determine which program SOC entity should be updated based on time.
     
     Args:
+        hass: Home Assistant instance to read entity states
         config: Configuration dictionary containing program entities and time windows
         current_time: Current datetime to check against time windows
         
@@ -127,25 +128,43 @@ def get_active_program_entity(
     configured_programs = []
     for soc_key, start_key in programs:
         soc_entity = config.get(soc_key)
-        start_time = config.get(start_key)
+        start_time_entity = config.get(start_key)
         
-        if not soc_entity or not start_time:
+        if not soc_entity or not start_time_entity:
+            continue
+        
+        # Get the state of the time entity
+        time_state = hass.states.get(start_time_entity)
+        if not time_state:
+            _LOGGER.warning("Time entity %s not found for %s", start_time_entity, soc_key)
             continue
             
         try:
-            # Convert time to dt_time object
-            if isinstance(start_time, str):
-                start_parts = start_time.split(":")
-                start_dt = dt_time(int(start_parts[0]), int(start_parts[1]))
-            elif isinstance(start_time, dt_time):
-                start_dt = start_time
+            # Extract time from entity state
+            # input_datetime entities can have date+time or just time
+            # sensor entities should have time in HH:MM or HH:MM:SS format
+            time_value = time_state.state
+            
+            if not time_value or time_value in ("unknown", "unavailable"):
+                _LOGGER.warning("Time entity %s has invalid state: %s", start_time_entity, time_value)
+                continue
+            
+            # Parse time string (handle HH:MM or HH:MM:SS format)
+            # Also handle datetime strings by extracting just the time portion
+            if "T" in time_value:
+                # ISO datetime format, extract time portion
+                time_value = time_value.split("T")[1].split("+")[0].split("-")[0]
+            
+            time_parts = time_value.split(":")
+            if len(time_parts) >= 2:
+                start_dt = dt_time(int(time_parts[0]), int(time_parts[1]))
             else:
-                _LOGGER.warning("Invalid start_time format for %s: %s", soc_key, start_time)
+                _LOGGER.warning("Invalid time format for %s: %s", start_time_entity, time_value)
                 continue
                 
             configured_programs.append((soc_entity, start_dt))
         except (ValueError, AttributeError, IndexError) as err:
-            _LOGGER.warning("Error parsing time for %s: %s", soc_key, err)
+            _LOGGER.warning("Error parsing time from entity %s: %s", start_time_entity, err)
             continue
     
     if not configured_programs:
@@ -252,7 +271,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
             
             # First, try to find active program entity
             current_time = datetime.now()
-            program_entity = get_active_program_entity(config, current_time)
+            program_entity = get_active_program_entity(hass, config, current_time)
             
             if program_entity:
                 target_entity = program_entity

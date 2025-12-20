@@ -157,27 +157,34 @@ For Solarman-compatible inverters (DEYE/Sunsynk/SolArk) with multiple time-based
 ```yaml
 # Leave target_soc_entity empty or unconfigured
 
+# First, create input_datetime helpers to store the program start times:
+# input_datetime.prog1_start
+# input_datetime.prog2_start
+# input_datetime.prog3_start
+
+# Then configure the programs:
 # Program 1 - Night charging (cheap electricity)
 prog1_soc_entity: number.deye_hybrid_prog1_capacity
-prog1_time_start: "22:00"
+prog1_time_start: input_datetime.prog1_start  # Set to "22:00" in HA UI
 
 # Program 2 - Morning (after cheap tariff)
 prog2_soc_entity: number.deye_hybrid_prog2_capacity
-prog2_time_start: "06:00"
+prog2_time_start: input_datetime.prog2_start  # Set to "06:00" in HA UI
 
 # Program 3 - Afternoon (peak solar)
 prog3_soc_entity: number.deye_hybrid_prog3_capacity
-prog3_time_start: "14:00"
+prog3_time_start: input_datetime.prog3_start  # Set to "14:00" in HA UI
 
 # Programs 4-6 can be configured similarly
 ```
 
 **How It Works:**
 1. During configuration, optionally configure time-based programs in addition to or instead of single target entity
-2. When `calculate_charge_soc` service runs, it checks the current time against all configured programs
-3. If a matching time window is found, the corresponding program SOC entity is updated
-4. If no program matches, it falls back to the single `target_soc_entity` (if configured)
-5. Time windows can cross midnight (e.g., 22:00 to 06:00)
+2. Program time starts must reference Home Assistant entities (input_datetime or sensor) that contain time values
+3. When `calculate_charge_soc` service runs, it reads the time from each configured entity and checks against current time
+4. If a matching time window is found, the corresponding program SOC entity is updated
+5. If no program matches, it falls back to the single `target_soc_entity` (if configured)
+6. Time windows can cross midnight (e.g., 22:00 to 06:00)
 
 **Entity Naming Patterns:**
 

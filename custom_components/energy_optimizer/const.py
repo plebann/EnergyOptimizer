@@ -35,7 +35,8 @@ CONF_PROG4_SOC_ENTITY = "prog4_soc_entity"
 CONF_PROG5_SOC_ENTITY = "prog5_soc_entity"
 CONF_PROG6_SOC_ENTITY = "prog6_soc_entity"
 
-# Time start for each program (programs run from start time to next program's start)
+# Time start entities for each program (input_datetime or sensor entities with time values)
+# Programs run from start time to next program's start time
 CONF_PROG1_TIME_START = "prog1_time_start"
 CONF_PROG2_TIME_START = "prog2_time_start"
 CONF_PROG3_TIME_START = "prog3_time_start"
