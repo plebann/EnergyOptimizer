@@ -378,6 +378,8 @@ async def async_register_services(hass: HomeAssistant) -> None:
 
     async def handle_optimize_schedule(call: ServiceCall) -> None:
         """Handle optimize_battery_schedule service call."""
+        _LOGGER.info("=== Battery Schedule Optimization Started ===")
+        
         from datetime import datetime
 
         from homeassistant.util import dt as dt_util
@@ -543,6 +545,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
             return
 
         # Get current battery SOC for preservation scenarios
+        _LOGGER.debug("Balancing not triggered - checking preservation/normal operation modes")
         soc_sensor = config.get(CONF_BATTERY_SOC_SENSOR)
         current_soc = None
         if soc_sensor:
@@ -639,6 +642,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
             return
 
         # SCENARIO 3: Normal Operation Restoration
+        _LOGGER.debug("Preservation not needed - checking normal operation restoration")
         program_night_soc = config.get(CONF_PROGRAM_NIGHT_SOC_ENTITY)
         min_soc = config.get("min_soc", 15)
 
