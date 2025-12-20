@@ -1,0 +1,2219 @@
+- actions:
+  - action: homeassistant.update_entity
+    data:
+      entity_id:
+      - sensor.rce_prices_today
+    target:
+      entity_id: sensor.rce_prices_today
+  - delay: 00:00:01
+  - action: homeassistant.update_entity
+    data:
+      entity_id:
+      - sensor.current_rce_price
+    target:
+      entity_id: sensor.current_rce_price
+  - delay: 00:00:01
+  - action: homeassistant.update_entity
+    data:
+      entity_id:
+      - sensor.rce_prices_tomorrow
+    target:
+      entity_id: sensor.rce_prices_tomorrow
+  alias: 00 Refresh RCE Prices Today
+  description: ''
+  id: refresh_rce_prices_today
+  triggers:
+  - at: 00:00:00
+    trigger: time
+- id: refresh_rce_prices_tomorrow
+  alias: Refresh RCE Prices Tomorrow
+  triggers:
+  - trigger: homeassistant
+    event: start
+  - at: '14:00:00'
+    trigger: time
+  actions:
+  - action: homeassistant.update_entity
+    data:
+      entity_id:
+      - sensor.rce_prices_tomorrow
+    target:
+      entity_id: sensor.rce_prices_tomorrow
+  - delay:
+      hours: 0
+      minutes: 0
+      seconds: 15
+      milliseconds: 0
+  - else:
+    - action: automation.trigger
+      data:
+        skip_condition: false
+      metadata: {}
+      target:
+        entity_id: automation.refresh_rce_prices_tomorrow
+    if:
+    - above: 0
+      condition: numeric_state
+      entity_id: sensor.rce_prices_tomorrow
+    then:
+    - action: python_script.find_prices_window_tomorrow_morning
+      data: {}
+      metadata: {}
+- id: check_rce_price_window
+  alias: Check RCE price window
+  description: ''
+  triggers:
+  - event: start
+    trigger: homeassistant
+  - entity_id:
+    - sensor.rce_prices_today
+    - sensor.rce_prices_tomorrow
+    trigger: state
+  - at:
+      entity_id: sensor.lowest_price_window_daytime
+      offset: -02:00:00
+    trigger: time
+  - at:
+      entity_id: input_datetime.rce_highest_window_evening
+      offset: -02:00:00
+    trigger: time
+  conditions: []
+  actions:
+  - action: python_script.find_prices_window_daytime
+    data: {}
+- id: '1740061678712'
+  alias: Switch tariffs
+  description: ''
+  triggers:
+  - at: 06:00:00
+    trigger: time
+    id: high_morning
+  - trigger: time
+    at: input_datetime.low_tarrif_start
+    id: low_afternoon
+  - at: input_datetime.low_tarrif_end
+    trigger: time
+    id: high_afternoon
+  - at: '22:00:00'
+    trigger: time
+    id: low_evening
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - low_afternoon
+        - low_evening
+      sequence:
+      - action: select.select_option
+        data:
+          option: low
+        metadata: {}
+        target:
+          entity_id:
+          - select.energy_tariff_daily
+          - select.energy_tariff_monthly
+        alias: Set tarrif to low
+      - action: input_number.set_value
+        data:
+          value: '{{ states(''input_number.energy_price_low'') | float }}'
+        target:
+          entity_id: input_number.energy_price
+        alias: Set energy price to low
+      alias: Switch to low
+    - conditions:
+      - condition: trigger
+        id:
+        - high_morning
+        - high_afternoon
+      sequence:
+      - action: select.select_option
+        data:
+          option: high
+        metadata: {}
+        target:
+          entity_id:
+          - select.energy_tariff_daily
+          - select.energy_tariff_monthly
+        alias: Set tarrif to high
+      - action: input_number.set_value
+        data:
+          value: '{{ states(''input_number.energy_price_high'') | float }}'
+        target:
+          entity_id: input_number.energy_price
+        alias: Set energy price to high
+      alias: Switch to high
+  mode: single
+- id: '1740673473180'
+  alias: 30 PV battery charging limit
+  description: ''
+  triggers:
+  - event: sunrise
+    offset: 0
+    trigger: sun
+  - event: sunrise
+    offset: 01:00:00
+    trigger: sun
+  - event: sunrise
+    offset: 02:00:00
+    trigger: sun
+  - event: sunrise
+    offset: 03:00:00
+    trigger: sun
+  conditions:
+  - above: 1
+    condition: numeric_state
+    entity_id: number.inverter_battery_max_charging_current
+  - alias: If today forecast production exceeds battery available capacity
+    condition: template
+    value_template: '{% set soc = states(''sensor.inverter_battery'') | float %}
+
+      {% set capacity = 20.5 %}
+
+      {% set available_capacity = ((100 - soc) / 100) * capacity %}
+
+      {% set usage = states(''sensor.load_usage_daily'') | float * 1.1 %}
+
+      {% set forecast = states(''sensor.solcast_pv_forecast_forecast_today'') | float
+      * 0.9 %}
+
+      {{ forecast - usage > available_capacity }}'
+  - above: 15
+    alias: Current Battery level is above 15%
+    condition: device
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: sensor
+    entity_id: 88da66cbcfbdce13358071d1f2c656f5
+    type: is_battery_level
+  - alias: If enough price difference
+    condition: template
+    value_template: '{{ state_attr(''sensor.lowest_price_window_daytime'', ''average_price'')
+      | float(0) * 1.3  < state_attr(''sensor.highest_price_window_morning'', ''average_price'')
+      | float(0) }}'
+  - condition: time
+    before: sensor.lowest_price_window_daytime
+  actions:
+  - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: number
+    entity_id: 817caa09f94c723919d229747fb30e4f
+    type: set_value
+    value: 1
+  - action: notify.persistent_notification
+    data:
+      message: PV Battery charging disabled
+    metadata: {}
+  - delay:
+      hours: 1
+      milliseconds: 0
+      minutes: 0
+      seconds: 0
+  - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: number
+    entity_id: 817caa09f94c723919d229747fb30e4f
+    type: set_value
+    value: 0
+  mode: single
+- id: '1740673764964'
+  alias: 50 Evening grid sell on
+  description: ''
+  triggers:
+  - alias: On RCE Highest price window
+    at: input_datetime.rce_highest_window_evening
+    trigger: time
+  conditions:
+  - alias: If today's price is higher than tomorrow morning's price
+    condition: template
+    value_template: '{{ state_attr(''sensor.highest_price_window_daytime'', ''average_price'')
+      | replace(''None'', ''0'') | float > states(''sensor.highest_price_tomorrow_morning'')
+      | replace(''unknown'', ''0'') | float }}'
+  actions:
+  - choose:
+    - conditions:
+      - alias: If evening price is 2 times energy price
+        condition: template
+        value_template: '{{ states(''input_number.energy_price_low'') | float * 2000
+          < state_attr(''sensor.highest_price_window_daytime'', ''average_price'')
+          | float }}'
+      sequence:
+      - variables:
+          surplus_energy: '{% from ''energy_sell_planing.jinja'' import calculate_max_sell
+            %} {{ calculate_max_sell() | float }}
+
+            '
+          expected_soc: '{% from ''energy_calculations.jinja'' import surplus_to_soc
+            %} {{ surplus_to_soc(surplus_energy) }}
+
+            '
+      alias: Sell all possible
+    default:
+    - variables:
+        surplus_energy: '{%- from ''energy_sell_planing.jinja'' import calculate_evening_sell
+          -%} {{- calculate_evening_sell() | float -}}
+
+          '
+        expected_soc: '{%- from ''energy_calculations.jinja'' import surplus_to_soc
+          -%} {{- surplus_to_soc(surplus_energy) -}}
+
+          '
+  - condition: template
+    value_template: '{{ expected_soc < states(''sensor.inverter_battery'') | int }}'
+    alias: If expected_soc is lower than current
+  - action: select.select_option
+    alias: Set Inverter Work Mode to Export First
+    data:
+      option: Export First
+    metadata: {}
+    target:
+      entity_id: select.inverter_work_mode
+  - alias: Set desired SOC in program 5
+    action: number.set_value
+    data:
+      value: '{{ expected_soc }}'
+    metadata: {}
+    target:
+      entity_id: number.inverter_program_5_soc
+  - alias: Limit export power
+    action: number.set_value
+    metadata: {}
+    data:
+      value: '{{ 100 * (surplus_energy * 10 + 2.5) | round(0) }}'
+    target:
+      entity_id:
+      - number.inverter_export_surplus_power
+  - action: notify.persistent_notification
+    data:
+      message: '{{ surplus_energy | round(2) }} kWh, expected SOC is {{ expected_soc
+        }}'
+      title: Grid sell on
+    metadata: {}
+  mode: single
+- id: '1740674010745'
+  alias: 35 Enable PV battery charging
+  description: ''
+  triggers:
+  - at: input_datetime.rce_lowest_window_noon
+    trigger: time
+  conditions:
+  - alias: If battery charging is disabled
+    below: 1.1
+    condition: numeric_state
+    entity_id: number.inverter_battery_max_charging_current
+  actions:
+  - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: number
+    entity_id: 817caa09f94c723919d229747fb30e4f
+    type: set_value
+    value: 23
+  - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: select
+    entity_id: 5c04b0cb3ad93638eab085dc63da4157
+    option: Zero Export To Load
+    type: select_option
+  - action: notify.persistent_notification
+    data:
+      message: PV Battery charging re-enabled
+    metadata: {}
+  mode: single
+- id: '1740689471157'
+  alias: 55 Evening grid sell off
+  description: ''
+  triggers:
+  - at:
+      entity_id: sensor.highest_price_window_daytime
+      offset: 01:00:00
+    trigger: time
+  conditions:
+  - alias: Current Inverter Work Mode is Export First
+    condition: device
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: select
+    entity_id: 5c04b0cb3ad93638eab085dc63da4157
+    option: Export First
+    type: selected_option
+  actions:
+  - alias: Change Inverter Work Mode option to Zero Export to Load
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: select
+    entity_id: 5c04b0cb3ad93638eab085dc63da4157
+    option: Zero Export To Load
+    type: select_option
+  - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: number
+    entity_id: ff7d38f0bc6383bc516b13f26019a8a5
+    type: set_value
+    value: 12
+  - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: number
+    entity_id: fa1fe693789095aae3d44c57e4f8ceaa
+    type: set_value
+    value: 12000
+    alias: Reset Export power
+  mode: single
+- id: '1741190665774'
+  alias: 20 Morning grid sell on
+  description: ''
+  triggers:
+  - at: input_datetime.rce_highest_window_morning
+    trigger: time
+  conditions:
+  - condition: and
+    conditions:
+    - below: 1
+      condition: numeric_state
+      entity_id: sensor.grid_import_daily
+    - above: 25
+      condition: device
+      device_id: c95e6820f178b0f468fc94b9da0ddfdb
+      domain: sensor
+      entity_id: 88da66cbcfbdce13358071d1f2c656f5
+      type: is_battery_level
+  actions:
+  - choose:
+    - conditions:
+      - alias: Morning price is lower than lowest with margin
+        condition: template
+        value_template: "{{ state_attr('sensor.highest_price_window_morning', 'average_price')
+          | float <=\n state_attr('sensor.lowest_price_window_daytime', 'average_price')
+          | float * 1.3 }}"
+      sequence:
+      - variables:
+          surplus_energy: '{{ 0 }}
+
+            '
+          expected_soc: '{% from ''energy_calculations.jinja'' import surplus_to_soc
+            %} {{ surplus_to_soc(surplus_energy) }}
+
+            '
+    - conditions:
+      - condition: template
+        value_template: "{{ state_attr('sensor.highest_price_window_morning', 'average_price')
+          | float >\n state_attr('sensor.highest_price_window_daytime', 'average_price')
+          | float }}"
+        alias: Morning price is higher than evening
+      sequence:
+      - variables:
+          surplus_energy: '{% from ''energy_calculations.jinja'' import calculate_required_energy_suffiency
+            %}
+
+            {{ calculate_required_energy_suffiency(now().hour, 18) }}
+
+            '
+          expected_soc: '{% from ''energy_calculations.jinja'' import surplus_to_soc
+            %} {{ surplus_to_soc(surplus_energy) }}
+
+            '
+    default:
+    - variables:
+        surplus_energy: '{% from ''energy_sell_planing.jinja'' import calculate_morning_sell
+          %} {{ calculate_morning_sell() | float }}
+
+          '
+        expected_soc: '{% from ''energy_calculations.jinja'' import surplus_to_soc
+          %} {{ surplus_to_soc(surplus_energy) }}
+
+          '
+  - condition: template
+    value_template: '{{ expected_soc < states(''sensor.inverter_battery'') | int }}'
+    alias: If expected_soc is lower than current
+  - alias: Change Inverter Work mode to Export First
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: select
+    entity_id: 5c04b0cb3ad93638eab085dc63da4157
+    option: Export First
+    type: select_option
+  - alias: Set desired SOC in program 2
+    action: number.set_value
+    data:
+      value: '{{ expected_soc }}'
+    metadata: {}
+    target:
+      entity_id:
+      - number.inverter_program_2_soc
+  - alias: Limit export power
+    action: number.set_value
+    metadata: {}
+    data:
+      value: '{{ 100 * (surplus_energy * 10 + 2.5) | round(0) }}'
+    target:
+      entity_id:
+      - number.inverter_export_surplus_power
+  - action: notify.persistent_notification
+    data:
+      message: '{{ surplus_energy | round(2) }} kWh, expected SOC is {{ expected_soc
+        }}'
+      title: Morning grid sell on
+    metadata: {}
+  mode: single
+- actions:
+  - alias: Set Max Charging Current to 0
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: number
+    entity_id: 817caa09f94c723919d229747fb30e4f
+    type: set_value
+    value: 0
+  - action: notify.persistent_notification
+    data:
+      message: Disable charging when profit margin to low
+    metadata: {}
+  alias: Disable charging when profit margin to low
+  conditions:
+  - above: 75
+    alias: Current battery lvl is between 75 and 90
+    below: 90
+    condition: device
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: sensor
+    entity_id: 88da66cbcfbdce13358071d1f2c656f5
+    type: is_battery_level
+  - condition: template
+    value_template: '{% set soc = states(''sensor.inverter_battery'') | float(1) %}
+
+      {% set capacity = states(''sensor.inverter_battery_capacity'') | float(1) *
+      1.2 %}
+
+      {% set available_capacity = ((100 - soc) / 100) * capacity %}
+
+      {% set usage = states(''sensor.load_usage_daily'') | float(0) %}
+
+      {% set forecast = states(''sensor.solcast_pv_forecast_forecast_today'') | float(0)
+      %}
+
+      {{ forecast - usage > available_capacity }}'
+  - after: sunrise
+    before: sunset
+    condition: sun
+  description: ''
+  id: '1741871239875'
+  mode: single
+  triggers:
+  - alias: When current price above 80% max evening price
+    trigger: template
+    value_template: '{{ states(''sensor.current_rce_price'') | replace(''unknown'',
+      ''0'') | float(0) > state_attr(''sensor.highest_price_window_daytime'', ''average_price'')
+      | replace(''None'', ''0'') | float(0) / 1333 }}'
+- id: '1747986174447'
+  alias: 25 Morning grid sell off
+  description: ''
+  triggers:
+  - at:
+      entity_id: input_datetime.rce_highest_window_morning
+      offset: 01:00:00
+    trigger: time
+  - alias: When Battery SOC reaches Program 2 limit
+    trigger: template
+    value_template: '{{ states(''sensor.inverter_battery'') | int == states(''number.inverter_program_2_soc'')
+      | int }}'
+  conditions:
+  - alias: Current Inverter Work Mode is Export First
+    condition: device
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: select
+    entity_id: 5c04b0cb3ad93638eab085dc63da4157
+    option: Export First
+    type: selected_option
+  actions:
+  - alias: Change Inverter Work Mode option to Zero Export to Load
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: select
+    entity_id: 5c04b0cb3ad93638eab085dc63da4157
+    option: Zero Export To Load
+    type: select_option
+  - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: number
+    entity_id: fda1d03e8a7599acdafcea27bcef8643
+    type: set_value
+    value: 12
+  mode: single
+- id: '1748506509492'
+  alias: 40 Afternoon grid charge enable
+  description: ''
+  triggers:
+  - trigger: time
+    at: input_datetime.low_tarrif_start
+  conditions: []
+  actions:
+  - variables:
+      deficit: '{% from ''energy_charge_planning.jinja'' import calculate_afternoon_charge_soc
+        %} {{ calculate_afternoon_charge_soc() | float(0) }}
+
+        '
+      expected_soc: '{% from ''energy_calculations.jinja'' import deficite_to_soc
+        %} {{ deficite_to_soc(deficit) }}
+
+        '
+  - if:
+    - alias: If expected_soc is higher than current soc
+      condition: template
+      value_template: '{{ expected_soc > (states(''sensor.inverter_battery'') | int)
+        }}'
+    then:
+    - variables:
+        charging_current: '{% from ''calculations.jinja'' import get_expected_current
+          %} {{ get_expected_current(deficit) | float }}
+
+          '
+    - action: number.set_value
+      metadata: {}
+      data:
+        value: '{{ charging_current }}'
+      target:
+        entity_id: number.inverter_battery_grid_charging_current
+      alias: Limit Inverter Battery Grid Charging current
+    - action: number.set_value
+      data:
+        value: '{{ expected_soc }}'
+      metadata: {}
+      target:
+        entity_id: number.inverter_program_4_soc
+    - action: notify.persistent_notification
+      data:
+        message: '{{ deficit | round(2) }} kWh, expected SOC is {{ expected_soc }}'
+        title: Afternoon grid charge enabled
+      metadata: {}
+  mode: single
+- id: '1748509048587'
+  alias: 45 Afternoon grid charge disable
+  description: ''
+  triggers:
+  - trigger: time
+    at: input_datetime.low_tarrif_end
+  conditions:
+  - condition: numeric_state
+    entity_id: number.inverter_program_4_soc
+    above: 12
+  actions:
+  - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: number
+    entity_id: 1563b7889769e4a1537c7a3d82a25fc7
+    type: set_value
+    value: 15
+  mode: single
+- id: '1748525219765'
+  alias: 10 Morning grid charge enable
+  description: ''
+  triggers:
+  - hours: '04'
+    minutes: '00'
+    seconds: '00'
+    trigger: time_pattern
+  conditions: []
+  actions:
+  - variables:
+      deficit: '{% from ''energy_charge_planning.jinja'' import calculate_morning_charge_soc
+        %} {{ calculate_morning_charge_soc() }}
+
+        '
+      expected_soc: '{% from ''energy_calculations.jinja'' import deficite_to_soc
+        %} {{ deficite_to_soc(deficit) }}
+
+        '
+  - if:
+    - alias: If expected_soc is higher than current soc
+      condition: template
+      value_template: '{{ expected_soc > (states(''sensor.inverter_battery'') | round
+        + 1) }}'
+    then:
+    - variables:
+        charging_current: '{% from ''calculations.jinja'' import get_expected_current
+          %} {{ get_expected_current(deficit) | float }}
+
+          '
+    - action: number.set_value
+      metadata: {}
+      data:
+        value: '{{ charging_current }}'
+      target:
+        entity_id: number.inverter_battery_grid_charging_current
+      alias: Limit Inverter Battery Grid Charging current
+    - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+      domain: select
+      entity_id: 4a9d679e77f71ef9af2fcb203ac5b0c3
+      option: Grid
+      type: select_option
+    - action: number.set_value
+      data:
+        value: '{{ expected_soc }}'
+      metadata: {}
+      target:
+        entity_id:
+        - number.inverter_program_1_soc
+    - action: notify.persistent_notification
+      data:
+        message: '{{ deficit | round(2) }} kWh, expected SOC is {{ expected_soc }}'
+        title: Morning grid charge enabled
+      metadata: {}
+  mode: single
+- id: '1748525362699'
+  alias: 15 Morning grid charge disable
+  description: ''
+  triggers:
+  - hours: '05'
+    minutes: '59'
+    seconds: '00'
+    trigger: time_pattern
+  conditions:
+  - condition: numeric_state
+    entity_id: number.inverter_program_1_soc
+    above: 12
+  actions:
+  - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: number
+    entity_id: 56d6f1f51d1e7596b73cd39e0989b863
+    type: set_value
+    value: 15
+  mode: single
+- id: '1751017131536'
+  alias: Fill rainwater tank
+  description: ''
+  triggers:
+  - at: sensor.sun_next_noon
+    trigger: time
+  - below: 5.1
+    entity_id:
+    - sensor.rainwater_level_percentage
+    trigger: numeric_state
+  conditions:
+  - condition: or
+    conditions:
+    - below: 5.1
+      condition: numeric_state
+      entity_id: sensor.rainwater_level_percentage
+    - condition: and
+      conditions:
+      - below: 12
+        condition: numeric_state
+        entity_id: sensor.rainwater_level_percentage
+      - alias: If no precipitation for next 3 days
+        condition: template
+        value_template: '{% set weather_today = (states(''input_text.weather_data_today'')
+          | from_json) %}
+
+          {% set weather_tomorrow = (states(''input_text.weather_data_tomorrow'')
+          | from_json) %}
+
+          {% set precipitation = 0 %}
+
+          {% set precipitation = weather_today.precipitation + weather_tomorrow.precipitation
+          %}
+
+          {{ precipitation <= 5  }}'
+  actions:
+  - action: switch.turn_on
+    data: {}
+    metadata: {}
+    target:
+      entity_id: switch.water_pomp
+  - delay:
+      hours: 0
+      milliseconds: 0
+      minutes: 5
+      seconds: 0
+  - action: switch.turn_off
+    data: {}
+    metadata: {}
+    target:
+      entity_id: switch.water_pomp
+  mode: single
+- actions:
+  - action: persistent_notification.create
+    data:
+      message: Wiatr
+    metadata: {}
+  alias: Wind notification
+  conditions: []
+  description: ''
+  id: '1751892473562'
+  mode: single
+  triggers:
+  - above: 35
+    device_id: fb43298a17fcfd5e866c78a0d3e2adee
+    domain: sensor
+    entity_id: a89773f86251a3dbc07362d363a20a15
+    for:
+      hours: 0
+      minutes: 5
+      seconds: 0
+    trigger: device
+    type: wind_speed
+- id: '1754294183285'
+  alias: Smart Garden Irrigation V1.0 beta
+  description: ''
+  triggers:
+  - at:
+    id: fixed_time
+    trigger: time
+  - event: sunset
+    offset: 0
+    id: sunset
+    trigger: sun
+    enabled: false
+  - event: sunrise
+    offset: 0
+    id: sunrise
+    trigger: sun
+  - at: 02:00:00
+    id: night
+    trigger: time
+    enabled: false
+  conditions:
+  - condition: or
+    conditions:
+    - condition: template
+      value_template: '{{ trigger.id == startzeit_option }}'
+    - condition: template
+      value_template: "{{ manual_lawn is defined and states(manual_lawn) != 'off'
+        or\n   manual_raised is defined and states(manual_raised) != 'off' or\n   manual_veg
+        is defined and states(manual_veg) != 'off' or\n   manual_shrub is defined
+        and states(manual_shrub) != 'off' }}\n"
+  actions:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: "{{ water_source == 'rainwater' and fill_sensor is defined
+          and\n   (states(fill_sensor) | float(0)) < min_level }}\n"
+      sequence:
+      - data:
+          title: Irrigation blocked
+          message: Fill level too low for pump!
+        action: persistent_notification.create
+    - conditions:
+      - condition: template
+        value_template: "{{ use_soil and soil_sensor is defined and\n   (states(soil_sensor)
+          | float(0)) > soil_threshold }}\n"
+      sequence:
+      - data:
+          title: Irrigation not necessary
+          message: Soil moisture above threshold.
+        action: persistent_notification.create
+    - conditions:
+      - condition: template
+        value_template: '{{ rain_sensor is defined and (states(rain_sensor) | float(0))
+          > rain_threshold }}
+
+          '
+      sequence:
+      - data:
+          title: Irrigation skipped
+          message: Rain amount above threshold.
+        action: persistent_notification.create
+    - conditions:
+      - condition: template
+        value_template: '{{ rain_live_sensor is defined and is_state(rain_live_sensor,
+          ''on'') }}
+
+          '
+      sequence:
+      - data:
+          title: Irrigation stopped
+          message: Rain detected by live sensor.
+        action: persistent_notification.create
+    - conditions: []
+      sequence:
+      - if:
+        - condition: template
+          value_template: '{{ pump is defined }}'
+        then:
+        - target:
+            entity_id: switch.water_pomp
+          action: switch.turn_on
+        - delay:
+            seconds: 5
+      - choose:
+        - conditions:
+          - condition: template
+            value_template: '{{ parallel }}'
+          sequence:
+          - target:
+              entity_id: '{{ zones_lawn + zones_raised + zones_veg + zones_shrub }}'
+            action: homeassistant.turn_on
+        - conditions: []
+          sequence:
+          - target:
+              entity_id: '{{ zones_lawn }}'
+            action: homeassistant.turn_on
+          - delay:
+              minutes: '{{ manual_lawn_duration if manual_lawn_duration > 0 else 10
+                }}'
+          - target:
+              entity_id: '{{ zones_lawn }}'
+            action: homeassistant.turn_off
+          - target:
+              entity_id: '{{ zones_raised }}'
+            action: homeassistant.turn_on
+          - delay:
+              minutes: '{{ manual_raised_duration if manual_raised_duration > 0 else
+                5 }}'
+          - target:
+              entity_id: '{{ zones_raised }}'
+            action: homeassistant.turn_off
+          - target:
+              entity_id: '{{ zones_veg }}'
+            action: homeassistant.turn_on
+          - delay:
+              minutes: '{{ manual_veg_duration if manual_veg_duration > 0 else 5 }}'
+          - target:
+              entity_id: '{{ zones_veg }}'
+            action: homeassistant.turn_off
+          - target:
+              entity_id: '{{ zones_shrub }}'
+            action: homeassistant.turn_on
+          - delay:
+              minutes: '{{ manual_shrub_duration if manual_shrub_duration > 0 else
+                7 }}'
+          - target:
+              entity_id: '{{ zones_shrub }}'
+            action: homeassistant.turn_off
+      - if:
+        - condition: template
+          value_template: '{{ pump is defined }}'
+        then:
+        - target:
+            entity_id: switch.water_pomp
+          action: switch.turn_off
+      - if:
+        - condition: template
+          value_template: '{{ water_calc and water_rate > 0 }}'
+        then:
+        - data:
+            title: Water usage
+            message: "Water used: {{\n  ( (manual_lawn_duration if manual_lawn_duration
+              > 0 else 10) +\n    (manual_raised_duration if manual_raised_duration
+              > 0 else 5) +\n    (manual_veg_duration if manual_veg_duration > 0 else
+              5) +\n    (manual_shrub_duration if manual_shrub_duration > 0 else 7)
+              \n  ) * water_rate\n}} liters.\n"
+          action: persistent_notification.create
+  variables:
+    water_source: rainwater
+    min_level: 1000
+    use_soil: false
+    soil_sensor:
+    soil_threshold: 30
+    rain_sensor: sensor.gw3000a_rain_rate_piezo
+    rain_live_sensor: binary_sensor.gw3000a_rain_state_piezo
+    rain_threshold: 10
+    zones_lawn: []
+    zones_raised: []
+    zones_veg: []
+    zones_shrub:
+    - switch.rain_bird_sprinkler_1
+    manual_lawn: input_select.sprinkler1dropdown
+    manual_raised: input_select.sprinkler1dropdown
+    manual_veg: input_select.sprinkler1dropdown
+    manual_shrub: input_select.sprinkler1dropdown
+    pump: switch.water_pomp
+    pump_delay: 5
+    fill_sensor: sensor.rainwater_volume
+    water_calc: false
+    water_rate: 0
+    parallel: false
+  mode: single
+- id: '1756908383549'
+  alias: Fetch forecast
+  description: ''
+  triggers:
+  - trigger: time_pattern
+    hours: /3
+    minutes: '06'
+    seconds: '42'
+  conditions: []
+  actions:
+  - action: script.fetch_weather_forecast
+    data: {}
+    metadata: {}
+  mode: single
+- id: '1756928063587'
+  alias: Inverter limit charging at the end
+  description: ''
+  triggers:
+  - above: 98
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: sensor
+    entity_id: 88da66cbcfbdce13358071d1f2c656f5
+    trigger: device
+    type: battery_level
+  - below: 98
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: sensor
+    entity_id: 88da66cbcfbdce13358071d1f2c656f5
+    trigger: device
+    type: battery_level
+  conditions: []
+  actions:
+  - else:
+    - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+      domain: number
+      entity_id: 817caa09f94c723919d229747fb30e4f
+      type: set_value
+      value: 23
+    if:
+    - above: 98
+      condition: device
+      device_id: c95e6820f178b0f468fc94b9da0ddfdb
+      domain: sensor
+      entity_id: 88da66cbcfbdce13358071d1f2c656f5
+      type: is_battery_level
+    then:
+    - condition: numeric_state
+      entity_id: number.inverter_battery_max_charging_current
+      above: 1
+    - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+      domain: number
+      entity_id: 817caa09f94c723919d229747fb30e4f
+      type: set_value
+      value: 1
+  mode: single
+- id: '1757678944546'
+  alias: Energy by time periods switch
+  description: ''
+  triggers:
+  - trigger: time
+    at: 00:00:00
+    id: '00'
+  - trigger: time
+    at: 04:00:00
+    id: '04'
+  - trigger: time
+    at: 08:00:00
+    id: 08
+  - trigger: time
+    at: '12:00:00'
+    id: '12'
+  - trigger: time
+    at: '16:00:00'
+    id: '16'
+  - trigger: time
+    at: '20:00:00'
+    id: '20'
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - '00'
+      sequence:
+      - action: select.select_option
+        metadata: {}
+        data:
+          option: 00-04
+        target:
+          entity_id: select.load_usage
+    - conditions:
+      - condition: trigger
+        id:
+        - '04'
+      sequence:
+      - action: select.select_option
+        metadata: {}
+        data:
+          option: 04-08
+        target:
+          entity_id: select.load_usage
+    - conditions:
+      - condition: trigger
+        id:
+        - 08
+      sequence:
+      - action: select.select_option
+        metadata: {}
+        data:
+          option: 08-12
+        target:
+          entity_id: select.load_usage
+    - conditions:
+      - condition: trigger
+        id:
+        - '12'
+      sequence:
+      - action: select.select_option
+        metadata: {}
+        data:
+          option: 12-16
+        target:
+          entity_id: select.load_usage
+    - conditions:
+      - condition: trigger
+        id:
+        - '16'
+      sequence:
+      - action: select.select_option
+        metadata: {}
+        data:
+          option: 16-20
+        target:
+          entity_id: select.load_usage
+    - conditions:
+      - condition: trigger
+        id:
+        - '20'
+      sequence:
+      - action: select.select_option
+        metadata: {}
+        data:
+          option: 20-24
+        target:
+          entity_id: select.load_usage
+  mode: single
+- id: '1757706796760'
+  alias: Inverter OffGrid off
+  description: ''
+  triggers:
+  - trigger: sun
+    event: sunrise
+    offset: 0
+  conditions:
+  - condition: device
+    type: is_on
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    entity_id: ec4a2c181cfbed2202570af47cc2c0cd
+    domain: switch
+  actions:
+  - type: turn_off
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    entity_id: ec4a2c181cfbed2202570af47cc2c0cd
+    domain: switch
+  mode: single
+- id: '1757960933971'
+  alias: HP Usage option select
+  description: ''
+  triggers:
+  - trigger: time_pattern
+    minutes: /15
+  conditions: []
+  actions:
+  - variables:
+      select_option: "{% set temperature = states('sensor.gw3000a_outdoor_temperature')
+        | float %} {% set temp_ranges = [\n  {'min': 30, 'max': 999, 'option': '30+'},\n
+        \ {'min': 25, 'max': 30, 'option': '25-30'},\n  {'min': 20, 'max': 25, 'option':
+        '20-25'},\n  {'min': 15, 'max': 20, 'option': '15-20'},\n  {'min': 10, 'max':
+        15, 'option': '10-15'},\n  {'min': 5, 'max': 10, 'option': '5-10'},\n  {'min':
+        0, 'max': 5, 'option': '0-5'},\n  {'min': -5, 'max': 0, 'option': 'n5-0'},\n
+        \ {'min': -10, 'max': -5, 'option': 'n10-n5'},\n  {'min': -15, 'max': -10,
+        'option': 'n15-n10'},\n  {'min': -999, 'max': -15, 'option': '-n15'}\n] %}
+        {% set matching_option = namespace(value='') %} {% for range in temp_ranges
+        %}\n  {% if temperature >= range.min and temperature < range.max %}\n    {%
+        set matching_option.value = range.option %}\n    {% break %}\n  {% endif %}\n{%
+        endfor %} {{ matching_option.value }}\n"
+      select_option_1: "{% set temperature = states('sensor.gw3000a_outdoor_temperature')
+        | float %} {% set temp_thresholds = [\n  (30, '35'),\n  (27, '30'),\n  (24,
+        '27'),\n  (20, '24'),\n  (15, '20'),\n  (12, '15'),\n  (9, '12'),\n  (6, '9'),\n
+        \ (3, '6'),\n  (0, '3'),\n  (-3, '0'),\n  (-6, 'n3'),\n  (-9, 'n6'),\n  (-12,
+        'n9'),\n  (-15, 'n12'),\n  (-20, 'n15'),\n  (-25, 'n20')\n] %} {% set result
+        = namespace(option='n25') %} {% for threshold, option in temp_thresholds %}\n
+        \ {% if temperature >= threshold %}\n    {% set result.option = option %}\n
+        \   {% break %}\n  {% endif %}\n{% endfor %} {{ result.option | trim }}\n"
+  - action: logbook.log
+    data:
+      name: HP Usage Debug
+      message: 'Temperature: {{ states(''sensor.gw3000a_outdoor_temperature'') }}
+        | Calculated option: ''{{ select_option }}'' (len={{ select_option|string|length
+        }}) | Current hp_usage: ''{{ states(''select.hp_usage'') }}'' (len={{ states(''select.hp_usage'')|string|length
+        }}) | Match: {{ select_option == states(''select.hp_usage'') }} | Calculated
+        option_1: ''{{ select_option_1 }}'' (len={{ select_option_1|string|length
+        }}) | Current hp_usage_1: ''{{ states(''select.hp_usage_1'') }}'' (len={{
+        states(''select.hp_usage_1'')|string|length }}) | Match: {{ select_option_1
+        == states(''select.hp_usage_1'') }}
+
+        '
+  - if:
+    - alias: If option needs change
+      condition: template
+      value_template: '{{ select_option != states(''select.hp_usage'') }}'
+    then:
+    - action: logbook.log
+      data:
+        name: HP Usage Update
+        message: Changing hp_usage from '{{ states('select.hp_usage') }}' to '{{ select_option
+          }}'
+    - action: select.select_option
+      metadata: {}
+      data:
+        option: '{{ select_option }}'
+      target:
+        entity_id: select.hp_usage
+  - if:
+    - alias: If option needs change
+      condition: template
+      value_template: '{{ select_option_1 != states(''select.hp_usage_1'') }}'
+    then:
+    - action: logbook.log
+      data:
+        name: HP Usage Update
+        message: Changing hp_usage_1 from '{{ states('select.hp_usage_1') }}' to '{{
+          select_option_1 }}'
+    - action: select.select_option
+      metadata: {}
+      data:
+        option: '{{ select_option_1 }}'
+      target:
+        entity_id:
+        - select.hp_usage_1
+  mode: single
+- id: '1758268207245'
+  alias: Tarrif winter/summer switch
+  description: ''
+  triggers:
+  - trigger: time
+    at: input_datetime.low_tarrif_time_change
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ now().month == 10 and now().day == 1 }}'
+        alias: If is first of October
+      sequence:
+      - action: input_datetime.set_datetime
+        metadata: {}
+        data:
+          time: '13:00:00'
+        target:
+          entity_id: input_datetime.low_tarrif_start
+      - action: input_datetime.set_datetime
+        metadata: {}
+        target:
+          entity_id: input_datetime.low_tarrif_end
+        data:
+          time: '15:00:00'
+      - action: time.set_value
+        metadata: {}
+        data:
+          time: '13:00:00'
+        target:
+          entity_id: time.inverter_program_4_time
+      - action: time.set_value
+        metadata: {}
+        data:
+          time: '15:00:00'
+        target:
+          entity_id: time.inverter_program_5_time
+      - action: input_datetime.set_datetime
+        data:
+          datetime: '{{ (now().replace(year=now().year+1, month=4, day=1, hour=0,
+            minute=0, second=0)) }}'
+        target:
+          entity_id: input_datetime.low_tarrif_time_change
+        alias: Set Low Tarrif time change to next April
+      - action: persistent_notification.create
+        metadata: {}
+        data:
+          title: Tarrif changed
+          message: Tarrif changed to Winter
+        alias: Notify tarrif change
+    - conditions:
+      - alias: If is first of April
+        condition: template
+        value_template: '{{ now().month == 4 and now().day == 1 }}'
+      sequence:
+      - action: input_datetime.set_datetime
+        metadata: {}
+        data:
+          time: '15:00:00'
+        target:
+          entity_id: input_datetime.low_tarrif_start
+      - action: input_datetime.set_datetime
+        metadata: {}
+        target:
+          entity_id: input_datetime.low_tarrif_end
+        data:
+          time: '17:00:00'
+      - action: time.set_value
+        metadata: {}
+        data:
+          time: '15:00:00'
+        target:
+          entity_id: time.inverter_program_4_time
+      - action: time.set_value
+        metadata: {}
+        data:
+          time: '17:00:00'
+        target:
+          entity_id: time.inverter_program_5_time
+      - alias: Set Low Tarrif time change to this October
+        action: input_datetime.set_datetime
+        data:
+          datetime: '{{ (now().replace(year=now().year, month=10, day=1, hour=0, minute=0,
+            second=0)) }}'
+        target:
+          entity_id: input_datetime.low_tarrif_time_change
+      - alias: Notify tarrif change
+        action: persistent_notification.create
+        metadata: {}
+        data:
+          title: Tarrif changed
+          message: Tarrif changed to Summer
+  mode: single
+- id: '1758313734243'
+  alias: Enable battery charging if no grid
+  description: ''
+  triggers:
+  - type: not_connected
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    entity_id: 1d8e5616dfba53addc9d807eede000ea
+    domain: binary_sensor
+    trigger: device
+  conditions:
+  - condition: numeric_state
+    entity_id: number.inverter_battery_max_charging_current
+    below: 5
+  actions:
+  - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: number
+    entity_id: 817caa09f94c723919d229747fb30e4f
+    type: set_value
+    value: 23
+  mode: single
+- id: '1758314445348'
+  alias: Fix fractured net balance
+  description: ''
+  triggers:
+  - trigger: time_pattern
+    minutes: '55'
+    seconds: '00'
+  conditions:
+  - type: is_battery_level
+    condition: device
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    entity_id: 88da66cbcfbdce13358071d1f2c656f5
+    domain: sensor
+    above: 10
+  - condition: numeric_state
+    entity_id: sensor.net_balance
+    below: 0
+  - condition: numeric_state
+    entity_id: sensor.net_balance
+    above: -0.25
+  actions:
+  - variables:
+      export_power: '{%- set balance = states(''sensor.net_balance'') | float -%}
+        {%- set current_surge = (states(''sensor.sdm630_load_power_total'') | float
+        / 100) | round * 100 -%} {%- set power = (10.5 * balance * 60 / 5) | round
+        * 100 + current_surge -%} {{ [[power, 200] | max, 12000] | min }}
+
+        '
+      iteration: 1
+  - action: number.set_value
+    metadata: {}
+    data:
+      value: '{{ export_power }}'
+    target:
+      entity_id: number.inverter_export_surplus_power
+    alias: Set Export power
+  - alias: Set Inverter Work Mode to Export First
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: select
+    entity_id: 5c04b0cb3ad93638eab085dc63da4157
+    option: Export First
+    type: select_option
+  - repeat:
+      while:
+      - condition: numeric_state
+        entity_id: sensor.net_balance
+        below: 0
+      - condition: template
+        value_template: '{{ iteration < 30 }}'
+      sequence:
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 10
+          milliseconds: 0
+      - variables:
+          iteration: '{{ iteration + 1 }}
+
+            '
+  - alias: Set Inverter Work Mode to Zero Export to Load
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: select
+    entity_id: 5c04b0cb3ad93638eab085dc63da4157
+    option: Zero Export To Load
+    type: select_option
+  - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    domain: number
+    entity_id: fa1fe693789095aae3d44c57e4f8ceaa
+    type: set_value
+    value: 14000
+    alias: Set default Export power
+  mode: single
+  trace:
+    stored_traces: 24
+- id: '1760179375881'
+  alias: Heat pump alert
+  description: ''
+  triggers:
+  - trigger: template
+    value_template: '{{ ''Alarm downtime'' in states(''sensor.sprsun_working_status_mark'')
+      }}'
+  conditions: []
+  actions:
+  - action: persistent_notification.create
+    metadata: {}
+    data:
+      title: Heat pump alert
+      message: '{{ now() }}'
+  - action: notify.mobile_app_sm_s911b
+    metadata: {}
+    data:
+      message: Heat pump alert
+  mode: single
+- id: '1760524650114'
+  alias: Leisure lights
+  description: ''
+  triggers:
+  - trigger: webhook
+    allowed_methods:
+    - POST
+    local_only: true
+    webhook_id: leisure_1_1_click
+    id: '1'
+    alias: Leisure 1 1 click
+  - trigger: webhook
+    allowed_methods:
+    - POST
+    local_only: true
+    webhook_id: leisure_1_1_short
+    id: '2'
+    alias: Leisure 1 1 short
+  - trigger: webhook
+    allowed_methods:
+    - POST
+    - PUT
+    local_only: true
+    webhook_id: leisure_1_1_long
+    id: '3'
+    alias: Leisure 1 1 long
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - '1'
+      sequence:
+      - action: light.toggle
+        metadata: {}
+        data: {}
+        target:
+          entity_id: light.boneio_esp_32x10_switch_04
+    - conditions:
+      - condition: trigger
+        id:
+        - '2'
+      sequence:
+      - action: light.toggle
+        metadata: {}
+        data: {}
+        target:
+          entity_id: light.boneio_esp_32x10_switch_05
+    - conditions:
+      - condition: trigger
+        id:
+        - '3'
+      sequence:
+      - action: light.toggle
+        metadata: {}
+        data: {}
+        target:
+          entity_id:
+          - light.boneio_esp_32x10_switch_04
+          - light.boneio_esp_32x10_switch_05
+  mode: single
+- id: '1760877043447'
+  alias: Bathroom Up Presence
+  description: ''
+  triggers:
+  - type: occupied
+    device_id: e1335bc1b5117ff4729537926ee18bde
+    entity_id: ff771ef7a00412afd1a42443cb5db690
+    domain: binary_sensor
+    trigger: device
+    id: '1'
+  - type: not_occupied
+    device_id: e1335bc1b5117ff4729537926ee18bde
+    entity_id: ff771ef7a00412afd1a42443cb5db690
+    domain: binary_sensor
+    trigger: device
+    id: '2'
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 5
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - '1'
+      sequence:
+      - action: light.turn_on
+        metadata: {}
+        data: {}
+        target:
+          entity_id: light.boneio_esp_32x10_switch_03
+    default:
+    - action: light.turn_off
+      metadata: {}
+      data: {}
+      target:
+        entity_id: light.boneio_esp_32x10_switch_03
+  mode: restart
+- id: '1760945975236'
+  alias: Heat pump keep circulation after stop
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - sensor.sprsun_working_status_mark
+    to: ''
+    id: '1'
+  - trigger: template
+    value_template: '{{- states(''sensor.sprsun_inlet_temperature'') | float <= (states(''sensor.sprsun_inlet_min'')
+      | float + 1.5) -}}'
+    for:
+      hours: 0
+      minutes: 1
+      seconds: 0
+    id: '2'
+  conditions:
+  - condition: or
+    conditions:
+    - condition: trigger
+      id:
+      - '1'
+    - condition: and
+      conditions:
+      - condition: trigger
+        id:
+        - '2'
+      - condition: state
+        entity_id: binary_sensor.sprsun_heating
+        state:
+        - 'off'
+      - alias: If SPRSUN Last run was later than
+        condition: template
+        value_template: '{% set last_run = states(''input_datetime.sprsun_last_run'')
+          | as_timestamp %}
+
+          {{ (now().timestamp() - last_run) < 10800 }}'
+  actions:
+  - action: select.select_option
+    metadata: {}
+    data:
+      option: Continous
+    target:
+      entity_id: select.sprsun_pump_work_mode
+  - delay:
+      hours: 0
+      minutes: 5
+      seconds: 0
+      milliseconds: 0
+  - action: select.select_option
+    metadata: {}
+    data:
+      option: On Demand
+    target:
+      entity_id: select.sprsun_pump_work_mode
+  - if:
+    - condition: trigger
+      id:
+      - '1'
+    then:
+    - action: input_datetime.set_datetime
+      metadata: {}
+      target:
+        entity_id: input_datetime.sprsun_last_run
+      data:
+        datetime: '{{ now().isoformat() }}'
+  mode: single
+- id: '1761734719051'
+  alias: Inverter time synchronization
+  description: Set device's time to `now()`
+  triggers:
+  - at: sensor.sun_next_dawn
+    trigger: time
+  actions:
+  - data:
+      datetime: '{{ now() }}'
+    action: datetime.set_value
+    target:
+      entity_id: datetime.inverter_date_time
+  mode: single
+- id: '1762860103777'
+  alias: Kitchen Lights
+  description: ''
+  triggers:
+  - domain: mqtt
+    device_id: 2b0853bbcac124604e3da2491160bb6e
+    type: action
+    subtype: single
+    trigger: device
+  conditions: []
+  actions:
+  - action: light.toggle
+    metadata: {}
+    data: {}
+    target:
+      entity_id:
+      - light.boneio_esp_32x10_switch_10
+  mode: single
+- id: '1763567361763'
+  alias: Bathroom down Presence
+  description: ''
+  triggers:
+  - type: occupied
+    device_id: 9cc8b49069407bea21c287e62b7e2a66
+    entity_id: db8c540efb57d275d6c6ecee68374d95
+    domain: binary_sensor
+    trigger: device
+    id: '1'
+  - type: not_occupied
+    device_id: 9cc8b49069407bea21c287e62b7e2a66
+    entity_id: db8c540efb57d275d6c6ecee68374d95
+    domain: binary_sensor
+    trigger: device
+    id: '2'
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 5
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - '1'
+      sequence:
+      - action: light.turn_on
+        metadata: {}
+        data: {}
+        target:
+          entity_id:
+          - light.boneio_esp_32x10_switch_01
+    default:
+    - action: light.turn_off
+      metadata: {}
+      data: {}
+      target:
+        entity_id:
+        - light.boneio_esp_32x10_switch_01
+  mode: restart
+- id: '1764258855343'
+  alias: 60 Night battery handling
+  description: ''
+  triggers:
+  - trigger: time
+    at: '22:00:00'
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: and
+        conditions:
+        - alias: Last 100 battery was long enough
+          condition: template
+          value_template: '{% set last_balanced = states(''input_datetime.inverter_battery_last_100'')
+            | as_datetime | as_local %}
+
+            {% set days_difference = states(''input_number.inverter_battery_100_max_delay_days'')
+            | int %}
+
+            {{ last_balanced + timedelta(days=days_difference) < now() }}'
+        - condition: template
+          value_template: '{% set pv_forecast_tomorrow = states(''sensor.solcast_pv_forecast_forecast_tomorrow'')
+            | float  %}
+
+            {{ pv_forecast_tomorrow < 20.5 }}'
+          alias: PV forecast for tomorrow is low enough
+      sequence:
+      - alias: Enable charging to 100%
+        action: number.set_value
+        metadata: {}
+        data:
+          value: '100'
+        target:
+          entity_id:
+          - number.inverter_program_1_soc
+          - number.inverter_program_6_soc
+      - device_id: c95e6820f178b0f468fc94b9da0ddfdb
+        domain: number
+        entity_id: 36ceb0f41f844287ed54ac7fba5ea26e
+        type: set_value
+        value: 23
+        alias: Max-out Batter Grid Charging Current
+      - action: notify.persistent_notification
+        data:
+          title: Night battery balancing enabled
+          message: Up to 100%
+        metadata: {}
+      alias: If Battery needs to be balanced
+    - conditions:
+      - condition: template
+        value_template: '{% from ''energy_calculations.jinja'' import calculate_battery_space
+          %}
+
+          {{ (states(''sensor.solcast_pv_forecast_forecast_tomorrow'') | float * 0.9)
+          < calculate_battery_space() | float }}'
+        alias: If PV forecast tomorrow is less than battery space
+      sequence:
+      - action: number.set_value
+        metadata: {}
+        data:
+          value: '{{ states(''sensor.inverter_battery'') | int }}'
+        target:
+          entity_id:
+          - number.inverter_program_1_soc
+          - number.inverter_program_6_soc
+        alias: Disable using battery for Load
+    default:
+    - alias: If using battery for Load is disabled
+      condition: numeric_state
+      entity_id: number.inverter_program_6_soc
+      above: 15
+    - action: number.set_value
+      metadata: {}
+      data:
+        value: '15'
+      target:
+        entity_id:
+        - number.inverter_program_1_soc
+        - number.inverter_program_6_soc
+      alias: Re-enable using battery for Load
+  mode: single
+- id: '1764597223172'
+  alias: Garage lights
+  description: ''
+  triggers:
+  - domain: mqtt
+    device_id: 2bc8298a21376bf4c1e3cf6635c5b7ab
+    type: action
+    subtype: single
+    trigger: device
+  conditions: []
+  actions:
+  - if:
+    - condition: device
+      type: is_on
+      device_id: 02573a419b82657df84cd780b75411be
+      entity_id: ddf52c84d9b137f965b6a14528ed6282
+      domain: light
+    then:
+    - delay:
+        hours: 0
+        minutes: 0
+        seconds: 45
+        milliseconds: 0
+  - action: light.toggle
+    metadata: {}
+    target:
+      entity_id: light.boneio_esp_32x10_switch_07
+    data: {}
+  mode: single
+- id: '1764599085633'
+  alias: Windbreak light
+  description: ''
+  triggers:
+  - domain: mqtt
+    device_id: 2bc8298a21376bf4c1e3cf6635c5b7ab
+    type: action
+    subtype: double
+    trigger: device
+  conditions: []
+  actions:
+  - action: light.toggle
+    metadata: {}
+    target:
+      entity_id: light.boneio_esp_32x10_switch_08
+    data: {}
+  mode: single
+- id: '1764601239642'
+  alias: All lights down
+  description: ''
+  triggers:
+  - domain: mqtt
+    device_id: 2bc8298a21376bf4c1e3cf6635c5b7ab
+    type: action
+    subtype: long
+    trigger: device
+  conditions: []
+  actions:
+  - action: light.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: light.boneio_esp_32x10_switch_07
+  - type: toggle
+    device_id: 02573a419b82657df84cd780b75411be
+    entity_id: 485188ff1a99ffd94a5138f815f6ca74
+    domain: light
+  - delay:
+      hours: 0
+      minutes: 0
+      seconds: 0
+      milliseconds: 250
+  - type: toggle
+    device_id: 02573a419b82657df84cd780b75411be
+    entity_id: 485188ff1a99ffd94a5138f815f6ca74
+    domain: light
+  - delay:
+      hours: 0
+      minutes: 0
+      seconds: 45
+      milliseconds: 0
+  - action: light.turn_off
+    metadata: {}
+    data: {}
+    target:
+      label_id: lights
+  mode: single
+- id: '1764676613910'
+  alias: Hallway Down Ocupancy
+  description: ''
+  triggers:
+  - type: occupied
+    device_id: 73161f002693458ce262f89eca95d611
+    entity_id: 1dba0d7a0dea2a446d16becb404e9c09
+    domain: binary_sensor
+    trigger: device
+    id: '1'
+  - type: not_occupied
+    device_id: 73161f002693458ce262f89eca95d611
+    entity_id: 1dba0d7a0dea2a446d16becb404e9c09
+    domain: binary_sensor
+    trigger: device
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 10
+    id: '2'
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - '1'
+      sequence:
+      - condition: device
+        type: is_off
+        device_id: 02573a419b82657df84cd780b75411be
+        entity_id: 5160346f0a95db0334b19dafc9314d33
+        domain: light
+      - action: light.turn_on
+        metadata: {}
+        data: {}
+        target:
+          entity_id: light.boneio_esp_32x10_switch_09
+    default:
+    - action: light.turn_off
+      metadata: {}
+      data: {}
+      target:
+        entity_id: light.boneio_esp_32x10_switch_09
+  mode: restart
+- id: '1764680980885'
+  alias: Hallway Up Presence
+  description: ''
+  triggers:
+  - type: occupied
+    device_id: 7a2e031ec74cfa51052925ef3fc9f855
+    entity_id: 7a1e16bf2f53bbba43a4e58d9c581539
+    domain: binary_sensor
+    trigger: device
+    id: '1'
+  - type: not_occupied
+    device_id: 7a2e031ec74cfa51052925ef3fc9f855
+    entity_id: 7a1e16bf2f53bbba43a4e58d9c581539
+    domain: binary_sensor
+    trigger: device
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 5
+    id: '2'
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - '1'
+      sequence:
+      - condition: device
+        type: is_off
+        device_id: 02573a419b82657df84cd780b75411be
+        entity_id: 4e66dafe4a6e825d4e701afb20f75d38
+        domain: light
+      - action: light.turn_on
+        metadata: {}
+        data: {}
+        target:
+          entity_id:
+          - light.boneio_esp_32x10_switch_06
+    default:
+    - action: light.turn_off
+      metadata: {}
+      data: {}
+      target:
+        entity_id:
+        - light.boneio_esp_32x10_switch_06
+  mode: restart
+- id: '1764884787558'
+  alias: Zaawansowane sterowanie CO przez przełącznik
+  description: Sterowanie CO + podnoszenie krzywej grzewczej 13-15
+  triggers:
+  - trigger: state
+    entity_id: input_boolean.grzanie_co_w_taniej_strefie
+    id: przelacznik
+  - trigger: time
+    at: '13:05:00'
+    id: start_strefy
+  - trigger: time
+    at: '22:05:00'
+    id: start_strefy
+  - trigger: time
+    at: '14:58:00'
+    id: koniec_strefy
+  - trigger: time
+    at: 05:58:00
+    id: koniec_strefy
+  actions:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ przelacznik_wlaczony and strefy_tanie }}'
+      sequence:
+      - target:
+          entity_id: input_number.original_hysteresis_co
+        data:
+          value: '{{ states(''number.sprsun_logger_v2_sprsun_p03_histereza_co'') |
+            float(6.0) }}
+
+            '
+        action: input_number.set_value
+      - target:
+          entity_id: input_number.original_stop_delta_co
+        data:
+          value: '{{ states(''number.sprsun_logger_v2_sprsun_f39_stop_delta_temp_grzanie_co'')
+            | float(3.0) }}
+
+            '
+        action: input_number.set_value
+      - target:
+          entity_id: number.sprsun_logger_v2_sprsun_p03_histereza_co
+        data:
+          value: 2
+        action: number.set_value
+      - target:
+          entity_id: number.sprsun_logger_v2_sprsun_f39_stop_delta_temp_grzanie_co
+        data:
+          value: 3
+        action: number.set_value
+      - if:
+        - condition: template
+          value_template: '{{ w_okienku_krzywej }}'
+        then:
+        - repeat:
+            for_each: '{{ punkty_krzywej }}'
+            sequence:
+            - target:
+                entity_id: '{{ repeat.item.oryginal }}'
+              data:
+                value: '{{ states(repeat.item.entity) | float(0) }}
+
+                  '
+              action: input_number.set_value
+        - delay:
+            seconds: 1
+        - repeat:
+            for_each: '{{ punkty_krzywej }}'
+            sequence:
+            - target:
+                entity_id: '{{ repeat.item.entity }}'
+              data:
+                value: '{% set oryginalna = states(repeat.item.oryginal) | float(0)
+                  %} {{ (oryginalna + 2) | round(1) }}
+
+                  '
+              action: number.set_value
+            - delay:
+                milliseconds: 100
+      - data:
+          title: Tryb taniej strefy AKTYWNY
+          message: 'CO: Histereza=2, Stop Delta=3 {% if w_okienku_krzywej %} Krzywa:
+            Podniesiono 4 punkty o +2°C {% endif %} Włączono przez: {{ trigger.id
+            }} Czas: {{ now().strftime(''%H:%M'') }}
+
+            '
+        action: persistent_notification.create
+    - conditions:
+      - condition: or
+        conditions:
+        - condition: and
+          conditions:
+          - condition: trigger
+            id: koniec_strefy
+          - condition: template
+            value_template: '{{ przelacznik_wlaczony }}'
+        - condition: and
+          conditions:
+          - condition: trigger
+            id: przelacznik
+          - condition: template
+            value_template: '{{ not przelacznik_wlaczony }}'
+      sequence:
+      - target:
+          entity_id: number.sprsun_logger_v2_sprsun_p03_histereza_co
+        data:
+          value: '{{ states(''input_number.original_hysteresis_co'') | float(6.0)
+            }}
+
+            '
+        action: number.set_value
+      - choose:
+        - conditions:
+          - condition: trigger
+            id: koniec_strefy
+          sequence:
+          - target:
+              entity_id: number.sprsun_logger_v2_sprsun_f39_stop_delta_temp_grzanie_co
+            data:
+              value: 1
+            action: number.set_value
+          - delay:
+              minutes: 2
+          - target:
+              entity_id: number.sprsun_logger_v2_sprsun_f39_stop_delta_temp_grzanie_co
+            data:
+              value: '{{ states(''input_number.original_stop_delta_co'') | float(3.0)
+                }}
+
+                '
+            action: number.set_value
+        - conditions:
+          - condition: trigger
+            id: przelacznik
+          sequence:
+          - target:
+              entity_id: number.sprsun_logger_v2_sprsun_f39_stop_delta_temp_grzanie_co
+            data:
+              value: '{{ states(''input_number.original_stop_delta_co'') | float(3.0)
+                }}
+
+                '
+            action: number.set_value
+      - if:
+        - condition: template
+          value_template: "{{ w_okienku_krzywej and \n   (trigger.id == 'koniec_strefy'
+            or trigger.id == 'przelacznik') }}\n"
+        then:
+        - repeat:
+            for_each: '{{ punkty_krzywej }}'
+            sequence:
+            - target:
+                entity_id: '{{ repeat.item.entity }}'
+              data:
+                value: '{{ states(repeat.item.oryginal) | float(0) }}
+
+                  '
+              action: number.set_value
+            - delay:
+                milliseconds: 100
+      - data:
+          title: Tryb taniej strefy WYŁĄCZONY
+          message: 'Przywrócono oryginalne wartości CO {% if w_okienku_krzywej %}
+            Przywrócono oryginalną krzywą grzewczą {% endif %} Histereza: {{ states(''number.sprsun_logger_v2_sprsun_p03_histereza_co'')
+            }}, Stop Delta: {{ states(''number.sprsun_logger_v2_sprsun_f39_stop_delta_temp_grzanie_co'')
+            }} Wyłączono przez: {{ trigger.id }}
+
+            '
+        action: persistent_notification.create
+  variables:
+    strefy_tanie: "{% set now = now() %}\n{% set hour = now.hour %}\n{% set minute
+      = now.minute %}\n{{ (hour == 13 and minute >= 5) or (hour == 14 and minute <
+      58) or\n   (hour >= 22) or (hour < 5) or (hour == 5 and minute < 58) }}\n"
+    przelacznik_wlaczony: '{{ is_state(''input_boolean.grzanie_co_w_taniej_strefie'',
+      ''on'') }}'
+    w_okienku_krzywej: '{% set now_time = now().time() %}
+
+      {{ now_time >= time(13,0) and now_time < time(15,0) }}
+
+      '
+    punkty_krzywej: "{% set punkty = [\n  {\n    'entity': 'number.sprsun_logger_v2_sprsun_e13_economic_heat_temp_1',\n
+      \   'oryginal': 'input_number.ory_sprsun_logger_v2_sprsun_e13_economic_heat_temp_1'\n
+      \ },\n  {\n    'entity': 'number.sprsun_logger_v2_sprsun_e14_economic_heat_temp_2',\n
+      \   'oryginal': 'input_number.ory_sprsun_logger_v2_sprsun_e14_economic_heat_temp_2'\n
+      \ },\n  {\n    'entity': 'number.sprsun_logger_v2_sprsun_e15_economic_heat_temp_3',\n
+      \   'oryginal': 'input_number.ory_sprsun_logger_v2_sprsun_e15_economic_heat_temp_3'\n
+      \ },\n  {\n    'entity': 'number.sprsun_logger_v2_sprsun_e16_economic_heat_temp_4',\n
+      \   'oryginal': 'input_number.ory_sprsun_logger_v2_sprsun_e16_economic_heat_temp_4'\n
+      \ }\n] %} {{ punkty }}\n"
+  mode: restart
+  max: 10
+- id: '1765823050415'
+  alias: Leisure Blinds tilt
+  description: ''
+  triggers:
+  - trigger: webhook
+    allowed_methods:
+    - POST
+    local_only: true
+    webhook_id: leisure_2_2_click
+    id: '1'
+  - trigger: webhook
+    allowed_methods:
+    - POST
+    local_only: true
+    webhook_id: leisure_2_4_click
+    id: '2'
+  conditions: []
+  actions:
+  - variables:
+      tilt_position: '{% set position = state_attr(''cover.blinds_leisure'', ''current_tilt_position'')
+        | int %} {% if trigger.id == ''1'' %} {{ [position + 50, 100] | min }} {%
+        else %} {{ [position - 50, 0] | max }} {% endif %}
+
+        '
+  - action: cover.set_cover_tilt_position
+    metadata: {}
+    target:
+      entity_id: cover.blinds_leisure
+    data:
+      tilt_position: '{{ tilt_position }}'
+  mode: single
+- id: '1765917377833'
+  alias: Inverter mark last 100 battery
+  description: ''
+  triggers:
+  - type: battery_level
+    device_id: c95e6820f178b0f468fc94b9da0ddfdb
+    entity_id: 88da66cbcfbdce13358071d1f2c656f5
+    domain: sensor
+    trigger: device
+    above: 97
+    for:
+      hours: 1
+      minutes: 30
+      seconds: 0
+  conditions: []
+  actions:
+  - action: input_datetime.set_datetime
+    metadata: {}
+    target:
+      entity_id: input_datetime.inverter_battery_last_100
+    data:
+      datetime: '{{ now() }}'
+  mode: single
+- id: '1765983070490'
+  alias: Room 1 Lights
+  description: ''
+  triggers:
+  - alias: Room1 1 click
+    trigger: webhook
+    allowed_methods:
+    - POST
+    local_only: true
+    webhook_id: room1_1_click
+    id: '1'
+  conditions: []
+  actions:
+  - action: light.toggle
+    metadata: {}
+    data: {}
+    target:
+      entity_id:
+      - light.boneio_esp_32x10_switch_11
+  mode: single
+- id: '1765984871549'
+  alias: Hallway down Lights
+  description: ''
+  triggers:
+  - domain: mqtt
+    device_id: 2b0853bbcac124604e3da2491160bb6e
+    type: action
+    subtype: double
+    trigger: device
+  conditions: []
+  actions:
+  - action: light.toggle
+    metadata: {}
+    target:
+      entity_id: light.boneio_esp_32x10_switch_09
+    data: {}
+  mode: single
+- id: '1765988067990'
+  alias: Bathroom up Blinds
+  description: ''
+  triggers:
+  - trigger: webhook
+    allowed_methods:
+    - POST
+    local_only: true
+    webhook_id: bathroom_up_2_click
+    id: '1'
+  - trigger: webhook
+    allowed_methods:
+    - POST
+    local_only: true
+    webhook_id: bathroom_up_4_click
+    id: '2'
+  conditions: []
+  actions:
+  - variables:
+      tilt_position: '{% set position = state_attr(''cover.blinds_bathroom'', ''current_tilt_position'')
+        | int %} {% if trigger.id == ''1'' %} {{ [position + 50, 100] | min }} {%
+        else %} {{ [position - 50, 0] | max }} {% endif %}
+
+        '
+  - action: cover.set_cover_tilt_position
+    metadata: {}
+    target:
+      entity_id:
+      - cover.blinds_bathroom
+    data:
+      tilt_position: '{{ tilt_position }}'
+  mode: single
+- id: '1765992067054'
+  alias: New automation
+  description: ''
+  triggers:
+  - trigger: webhook
+    allowed_methods:
+    - POST
+    - PUT
+    local_only: true
+    webhook_id: leisure_1_4_click
+    id: '1'
+  - trigger: webhook
+    allowed_methods:
+    - POST
+    - PUT
+    local_only: true
+    webhook_id: leisure_1_4_double_click
+    id: '2'
+  conditions: []
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id:
+        - '1'
+      sequence:
+      - action: light.toggle
+        metadata: {}
+        target:
+          entity_id: light.boneio_esp_32x10_switch_04
+        data: {}
+    - conditions:
+      - condition: trigger
+        id:
+        - '2'
+      sequence:
+      - action: light.toggle
+        metadata: {}
+        target:
+          entity_id: light.boneio_esp_32x10_switch_05
+        data: {}
+  mode: single

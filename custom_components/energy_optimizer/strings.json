@@ -1,0 +1,145 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Energy Optimizer Setup",
+        "description": "Welcome to Energy Optimizer! This integration coordinates battery charging and energy optimization based on electricity prices, battery state, and PV forecasts.\n\n**Recommended Integrations** (install from HACS if needed):\n- **ha-rce-pse**: RCE electricity pricing and price windows\n- **ha-solarman**: Inverter and battery control\n- **Solcast Solar**: PV production forecasting (optional)\n\nYou can use other integrations with compatible entity structures."
+      },
+      "price_entities": {
+        "title": "Price Entity Configuration",
+        "description": "Select entities that provide electricity price data",
+        "data": {
+          "price_sensor": "Current Price Sensor",
+          "average_price_sensor": "Average Price Sensor",
+          "cheapest_window_sensor": "Cheapest Window Sensor (Optional)",
+          "expensive_window_sensor": "Expensive Window Sensor (Optional)",
+          "tomorrow_price_sensor": "Tomorrow Price Sensor (Optional)"
+        },
+        "data_description": {
+          "price_sensor": "Sensor providing current electricity price",
+          "average_price_sensor": "Sensor providing average price for comparison",
+          "cheapest_window_sensor": "Binary sensor indicating cheapest price window",
+          "expensive_window_sensor": "Binary sensor indicating expensive price window",
+          "tomorrow_price_sensor": "Sensor providing tomorrow's price data"
+        }
+      },
+      "battery_sensors": {
+        "title": "Battery Sensor Configuration",
+        "description": "Select entities that monitor battery state",
+        "data": {
+          "battery_soc_sensor": "Battery SOC Sensor",
+          "battery_power_sensor": "Battery Power Sensor",
+          "battery_voltage_sensor": "Battery Voltage Sensor (Optional)",
+          "battery_current_sensor": "Battery Current Sensor (Optional)"
+        },
+        "data_description": {
+          "battery_soc_sensor": "Sensor showing battery state of charge (%)",
+          "battery_power_sensor": "Sensor showing battery charge/discharge power (W)",
+          "battery_voltage_sensor": "Sensor showing battery voltage (V)",
+          "battery_current_sensor": "Sensor showing battery current (A)"
+        }
+      },
+      "battery_params": {
+        "title": "Battery Parameters",
+        "description": "Configure battery specifications and operating limits",
+        "data": {
+          "battery_capacity_ah": "Battery Capacity (Ah)",
+          "battery_voltage": "Battery Nominal Voltage (V)",
+          "battery_efficiency": "Battery Efficiency (%)",
+          "min_soc": "Minimum SOC (%)",
+          "max_soc": "Maximum SOC (%)",
+          "battery_capacity_entity": "Battery Capacity Entity (Optional)"
+        },
+        "data_description": {
+          "battery_capacity_ah": "Battery capacity in Ampere-hours",
+          "battery_voltage": "Battery system voltage (typically 48V)",
+          "battery_efficiency": "Round-trip efficiency (90-95% typical)",
+          "min_soc": "Minimum SOC to preserve battery health",
+          "max_soc": "Maximum SOC (may be limited by inverter)",
+          "battery_capacity_entity": "Entity to read/write capacity dynamically"
+        }
+      },
+      "control_entities": {
+        "title": "Control Entity Configuration",
+        "description": "Select entities for controlling battery/inverter behavior",
+        "data": {
+          "target_soc_entity": "Target SOC Control",
+          "work_mode_entity": "Work Mode Control (Optional)",
+          "charge_current_entity": "Charge Current Control (Optional)",
+          "discharge_current_entity": "Discharge Current Control (Optional)",
+          "grid_charge_switch": "Grid Charge Switch (Optional)"
+        },
+        "data_description": {
+          "target_soc_entity": "Entity to set battery charge target (required)",
+          "work_mode_entity": "Entity to switch inverter work modes",
+          "charge_current_entity": "Entity to control charge current limit",
+          "discharge_current_entity": "Entity to control discharge current limit",
+          "grid_charge_switch": "Switch to enable/disable grid charging"
+        }
+      },
+      "pv_load_config": {
+        "title": "PV Forecast & Load Configuration",
+        "description": "Select sensors for PV forecasting and load monitoring (all optional)",
+        "data": {
+          "daily_load_sensor": "Daily Load Sensor (Optional)",
+          "pv_forecast_today": "PV Forecast Today (Optional)",
+          "pv_forecast_tomorrow": "PV Forecast Tomorrow (Optional)",
+          "pv_forecast_remaining": "PV Forecast Remaining (Optional)",
+          "pv_peak_forecast": "PV Peak Forecast (Optional)",
+          "weather_forecast": "Weather Forecast (Optional)"
+        },
+        "data_description": {
+          "daily_load_sensor": "Sensor tracking daily energy consumption",
+          "pv_forecast_today": "Today's PV production forecast (kWh)",
+          "pv_forecast_tomorrow": "Tomorrow's PV production forecast (kWh)",
+          "pv_forecast_remaining": "Remaining PV forecast for today (kWh)",
+          "pv_peak_forecast": "Peak PV power forecast (kW)",
+          "weather_forecast": "Weather entity for temperature-based calculations"
+        }
+      },
+      "heat_pump": {
+        "title": "Heat Pump Configuration",
+        "description": "Configure heat pump monitoring and estimation (optional)",
+        "data": {
+          "enable_heat_pump": "Enable Heat Pump Integration",
+          "outside_temp_sensor": "Outside Temperature Sensor (Optional)",
+          "heat_pump_power_sensor": "Heat Pump Power Sensor (Optional)"
+        },
+        "data_description": {
+          "enable_heat_pump": "Enable heat pump consumption estimation",
+          "outside_temp_sensor": "Sensor measuring outside temperature",
+          "heat_pump_power_sensor": "Sensor measuring heat pump power consumption"
+        }
+      },
+      "review": {
+        "title": "Review Configuration",
+        "description": "Review your configuration before completing setup. Click Submit to create the integration."
+      }
+    },
+    "error": {
+      "entity_not_found": "Entity not found. Please check the entity ID.",
+      "not_numeric": "Entity state is not numeric.",
+      "not_binary_sensor": "Entity must be a binary sensor.",
+      "not_number_entity": "Entity must be a number entity.",
+      "min_greater_than_max": "Minimum SOC must be less than maximum SOC.",
+      "cannot_connect": "Failed to connect.",
+      "unknown": "Unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "Energy Optimizer is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Energy Optimizer Options",
+        "description": "Reconfigure Energy Optimizer parameters",
+        "data": {
+          "min_soc": "Minimum SOC (%)",
+          "max_soc": "Maximum SOC (%)",
+          "battery_efficiency": "Battery Efficiency (%)"
+        }
+      }
+    }
+  }
+}

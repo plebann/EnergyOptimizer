@@ -1,0 +1,75 @@
+{# CONFIGURATION CONSTANTS #}
+{% set min_soc = 20 %}
+{% set efficiency = 0.95 %}
+{% set safety_factor = 1.1 %}
+{% set battery_capacity = 20.5 %}
+
+{# CURRENT STATE VARIABLES #}
+{% set current_soc = states('sensor.inverter_battery') | int %}
+{% set now_time = now() %}
+{% set minutes_passed = now_time.hour * 60 + now_time.minute %}
+
+{# ENERGY DEMAND CALCULATION #}
+{# Current usage pattern #}
+
+{% from 'usage.jinja' import get_hourly_rates %}
+{% set get_hourly_rates = get_hourly_rates | as_function %}
+{% set hourly_rates = get_hourly_rates() %}
+
+{# Calculate usage rate with fallback to average #}
+{% from 'heat_pump.jinja' import get_heat_pump_usage %}
+{% set hp_usage = get_heat_pump_usage(22 - now_time.hour) | float %}
+{% set current_usage = states('sensor.load_usage_daily') | float %}
+
+{% set today_usage_rate = (current_usage - hp_usage) / (minutes_passed / 60) %}
+{% set avg_usage_rate = state_attr('sensor.load_usage_history', 'hourly_rate') | float(0) %}
+{% set avg_losses_rate = state_attr('sensor.inverter_total_losses_history', 'hourly_rate') | float(0) %}
+{% set average_ratio = 1 %}
+{% if today_usage_rate > avg_usage_rate %}
+  {% set average_ratio = today_usage_rate / avg_usage_rate %}
+{% endif %}
+
+{% set sufficiency_time = namespace(value=none) %}
+{% set remaining_hours = hourly_rates[now_time.hour:24] %}
+{% set required_kwh = namespace(value=(remaining_hours | sum) * average_ratio) %}
+
+{# FIND PV SUFFICIENCY MOMENT #}
+{% set pv_forecast = state_attr('sensor.solcast_pv_forecast_forecast_tomorrow', 'detailedHourly') %}
+{% if pv_forecast %}
+  {% for forecast in pv_forecast %}
+    {% set hour_usage = hourly_rates[(forecast.period_start).hour] * average_ratio + avg_losses_rate %}
+    {% set required_kwh.value = required_kwh.value + [hour_usage - forecast.pv_estimate, 0] | max %}
+    {% if forecast.pv_estimate * efficiency > hour_usage * safety_factor %}
+      {% set sufficiency_time.value = as_datetime(forecast.period_start).astimezone(now_time.tzinfo) %}
+      {% break %}
+    {% endif %}
+  {% endfor %}
+{% endif %}
+
+{% set hp_estimated_usage = states('input_number.heat_pump_estimated_usage') | float(0) %}
+{% set required_kwh.value = required_kwh.value + hp_estimated_usage %}
+
+{% set current_energy = (current_soc - min_soc) * battery_capacity / 100 * efficiency %}
+{% set surplus_energy = current_energy - required_kwh.value * safety_factor %}
+{% set today_production = states('sensor.inverter_today_production_total') | float(0) %}
+{% if surplus_energy > today_production %}
+  {{ today_production }}
+{% else %}
+  {{ surplus_energy }}
+{% endif %}
+
+
+{# CONFIGURATION CONSTANTS #}
+{% set min_soc = 20 %}
+{% set efficiency = 0.95 %}
+{% set safety_factor = 1.1 %}
+{% set battery_capacity = 20.5 %}
+
+{% set current_soc = states('sensor.inverter_battery') | int %}
+
+{% if surplus_energy > 0 %}
+  {% set usable_capacity = battery_capacity * efficiency %}
+  {{ [current_soc - ((100 * surplus_energy / usable_capacity) | round), 100] | min }}
+{% else %}
+  {{ current_soc }}
+{% endif %}

@@ -1,0 +1,30 @@
+{% macro get_battery_config(returns) %}
+  {% set config = {
+    'min_soc': 25,
+    'efficiency': 0.9,
+    'safety_factor': 1.15,
+    'battery_capacity': 20.5,
+    'inverter_device_id': 'c95e6820f178b0f468fc94b9da0ddfdb'
+  } %}
+  {% do returns(config) %}
+{% endmacro %}
+
+{% macro get_sensor_config(returns) %}
+  {% set sensors = {
+    'load_usage_daily': 'sensor.load_usage_daily',
+    'hp_usage_daily': 'sensor.hp_usage_daily',
+    'load_usage_history': 'sensor.load_usage_history',
+    'inverter_losses_history': 'sensor.inverter_total_losses_history',
+    'pv_forecast_today': 'sensor.solcast_pv_forecast_forecast_today',
+    'pv_forecast_tomorrow': 'sensor.solcast_pv_forecast_forecast_tomorrow',
+    'pv_forecast_remaining': 'sensor.solcast_pv_forecast_forecast_remaining_today',
+    'hp_estimated_usage': 'input_number.heat_pump_estimated_usage',
+    'today_production': 'sensor.inverter_today_production_total',
+    'battery_voltage_sensor': 'sensor.inverter_battery_voltage',
+    'battery_soc_sensor': 'sensor.inverter_battery',
+    'low_tarrif_start': 'input_datetime.low_tarrif_start',
+    'low_tarrif_end': 'input_datetime.low_tarrif_end',
+    'rce_highest_window_evening': 'input_datetime.rce_highest_window_evening'
+  } %}
+  {% do returns(sensors) %}
+{% endmacro %}

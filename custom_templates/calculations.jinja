@@ -1,0 +1,78 @@
+{% macro get_expected_current(energy_to_charge) %}
+  {% from 'energy_config.jinja' import get_battery_config, get_sensor_config %}
+  
+  {% set get_battery_config = get_battery_config | as_function %}
+  {% set get_sensor_config = get_sensor_config | as_function %}
+  {% set config = get_battery_config() %}
+  {% set sensors = get_sensor_config() %}
+  
+  {% set nominal_voltage = states(sensors.battery_voltage_sensor) | float %}
+  {% set target_charge_time_hours = 2 %}
+  
+  {% set lvl1_current = 23 %}
+  {% set lvl2_threshold = 70 %}
+  {% set lvl2_current = 9 %}
+  {% set lvl3_treshold = 90 %}
+  {% set lvl3_current = 5 %}
+  
+  {% set current_soc = states(sensors.battery_soc_sensor) | int %}
+  
+  {% set target_soc = current_soc + (energy_to_charge / config.battery_capacity * 100) %}
+  {% set target_soc = [target_soc, 100] | min %}
+  
+  {% macro energy_in_range(soc_start, soc_end) -%}
+    {{ (soc_end - soc_start) / 100 * config.battery_capacity }}
+  {%- endmacro %}
+  
+  {% if current_soc < lvl2_threshold %}
+    {% set phase1_start = current_soc %}
+    {% set phase1_end = [target_soc, lvl2_threshold] | min %}
+    {% set phase1_energy = energy_in_range(phase1_start, phase1_end) | float %}
+  {% else %}
+    {% set phase1_energy = 0 %}
+  {% endif %}
+  
+  {% if current_soc < lvl3_treshold and target_soc > lvl2_threshold %}
+    {% set phase2_start = [current_soc, lvl2_threshold] | max %}
+    {% set phase2_end = [target_soc, lvl3_treshold] | min %}
+    {% set phase2_energy = energy_in_range(phase2_start, phase2_end) | float %}
+  {% else %}
+    {% set phase2_energy = 0 %}
+  {% endif %}
+  
+  {% if target_soc > lvl3_treshold %}
+    {% set phase3_start = [current_soc, lvl3_treshold] | max %}
+    {% set phase3_end = target_soc %}
+    {% set phase3_energy = energy_in_range(phase3_start, phase3_end) | float %}
+  {% else %}
+    {% set phase3_energy = 0 %}
+  {% endif %}
+  
+  {% set phase1_time = (phase1_energy * 1000) / (nominal_voltage * lvl1_current) if phase1_energy > 0 else 0 %}
+  {% set phase2_time = (phase2_energy * 1000) / (nominal_voltage * lvl2_current) if phase2_energy > 0 else 0 %}
+  {% set phase3_time = (phase3_energy * 1000) / (nominal_voltage * lvl3_current) if phase3_energy > 0 else 0 %}
+  
+  {% set total_time_at_max = phase1_time + phase2_time + phase3_time %}
+  
+  {% if total_time_at_max <= target_charge_time_hours %}
+    {% set required_power_w = (energy_to_charge * 1000) / target_charge_time_hours %}
+    {% set average_current = required_power_w / nominal_voltage %}
+    
+    {% if current_soc < lvl2_threshold %}
+      {% set recommended_current = [average_current, lvl1_current] | min %}
+      {% set limiting_phase = "0-" ~ lvl2_threshold ~ "% SOC" %}
+      {% set max_current = lvl1_current %}
+    {% elif current_soc < lvl3_threshold %}
+      {% set recommended_current = [average_current, lvl2_current] | min %}
+      {% set limiting_phase = lvl2_threshold ~ "-" ~ lvl3_threshold ~ "% SOC" %}
+      {% set max_current = lvl2_current %}
+    {% else %}
+      {% set recommended_current = [average_current, lvl3_current] | min %}
+      {% set limiting_phase = lvl3_threshold ~ "-100% SOC" %}
+      {% set max_current = lvl3_current %}
+    {% endif %}
+  {% else %}
+    {% set recommended_current = lvl1_current %}
+  {% endif %}
+  {{ (recommended_current + 0.5) | round }}
+{% endmacro %}

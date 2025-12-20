@@ -1,0 +1,105 @@
+{% macro get_heat_pump_energy(temperature) %}
+  {% set usage_data = states('input_text.heat_pump_usage') | from_json %}
+  {% set temp_keys = usage_data.keys() | map('int') | list | sort %}
+  
+  {# Clamp to min/max range #}
+  {% if temperature <= temp_keys[0] %}
+    {{ usage_data[temp_keys[0] | string] }}
+  {% elif temperature >= temp_keys[-1] %}
+    {{ usage_data[temp_keys[-1] | string] }}
+  {% elif temperature | string in usage_data %}
+    {{ usage_data[temperature | string] }}
+  {% else %}
+    {# Linear interpolation #}
+    {% set lower = namespace(temp=temp_keys[0], value=usage_data[temp_keys[0] | string]) %}
+    {% set upper = namespace(temp=temp_keys[-1], value=usage_data[temp_keys[-1] | string]) %}
+    
+    {% for temp_key in temp_keys %}
+      {% if temp_key < temperature %}
+        {% set lower.temp = temp_key %}
+        {% set lower.value = usage_data[temp_key | string] %}
+      {% endif %}
+      {% if temp_key > temperature and upper.temp == temp_keys[-1] %}
+        {% set upper.temp = temp_key %}
+        {% set upper.value = usage_data[temp_key | string] %}
+      {% endif %}
+    {% endfor %}
+    
+    {% set ratio = (temperature - lower.temp) / (upper.temp - lower.temp) %}
+    {% set result = lower.value + (upper.value - lower.value) * ratio %}
+    {{ result | round(2) }}
+  {% endif %}
+{% endmacro %}
+
+{% macro get_heat_pump_estimation(start_hour, end_hour, include_tomorrow=false) %}
+  {% set heat_pump_estimations = state_attr('sensor.weather_forecast', 'heat_pump_estimation')[:24] %}
+  {% set usage = namespace(value=0) %}
+  
+  {% if include_tomorrow %}
+    {% set today = now().date() %}
+    {% set tomorrow = today + timedelta(days=1) %}
+    
+    {% for est in heat_pump_estimations %}
+      {% set est_time = as_datetime(est.local_time) %}
+      {% set est_date = est_time.date() %}
+      {% set est_hour = est_time.hour %}
+      
+      {% if (est_date == today and start_hour <= est_hour < 24) or 
+            (est_date == tomorrow and est_hour < end_hour) %}
+        {% set usage.value = usage.value + est.usage %}
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    {% for est in heat_pump_estimations %}
+      {% set est_hour = as_datetime(est.local_time).hour %}
+      {% if start_hour <= est_hour < end_hour %}
+        {% set usage.value = usage.value + est.usage %}
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+  
+  {{ usage.value }}
+{% endmacro %}
+
+{% macro get_heat_pump_hour_usage(hour) %}
+  {% set heat_pump_usage = state_attr('sensor.weather_forecast', 'heat_pump_estimation')[:24] %}
+  {% for usage in heat_pump_usage %}
+    {% if hour == as_datetime(usage.local_time).hour %}
+      {{ usage.usage }}
+      {% break %}
+    {% endif %}
+  {% endfor %}
+{% endmacro %}
+
+{% macro get_heat_pump_usage(hours) %}
+  {% set heat_pump_usage = state_attr('sensor.weather_forecast', 'heat_pump_estimation') %}
+  {% set total_usage = heat_pump_usage[:hours] | map(attribute='usage') | sum %} 
+  {{ total_usage * 1.1 | round(2) }}
+{% endmacro %}
+
+{% macro get_hp_usage(temperature) %}
+  {% set temp = temperature | float %}
+  {% if temp < -15 %}
+    {{ states('sensor.hp_usage_n15_est') | float }}
+  {% elif temp < -10 %}
+    {{ states('sensor.hp_usage_n15_n10_est') | float }}
+  {% elif temp < -5 %}
+    {{ states('sensor.hp_usage_n10_n5_est') | float }}
+  {% elif temp < 0 %}
+    {{ states('sensor.hp_usage_n5_0_est') | float }}
+  {% elif temp < 5 %}
+    {{ states('sensor.hp_usage_0_5_est') | float }}
+  {% elif temp < 10 %}
+    {{ states('sensor.hp_usage_5_10_est') | float }}
+  {% elif temp < 15 %}
+    {{ states('sensor.hp_usage_10_15_est') | float }}
+  {% elif temp < 20 %}
+    {{ states('sensor.hp_usage_15_20_est') | float }}
+  {% elif temp < 25 %}
+    {{ states('sensor.hp_usage_20_25_est') | float }}
+  {% elif temp < 30 %}
+    {{ states('sensor.hp_usage_25_30_est') | float }}
+  {% else %}
+    {{ states('sensor.hp_usage_30_est') | float }}
+  {% endif %}
+{% endmacro %}

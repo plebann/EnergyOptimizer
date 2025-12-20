@@ -1,0 +1,79 @@
+calculate_charge_soc:
+  name: Calculate Charge SOC
+  description: Calculate optimal battery charge target based on price and load
+  fields:
+    hours:
+      name: Hours
+      description: Number of hours to cover with charge
+      required: false
+      default: 12
+      selector:
+        number:
+          min: 1
+          max: 24
+          unit_of_measurement: "hours"
+    force_charge:
+      name: Force Charge
+      description: Force charging regardless of price
+      required: false
+      default: false
+      selector:
+        boolean:
+
+calculate_sell_energy:
+  name: Calculate Sell Energy
+  description: Calculate sellable battery surplus based on price favorability
+  fields:
+    min_profit_margin:
+      name: Minimum Profit Margin
+      description: Minimum price premium required to sell (%)
+      required: false
+      default: 20
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    auto_set_work_mode:
+      name: Auto Set Work Mode
+      description: Automatically switch to sell mode if profitable
+      required: false
+      default: false
+      selector:
+        boolean:
+
+estimate_heat_pump_usage:
+  name: Estimate Heat Pump Usage
+  description: Forecast daily heat pump consumption based on weather
+  fields:
+    date:
+      name: Date
+      description: Date to estimate (default: today)
+      required: false
+      selector:
+        date:
+
+optimize_battery_schedule:
+  name: Optimize Battery Schedule
+  description: Generate optimal daily battery charge/discharge schedule
+  fields:
+    date:
+      name: Date
+      description: Date to optimize (default: tomorrow)
+      required: false
+      selector:
+        date:
+    optimization_goal:
+      name: Optimization Goal
+      description: Optimization strategy to use
+      required: false
+      default: "balanced"
+      selector:
+        select:
+          options:
+            - label: "Cost Minimize"
+              value: "cost_minimize"
+            - label: "Self Consumption"
+              value: "self_consumption"
+            - label: "Balanced"
+              value: "balanced"

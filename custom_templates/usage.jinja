@@ -1,0 +1,10 @@
+{% macro get_hourly_rates(returns) %}
+  {% set time_blocks = ['00_04', '04_08', '08_12', '12_16', '16_20', '20_24'] %}
+
+  {% set hourly_rates = namespace(value = []) %}
+  {% for block in time_blocks %}
+    {% set history_usage = state_attr('sensor.load_usage_hourly_history', 'load_usage_' + block) | float(0) %}
+    {% set hourly_rates.value = hourly_rates.value + [history_usage] * 4 %}
+  {% endfor %}
+  {% do returns(hourly_rates.value) %}
+{% endmacro %}

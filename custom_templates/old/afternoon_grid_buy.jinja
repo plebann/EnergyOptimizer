@@ -1,0 +1,54 @@
+{# CONFIGURATION #}
+{% set min_soc = 20 %}
+{% set efficiency = 0.95 %}
+{% set safety_factor = 1.1 %}
+{% set battery_capacity = 20.5 %}
+
+{# ENERGY DEMAND CALCULATION #}
+{# Current usage pattern #}
+{% set current_usage = states('sensor.load_usage_daily') | float %}
+{% set hp_usage = states('sensor.sprsun_usage_daily') | float(0) %}
+
+{% from 'usage.jinja' import get_hourly_rates %}
+{% set get_hourly_rates = get_hourly_rates | as_function %}
+{% set hourly_rates = get_hourly_rates() %}
+
+{# Calculate usage rate #}
+{% set hours_passed = ((now().hour * 60 + now().minute) / 60) | round(2) %}
+{% set today_usage_rate = (current_usage - hp_usage) / hours_passed %}
+{% set avg_usage_rate = state_attr('sensor.load_usage_history', 'hourly_rate') | float(0) %}
+{% set average_ratio = 1 %}
+{% if today_usage_rate > avg_usage_rate %}
+  {% set average_ratio = today_usage_rate / avg_usage_rate %}
+{% endif %}
+
+{# TARIFF TIMING #}
+{% set calculation_start = today_at(states('input_datetime.low_tarrif_end')).hour %}
+{% set calculation_end = 22 %}
+
+{% set remaining_hours = hourly_rates[calculation_start:calculation_end] %}
+{% set required_kwh = (remaining_hours | sum) * average_ratio * safety_factor %}
+{% set avg_losses_rate = state_attr('sensor.inverter_total_losses_history', 'hourly_rate') | float(0) %}
+{% set losses = (remaining_hours | count) * avg_losses_rate * safety_factor %}
+
+{# ENERGY AVAILABILITY CALCULATION #}
+{% set current_soc = states('sensor.inverter_battery') | int %}
+{% set soc = [current_soc - min_soc, 0] | max %}
+{% set battery_reserve = soc * battery_capacity * efficiency / 100 %}
+{% set remaining_production = (states('sensor.solcast_pv_forecast_forecast_remaining_today') | float) * efficiency %}
+
+{% set hp_estimated_usage = states('input_number.heat_pump_estimated_usage') | float(0) %}
+{# DEFICITE CALCULATION #}
+{% set deficite = (required_kwh + hp_estimated_usage + losses - battery_reserve - remaining_production) | round(3) %}
+
+{# RESULT #}
+{% if current_soc < min_soc %}
+  {% set current_soc = min_soc %}
+{% endif %}
+
+{% if deficite > 0 %}
+  {% set target_soc = (100 * deficite / battery_capacity + current_soc) | round(0) %}
+  {{ [target_soc, 100] | min }}
+{% else %}
+  {{ current_soc }}
+{% endif %}

@@ -1,0 +1,81 @@
+{# CONFIGURATION #}
+{% set min_soc = 20 %}
+{% set efficiency = 0.95 %}
+{% set safety_factor = 1.1 %}
+{% set battery_capacity = 20.5 %}
+
+{# ENERGY DEMAND CALCULATION #}
+{% set current_usage = states('sensor.load_usage_daily') | float %}
+{% set hp_usage = states('sensor.sprsun_usage_daily') | float(0) %}
+
+{% from 'usage.jinja' import get_hourly_rates %}
+{% set get_hourly_rates = get_hourly_rates | as_function %}
+{% set hourly_rates = get_hourly_rates() %}
+
+{# Calculate usage rate with fallback to average #}
+{% set hours_passed = ((now().hour * 60 + now().minute) / 60) | round(2) %}
+{% set today_usage_rate = (current_usage - hp_usage) / hours_passed %}
+{% set avg_usage_rate = state_attr('sensor.load_usage_history', 'hourly_rate') | float(0) %}
+{% set avg_losses_rate = state_attr('sensor.inverter_total_losses_history', 'hourly_rate') | float(0) %}
+{% set average_ratio = 1 %}
+{% if today_usage_rate > avg_usage_rate %}
+  {% set average_ratio = today_usage_rate / avg_usage_rate %}
+{% endif %}
+
+{# TARIFF TIMING #}
+{% set calculation_start = 6 %}
+{% set calculation_end = today_at(states('input_datetime.low_tarrif_start')).hour %}
+
+{% set remaining_hours = hourly_rates[calculation_start:calculation_end] %}
+{% set required_kwh = (remaining_hours | sum) * average_ratio * safety_factor %}
+{% set losses = (remaining_hours | count) * avg_losses_rate * safety_factor %}
+{% set pv_forecast = namespace(value=0) %}
+{% set sufficiency = namespace(value=false) %}
+{% set sufficiency_kwh = namespace(value=0) %}
+{% set sufficiency_pv = namespace(value=0) %}
+{% set detailed_forecast = state_attr('sensor.solcast_pv_forecast_forecast_today', 'detailedHourly') %}
+{% for forecast in detailed_forecast %}
+  {% set forecast_hour = as_datetime(forecast.period_start).astimezone(now().tzinfo).hour %}
+  {% if calculation_start <= forecast_hour and forecast_hour < calculation_end %}
+    {% set pv_forecast.value = pv_forecast.value + forecast.pv_estimate * efficiency %}
+    {% set hour_usage = hourly_rates[(forecast.period_start).hour] * average_ratio %}
+    {% if sufficiency.value is false %}
+      {% set sufficiency_kwh.value = sufficiency_kwh.value + hour_usage + avg_losses_rate %}
+      {% set sufficiency_pv.value = sufficiency_pv.value + forecast.pv_estimate %}
+    {% endif %}
+    {% if forecast.pv_estimate * efficiency > (hour_usage + avg_losses_rate) * safety_factor %}
+      {% set sufficiency.value = true %}
+    {% endif %}
+  {% endif %}
+{% endfor %}
+
+{# ENERGY AVAILABILITY CALCULATION #}
+{% set current_soc = states('sensor.inverter_battery') | int %}
+{% set soc = [current_soc - min_soc, 0] | max %}
+{% set battery_reserve = soc * battery_capacity * efficiency / 100 %}
+{% set hp_estimated_usage = states('input_number.heat_pump_estimated_usage') | float(0) %}
+{# DEFICITE CALCULATIONS #}
+{% set deficite = required_kwh + hp_estimated_usage + losses - battery_reserve - pv_forecast.value %}
+{% set sufficiency_deficite = sufficiency_kwh.value * safety_factor - sufficiency_pv.value * efficiency - battery_reserve %}
+{% if sufficiency_deficite > deficite %}
+  {% set deficite = sufficiency_deficite %}
+{% endif %}
+
+{{ deficite }}
+
+
+{# CONFIGURATION #}
+{% set min_soc = 20 %}
+{% set battery_capacity = 20.5 %}
+{% set current_soc = states('sensor.inverter_battery') | int %}
+{# RESULT #}
+{% if current_soc < min_soc %}
+  {% set current_soc = min_soc %}
+{% endif %}
+
+{% if deficite > 0 %}
+  {% set deficite_soc = (100 * deficite / battery_capacity + current_soc) | round(0) %}
+  {{ [deficite_soc, 100] | min }}
+{% else %}
+  {{ current_soc }}
+{% endif %}

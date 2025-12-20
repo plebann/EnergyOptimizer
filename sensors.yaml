@@ -1,0 +1,35 @@
+# Pobieranie dzisiejszych cen RCE z PSE
+- platform: rest
+  name: RCE Prices Today
+  unique_id: rce_prices_today
+  resource_template: "https://api.raporty.pse.pl/api/rce-pln?$select=rce_pln,period&$filter=business_date eq '{{ now().strftime('%Y-%m-%d') }}'"
+  method: GET
+  headers:
+    accept: "application/json"
+  value_template: >
+    {% if value_json.value is defined and value_json.value | length > 0 %}
+      {{ value_json.value[0]['rce_pln'] | float }}
+    {% else %}
+      0
+    {% endif %}
+  json_attributes:
+    - value
+  scan_interval: 3600
+
+# Pobieranie jutrzejszych cen RCE z PSE
+- platform: rest
+  name: RCE Prices Tomorrow
+  unique_id: rce_prices_tomorrow
+  resource_template: "https://api.raporty.pse.pl/api/rce-pln?$select=rce_pln,period&$filter=business_date eq '{{ (now() + timedelta(days=1)).strftime('%Y-%m-%d') }}'"
+  method: GET
+  headers:
+    accept: "application/json"
+  value_template: >
+    {% if value_json.value is defined and value_json.value | length > 0 %}
+      {{ value_json.value[0]['rce_pln'] | float }}
+    {% else %}
+      0
+    {% endif %}
+  json_attributes:
+    - value
+  scan_interval: 3600
