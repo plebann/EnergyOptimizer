@@ -1,11 +1,12 @@
 """Sensor platform for Energy Optimizer integration."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
@@ -16,6 +17,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from .calculations.battery import (
     calculate_battery_reserve,
@@ -39,6 +41,7 @@ from .const import (
     CONF_PV_FORECAST_TODAY,
     DEFAULT_COP_CURVE,
     DOMAIN,
+    SENSOR_LAST_BALANCING_TIMESTAMP,
     UPDATE_INTERVAL_FAST,
 )
 
@@ -83,6 +86,21 @@ async def async_setup_entry(
     # Add heat pump sensor if enabled
     if config.get(CONF_ENABLE_HEAT_PUMP) and config.get(CONF_OUTSIDE_TEMP_SENSOR):
         sensors.append(HeatPumpEstimationSensor(coordinator, config_entry, config))
+
+    # Add last balancing timestamp sensor
+    last_balancing_sensor = LastBalancingTimestampSensor(
+        coordinator, config_entry, config
+    )
+    sensors.append(last_balancing_sensor)
+
+    # Store sensor reference for service access
+    if DOMAIN not in hass.data:
+        hass.data[DOMAIN] = {}
+    if config_entry.entry_id not in hass.data[DOMAIN]:
+        hass.data[DOMAIN][config_entry.entry_id] = {}
+    hass.data[DOMAIN][config_entry.entry_id][
+        "last_balancing_sensor"
+    ] = last_balancing_sensor
 
     async_add_entities(sensors)
 
@@ -389,3 +407,121 @@ class HeatPumpEstimationSensor(EnergyOptimizerSensor):
             "estimated_min_temp": temp - 5,
             "estimated_max_temp": temp + 5,
         }
+
+
+class LastBalancingTimestampSensor(EnergyOptimizerSensor, RestoreSensor):
+    """Sensor tracking last battery balancing timestamp."""
+
+    _attr_name = "Last Battery Balancing"
+    _attr_unique_id = "last_balancing_timestamp"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:battery-charging-100"
+    _attr_native_value: datetime | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last state on startup."""
+        await super().async_added_to_hass()
+
+        # Restore previous timestamp
+        if (restored_data := await self.async_get_last_sensor_data()) is not None:
+            self._attr_native_value = restored_data.native_value
+            _LOGGER.debug(
+                "Restored last balancing timestamp: %s", self._attr_native_value
+            )
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the last balancing timestamp."""
+        return self._attr_native_value
+
+    def update_balancing_timestamp(self, timestamp: datetime | None = None) -> None:
+        """Update the balancing timestamp (called from service)."""
+        if timestamp is None:
+            timestamp = dt_util.utcnow()
+        self._attr_native_value = timestamp
+        self.async_write_ha_state()
+        _LOGGER.debug("Updated balancing timestamp to %s", timestamp)
+
+
+class LastOptimizationSensor(EnergyOptimizerSensor, RestoreSensor):
+    """Sensor tracking last optimization run and decision."""
+
+    _attr_name = "Last Optimization"
+    _attr_unique_id = "last_optimization"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:calendar-clock"
+    _attr_native_value: datetime | None = None
+    _attr_extra_state_attributes: dict[str, Any] = {}
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last state on startup."""
+        await super().async_added_to_hass()
+
+        # Restore previous timestamp and attributes
+        if (restored_data := await self.async_get_last_sensor_data()) is not None:
+            self._attr_native_value = restored_data.native_value
+            if restored_data.last_extra_data:
+                self._attr_extra_state_attributes = restored_data.last_extra_data
+            _LOGGER.debug(
+                "Restored last optimization: %s", self._attr_native_value
+            )
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the last optimization timestamp."""
+        return self._attr_native_value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        return self._attr_extra_state_attributes
+
+    def log_optimization(self, scenario: str, details: dict[str, Any]) -> None:
+        """Log an optimization run (called from service)."""
+        self._attr_native_value = dt_util.utcnow()
+        self._attr_extra_state_attributes = {
+            "scenario": scenario,
+            "timestamp_local": dt_util.now().isoformat(),
+            **details,
+        }
+        self.async_write_ha_state()
+        _LOGGER.debug("Logged optimization: %s - %s", scenario, details)
+
+
+class OptimizationHistorySensor(EnergyOptimizerSensor):
+    """Sensor showing recent optimization history as text."""
+
+    _attr_name = "Optimization History"
+    _attr_unique_id = "optimization_history"
+    _attr_icon = "mdi:history"
+    _attr_native_value: str = "No optimizations yet"
+    _history: list[dict[str, Any]] = []
+
+    @property
+    def native_value(self) -> str:
+        """Return the most recent optimization as text."""
+        return self._attr_native_value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return full history in attributes."""
+        return {"history": self._history[-10:]}  # Keep last 10 entries
+
+    def add_entry(self, scenario: str, details: dict[str, Any]) -> None:
+        """Add a new history entry."""
+        timestamp = dt_util.now()
+        entry = {
+            "time": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            "scenario": scenario,
+            **details,
+        }
+        self._history.append(entry)
+        
+        # Keep only last 50 entries in memory
+        if len(self._history) > 50:
+            self._history = self._history[-50:]
+        
+        # Update display value to show most recent
+        self._attr_native_value = f"{timestamp.strftime('%H:%M:%S')} - {scenario}"
+        self.async_write_ha_state()
+        _LOGGER.debug("Added optimization history entry: %s", entry)

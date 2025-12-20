@@ -8,6 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_track_time_change
 
 from .const import (
     DOMAIN,
@@ -43,6 +44,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.services.has_service(DOMAIN, SERVICE_CALCULATE_CHARGE_SOC):
         await async_register_services(hass)
 
+    # Register automatic daily schedule optimization at 22:00
+    async def _trigger_optimize_schedule(now):
+        """Trigger battery schedule optimization at 22:00."""
+        _LOGGER.info("Auto-triggering battery schedule optimization at 22:00")
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_OPTIMIZE_SCHEDULE,
+            {},
+            blocking=False,
+        )
+
+    # Track time change: trigger at 22:00 every day
+    remove_listener = async_track_time_change(
+        hass, _trigger_optimize_schedule, hour=22, minute=0, second=0
+    )
+
+    # Store removal callback for cleanup
+    if "listeners" not in hass.data[DOMAIN][entry.entry_id]:
+        hass.data[DOMAIN][entry.entry_id] = {"listeners": []}
+    hass.data[DOMAIN][entry.entry_id]["listeners"].append(remove_listener)
+
+    _LOGGER.info("Energy Optimizer: Automatic 22:00 schedule optimization enabled")
+
     return True
 
 
@@ -51,6 +75,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
+        # Remove time-based listeners
+        entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
+        for remove_listener in entry_data.get("listeners", []):
+            remove_listener()
+
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
@@ -232,8 +261,355 @@ async def async_register_services(hass: HomeAssistant) -> None:
 
     async def handle_optimize_schedule(call: ServiceCall) -> None:
         """Handle optimize_battery_schedule service call."""
-        # TODO: Implement comprehensive schedule optimization
-        _LOGGER.info("Battery schedule optimization called (not yet implemented)")
+        from datetime import datetime
+
+        from homeassistant.util import dt as dt_util
+
+        from .calculations.battery import calculate_battery_space
+        from .const import (
+            CONF_BALANCING_INTERVAL_DAYS,
+            CONF_BALANCING_PV_THRESHOLD,
+            CONF_BATTERY_SOC_SENSOR,
+            CONF_MAX_CHARGE_CURRENT_ENTITY,
+            CONF_PROGRAM_MORNING_SOC_ENTITY,
+            CONF_PROGRAM_NIGHT_SOC_ENTITY,
+            CONF_PV_FORECAST_TOMORROW,
+            DEFAULT_BALANCING_INTERVAL_DAYS,
+            DEFAULT_BALANCING_PV_THRESHOLD,
+        )
+
+        # Get configuration
+        entries = hass.config_entries.async_entries(DOMAIN)
+        if not entries:
+            _LOGGER.error("No Energy Optimizer configuration found")
+            return
+
+        entry = entries[0]
+        config = entry.data
+
+        # Get sensor reference from hass.data
+        if (
+            DOMAIN not in hass.data
+            or entry.entry_id not in hass.data[DOMAIN]
+            or "last_balancing_sensor" not in hass.data[DOMAIN][entry.entry_id]
+        ):
+            _LOGGER.error("Last balancing sensor not initialized")
+            return
+
+        last_balancing_sensor = hass.data[DOMAIN][entry.entry_id]["last_balancing_sensor"]
+
+        # Read configuration
+        balancing_interval_days = config.get(
+            CONF_BALANCING_INTERVAL_DAYS, DEFAULT_BALANCING_INTERVAL_DAYS
+        )
+        balancing_pv_threshold = config.get(
+            CONF_BALANCING_PV_THRESHOLD, DEFAULT_BALANCING_PV_THRESHOLD
+        )
+
+        # Check if balancing is due
+        last_balancing = (
+            last_balancing_sensor.native_value if last_balancing_sensor else None
+        )
+        days_since_balancing = None
+        if last_balancing:
+            days_since_balancing = (dt_util.utcnow() - last_balancing).days
+            _LOGGER.debug(
+                "Days since last balancing: %s (last: %s)",
+                days_since_balancing,
+                last_balancing,
+            )
+
+        balancing_due = (last_balancing is None) or (
+            days_since_balancing >= balancing_interval_days
+        )
+
+        # Get PV forecast
+        pv_forecast_entity = config.get(CONF_PV_FORECAST_TOMORROW)
+        pv_forecast = 0.0
+        if pv_forecast_entity:
+            pv_state = hass.states.get(pv_forecast_entity)
+            if pv_state and pv_state.state not in ("unknown", "unavailable"):
+                try:
+                    pv_forecast = float(pv_state.state)
+                except (ValueError, TypeError) as err:
+                    _LOGGER.warning("Could not parse PV forecast: %s", err)
+
+        _LOGGER.debug(
+            "Balancing check: due=%s, pv_forecast=%.2f kWh, threshold=%.2f kWh",
+            balancing_due,
+            pv_forecast,
+            balancing_pv_threshold,
+        )
+
+        # SCENARIO 1: Battery Balancing Mode
+        if balancing_due and pv_forecast < balancing_pv_threshold:
+            _LOGGER.info(
+                "Activating battery balancing mode (PV forecast: %.2f kWh < %.2f kWh)",
+                pv_forecast,
+                balancing_pv_threshold,
+            )
+
+            # Set program SOC targets to 100%
+            program_morning_soc = config.get(CONF_PROGRAM_MORNING_SOC_ENTITY)
+            program_night_soc = config.get(CONF_PROGRAM_NIGHT_SOC_ENTITY)
+            max_charge_current = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
+
+            if program_morning_soc:
+                await hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": program_morning_soc, "value": 100},
+                    blocking=True,
+                )
+                _LOGGER.debug("Set %s to 100%%", program_morning_soc)
+
+            if program_night_soc:
+                await hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": program_night_soc, "value": 100},
+                    blocking=True,
+                )
+                _LOGGER.debug("Set %s to 100%%", program_night_soc)
+
+            if max_charge_current:
+                await hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": max_charge_current, "value": 23},
+                    blocking=True,
+                )
+                _LOGGER.debug("Set %s to 23A", max_charge_current)
+
+            # Update balancing timestamp
+            last_balancing_sensor.update_balancing_timestamp()
+
+            # Log to optimization sensors
+            if "last_optimization_sensor" in hass.data[DOMAIN][entry.entry_id]:
+                opt_sensor = hass.data[DOMAIN][entry.entry_id]["last_optimization_sensor"]
+                opt_sensor.log_optimization(
+                    "Battery Balancing",
+                    {
+                        "pv_forecast_kwh": round(pv_forecast, 2),
+                        "threshold_kwh": balancing_pv_threshold,
+                        "target_soc": 100,
+                        "days_since_last": days_since_balancing,
+                    },
+                )
+            if "optimization_history_sensor" in hass.data[DOMAIN][entry.entry_id]:
+                hist_sensor = hass.data[DOMAIN][entry.entry_id]["optimization_history_sensor"]
+                hist_sensor.add_entry(
+                    "Battery Balancing",
+                    {
+                        "pv_forecast": f"{pv_forecast:.1f} kWh",
+                        "target": "100%",
+                        "reason": f"Low PV forecast ({pv_forecast:.1f} < {balancing_pv_threshold:.1f})",
+                    },
+                )
+
+            # Send notification
+            await hass.services.async_call(
+                "notify",
+                "notify",
+                {"message": "Night battery balancing enabled - Up to 100%"},
+                blocking=False,
+            )
+
+            _LOGGER.info("Battery balancing mode activated")
+            return
+
+        # Get current battery SOC for preservation scenarios
+        soc_sensor = config.get(CONF_BATTERY_SOC_SENSOR)
+        current_soc = None
+        if soc_sensor:
+            soc_state = hass.states.get(soc_sensor)
+            if soc_state and soc_state.state not in ("unknown", "unavailable"):
+                try:
+                    current_soc = float(soc_state.state)
+                except (ValueError, TypeError) as err:
+                    _LOGGER.warning("Could not parse battery SOC: %s", err)
+
+        if current_soc is None:
+            _LOGGER.warning("Current battery SOC not available, skipping preservation check")
+            return
+
+        # Calculate battery space
+        capacity_ah = config.get("battery_capacity_ah", 200)
+        voltage = config.get("battery_voltage", 48)
+        max_soc = config.get("max_soc", 100)
+
+        battery_space = calculate_battery_space(current_soc, max_soc, capacity_ah, voltage)
+        pv_with_efficiency = pv_forecast * 0.9  # 90% efficiency factor
+
+        _LOGGER.debug(
+            "Battery space: %.2f kWh, PV forecast (90%%): %.2f kWh",
+            battery_space,
+            pv_with_efficiency,
+        )
+
+        # SCENARIO 2: Battery Preservation Mode
+        if pv_with_efficiency > battery_space:
+            _LOGGER.info(
+                "Activating battery preservation mode (PV %.2f kWh > space %.2f kWh)",
+                pv_with_efficiency,
+                battery_space,
+            )
+
+            program_morning_soc = config.get(CONF_PROGRAM_MORNING_SOC_ENTITY)
+            program_night_soc = config.get(CONF_PROGRAM_NIGHT_SOC_ENTITY)
+
+            # Set targets to current SOC to prevent discharge
+            if program_morning_soc:
+                await hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": program_morning_soc, "value": current_soc},
+                    blocking=True,
+                )
+                _LOGGER.debug("Set %s to %.1f%% (current SOC)", program_morning_soc, current_soc)
+
+            if program_night_soc:
+                await hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": program_night_soc, "value": current_soc},
+                    blocking=True,
+                )
+                _LOGGER.debug("Set %s to %.1f%% (current SOC)", program_night_soc, current_soc)
+
+            # Log to optimization sensors
+            if "last_optimization_sensor" in hass.data[DOMAIN][entry.entry_id]:
+                opt_sensor = hass.data[DOMAIN][entry.entry_id]["last_optimization_sensor"]
+                opt_sensor.log_optimization(
+                    "Battery Preservation",
+                    {
+                        "pv_forecast_kwh": round(pv_forecast, 2),
+                        "pv_with_efficiency_kwh": round(pv_with_efficiency, 2),
+                        "battery_space_kwh": round(battery_space, 2),
+                        "locked_soc": round(current_soc, 1),
+                    },
+                )
+            if "optimization_history_sensor" in hass.data[DOMAIN][entry.entry_id]:
+                hist_sensor = hass.data[DOMAIN][entry.entry_id]["optimization_history_sensor"]
+                hist_sensor.add_entry(
+                    "Battery Preservation",
+                    {
+                        "pv_forecast": f"{pv_forecast:.1f} kWh",
+                        "battery_space": f"{battery_space:.1f} kWh",
+                        "locked_at": f"{current_soc:.0f}%",
+                        "reason": f"PV surplus exceeds space ({pv_with_efficiency:.1f} > {battery_space:.1f})",
+                    },
+                )
+
+            # Send notification
+            await hass.services.async_call(
+                "notify",
+                "notify",
+                {
+                    "message": f"Battery preservation mode - SOC locked at {current_soc:.0f}%"
+                },
+                blocking=False,
+            )
+
+            _LOGGER.info("Battery preservation mode activated")
+            return
+
+        # SCENARIO 3: Normal Operation Restoration
+        program_night_soc = config.get(CONF_PROGRAM_NIGHT_SOC_ENTITY)
+        min_soc = config.get("min_soc", 15)
+
+        current_program_night_soc = None
+        if program_night_soc:
+            night_soc_state = hass.states.get(program_night_soc)
+            if night_soc_state and night_soc_state.state not in ("unknown", "unavailable"):
+                try:
+                    current_program_night_soc = float(night_soc_state.state)
+                except (ValueError, TypeError) as err:
+                    _LOGGER.warning("Could not parse program night SOC: %s", err)
+
+        if (
+            current_program_night_soc is not None
+            and current_program_night_soc > min_soc
+            and not (pv_with_efficiency > battery_space)
+        ):
+            _LOGGER.info(
+                "Restoring normal operation (current: %.0f%%, restoring to: %.0f%%)",
+                current_program_night_soc,
+                min_soc,
+            )
+
+            program_morning_soc = config.get(CONF_PROGRAM_MORNING_SOC_ENTITY)
+
+            if program_morning_soc:
+                await hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": program_morning_soc, "value": min_soc},
+                    blocking=True,
+                )
+                _LOGGER.debug("Set %s to %.0f%%", program_morning_soc, min_soc)
+
+            if program_night_soc:
+                await hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": program_night_soc, "value": min_soc},
+                    blocking=True,
+                )
+                _LOGGER.debug("Set %s to %.0f%%", program_night_soc, min_soc)
+
+            # Log to optimization sensors
+            if "last_optimization_sensor" in hass.data[DOMAIN][entry.entry_id]:
+                opt_sensor = hass.data[DOMAIN][entry.entry_id]["last_optimization_sensor"]
+                opt_sensor.log_optimization(
+                    "Normal Operation Restored",
+                    {
+                        "previous_soc": round(current_program_night_soc, 1),
+                        "restored_to_soc": min_soc,
+                        "pv_forecast_kwh": round(pv_forecast, 2),
+                    },
+                )
+            if "optimization_history_sensor" in hass.data[DOMAIN][entry.entry_id]:
+                hist_sensor = hass.data[DOMAIN][entry.entry_id]["optimization_history_sensor"]
+                hist_sensor.add_entry(
+                    "Normal Operation",
+                    {
+                        "previous": f"{current_program_night_soc:.0f}%",
+                        "restored_to": f"{min_soc:.0f}%",
+                        "reason": "PV within normal range",
+                    },
+                )
+
+            # Send notification
+            await hass.services.async_call(
+                "notify",
+                "notify",
+                {"message": f"Normal battery operation restored - SOC minimum {min_soc:.0f}%"},
+                blocking=False,
+            )
+
+            _LOGGER.info("Normal operation restored")
+            return
+
+        # Log when no action taken
+        if "last_optimization_sensor" in hass.data[DOMAIN][entry.entry_id]:
+            opt_sensor = hass.data[DOMAIN][entry.entry_id]["last_optimization_sensor"]
+            opt_sensor.log_optimization(
+                "No Action",
+                {
+                    "pv_forecast_kwh": round(pv_forecast, 2),
+                    "battery_space_kwh": round(battery_space, 2) if battery_space else 0,
+                    "current_soc": round(current_soc, 1) if current_soc else 0,
+                },
+            )
+        if "optimization_history_sensor" in hass.data[DOMAIN][entry.entry_id]:
+            hist_sensor = hass.data[DOMAIN][entry.entry_id]["optimization_history_sensor"]
+            hist_sensor.add_entry(
+                "No Action",
+                {"reason": "No changes needed"},
+            )
+
+        _LOGGER.debug("No battery schedule changes needed")
 
     # Register services
     hass.services.async_register(

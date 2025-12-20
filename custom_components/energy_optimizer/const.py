@@ -39,12 +39,21 @@ CONF_OUTSIDE_TEMP_SENSOR = "outside_temp_sensor"
 CONF_HEAT_PUMP_POWER_SENSOR = "heat_pump_power_sensor"
 CONF_COP_CURVE = "cop_curve"
 
+# Battery balancing configuration
+CONF_BALANCING_INTERVAL_DAYS = "balancing_interval_days"
+CONF_BALANCING_PV_THRESHOLD = "balancing_pv_threshold_kwh"
+CONF_PROGRAM_NIGHT_SOC_ENTITY = "program_night_soc_entity"
+CONF_PROGRAM_MORNING_SOC_ENTITY = "program_morning_soc_entity"
+CONF_MAX_CHARGE_CURRENT_ENTITY = "max_charge_current_entity"
+
 # Default values
 DEFAULT_BATTERY_CAPACITY_AH = 200
 DEFAULT_BATTERY_VOLTAGE = 48
 DEFAULT_BATTERY_EFFICIENCY = 95
 DEFAULT_MIN_SOC = 10
 DEFAULT_MAX_SOC = 100
+DEFAULT_BALANCING_INTERVAL_DAYS = 14
+DEFAULT_BALANCING_PV_THRESHOLD = 20.5
 
 # Default COP curve (temperature °C, COP)
 DEFAULT_COP_CURVE = [
@@ -75,6 +84,9 @@ SENSOR_REQUIRED_ENERGY_EVENING = "required_energy_evening"
 SENSOR_SURPLUS_ENERGY = "surplus_energy"
 SENSOR_ENERGY_DEFICIT = "energy_deficit"
 SENSOR_HEAT_PUMP_ESTIMATION = "heat_pump_estimation"
+SENSOR_LAST_BALANCING_TIMESTAMP = "last_balancing_timestamp"
+SENSOR_LAST_OPTIMIZATION = "last_optimization"
+SENSOR_OPTIMIZATION_HISTORY = "optimization_history"
 
 # Update intervals (seconds)
 UPDATE_INTERVAL_FAST = 60  # For battery-related sensors

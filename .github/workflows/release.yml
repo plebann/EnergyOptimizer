@@ -1,0 +1,134 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_increment:
+        description: 'Version increment type'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get latest tag
+        id: get_latest_tag
+        run: |
+          # Get the latest tag, or use 0.0.0 if no tags exist
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest_tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
+          echo "Latest tag: ${LATEST_TAG}"
+      
+      - name: Calculate next version
+        id: next_version
+        run: |
+          LATEST_TAG="${{ steps.get_latest_tag.outputs.latest_tag }}"
+          # Remove 'v' prefix if present
+          VERSION=${LATEST_TAG#v}
+          
+          # Split version into parts
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          
+          # Increment based on input (default: patch)
+          INCREMENT="${{ github.event.inputs.version_increment || 'patch' }}"
+          
+          if [ "$INCREMENT" = "major" ]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif [ "$INCREMENT" = "minor" ]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+          
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "new_tag=v${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "Next version: ${NEW_VERSION}"
+      
+      - name: Update manifest.json
+        run: |
+          NEW_VERSION="${{ steps.next_version.outputs.new_version }}"
+          sed -i "s/\"version\": \".*\"/\"version\": \"${NEW_VERSION}\"/" custom_components/energy_optimizer/manifest.json
+          echo "Updated manifest.json to version ${NEW_VERSION}"
+      
+      - name: Commit version update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add custom_components/energy_optimizer/manifest.json
+          git commit -m "Bump version to ${{ steps.next_version.outputs.new_version }}"
+          git push
+      
+      - name: Create and push tag
+        run: |
+          NEW_TAG="${{ steps.next_version.outputs.new_tag }}"
+          git tag -a "${NEW_TAG}" -m "Release ${NEW_TAG}"
+          git push origin "${NEW_TAG}"
+      
+      - name: Create release archive
+        run: |
+          cd custom_components
+          zip -r ../energy_optimizer.zip energy_optimizer/
+          cd ..
+      
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          NEW_TAG="${{ steps.next_version.outputs.new_tag }}"
+          LATEST_TAG="${{ steps.get_latest_tag.outputs.latest_tag }}"
+          
+          # Generate changelog
+          if [ "$LATEST_TAG" = "v0.0.0" ]; then
+            CHANGELOG="Initial release of Energy Optimizer integration for Home Assistant."
+          else
+            CHANGELOG=$(git log ${LATEST_TAG}..HEAD --pretty=format:"- %s" --no-merges)
+            if [ -z "$CHANGELOG" ]; then
+              CHANGELOG="- Minor improvements and bug fixes"
+            fi
+          fi
+          
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.next_version.outputs.new_tag }}
+          name: Release ${{ steps.next_version.outputs.new_version }}
+          body: |
+            ## Energy Optimizer ${{ steps.next_version.outputs.new_version }}
+            
+            ### Changes
+            ${{ steps.release_notes.outputs.changelog }}
+            
+            ### Installation
+            1. Download `energy_optimizer.zip`
+            2. Extract to your Home Assistant `custom_components` directory
+            3. Restart Home Assistant
+            
+            ### HACS Installation
+            This integration is available through HACS as a custom repository.
+          files: |
+            energy_optimizer.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
