@@ -271,32 +271,26 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG1_TIME_START): selector.TimeSelector(),
-                vol.Optional(CONF_PROG1_TIME_END): selector.TimeSelector(),
                 vol.Optional(CONF_PROG2_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG2_TIME_START): selector.TimeSelector(),
-                vol.Optional(CONF_PROG2_TIME_END): selector.TimeSelector(),
                 vol.Optional(CONF_PROG3_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG3_TIME_START): selector.TimeSelector(),
-                vol.Optional(CONF_PROG3_TIME_END): selector.TimeSelector(),
                 vol.Optional(CONF_PROG4_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG4_TIME_START): selector.TimeSelector(),
-                vol.Optional(CONF_PROG4_TIME_END): selector.TimeSelector(),
                 vol.Optional(CONF_PROG5_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG5_TIME_START): selector.TimeSelector(),
-                vol.Optional(CONF_PROG5_TIME_END): selector.TimeSelector(),
                 vol.Optional(CONF_PROG6_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG6_TIME_START): selector.TimeSelector(),
-                vol.Optional(CONF_PROG6_TIME_END): selector.TimeSelector(),
             }
         )
 
@@ -491,18 +485,17 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Validate each configured program
         program_configs = [
-            (CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START, CONF_PROG1_TIME_END),
-            (CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START, CONF_PROG2_TIME_END),
-            (CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START, CONF_PROG3_TIME_END),
-            (CONF_PROG4_SOC_ENTITY, CONF_PROG4_TIME_START, CONF_PROG4_TIME_END),
-            (CONF_PROG5_SOC_ENTITY, CONF_PROG5_TIME_START, CONF_PROG5_TIME_END),
-            (CONF_PROG6_SOC_ENTITY, CONF_PROG6_TIME_START, CONF_PROG6_TIME_END),
+            (CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START),
+            (CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START),
+            (CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START),
+            (CONF_PROG4_SOC_ENTITY, CONF_PROG4_TIME_START),
+            (CONF_PROG5_SOC_ENTITY, CONF_PROG5_TIME_START),
+            (CONF_PROG6_SOC_ENTITY, CONF_PROG6_TIME_START),
         ]
 
-        for soc_key, start_key, end_key in program_configs:
+        for soc_key, start_key in program_configs:
             soc_entity = user_input.get(soc_key)
             start_time = user_input.get(start_key)
-            end_time = user_input.get(end_key)
 
             if soc_entity:
                 has_programs = True
@@ -513,10 +506,10 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 elif prog_state.domain != "number":
                     errors[soc_key] = "not_number_entity"
 
-                # Warn if time windows not configured (optional but recommended)
-                if not start_time or not end_time:
+                # Warn if start time not configured (optional but recommended)
+                if not start_time:
                     _LOGGER.warning(
-                        "%s configured without time windows - will be used for manual control only",
+                        "%s configured without start time - will be used for manual control only",
                         soc_key
                     )
 
@@ -561,7 +554,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
             )
             return self.async_create_entry(title="", data={})
 
-        # Allow reconfiguring key parameters
+        # Allow reconfiguring key parameters and program entities
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -578,6 +571,72 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                         CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY
                     ),
                 ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
+                # Program 1
+                vol.Optional(
+                    CONF_PROG1_SOC_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG1_SOC_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_PROG1_TIME_START,
+                    default=self._config_entry.data.get(CONF_PROG1_TIME_START),
+                ): selector.TimeSelector(),
+                # Program 2
+                vol.Optional(
+                    CONF_PROG2_SOC_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG2_SOC_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_PROG2_TIME_START,
+                    default=self._config_entry.data.get(CONF_PROG2_TIME_START),
+                ): selector.TimeSelector(),
+                # Program 3
+                vol.Optional(
+                    CONF_PROG3_SOC_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG3_SOC_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_PROG3_TIME_START,
+                    default=self._config_entry.data.get(CONF_PROG3_TIME_START),
+                ): selector.TimeSelector(),
+                # Program 4
+                vol.Optional(
+                    CONF_PROG4_SOC_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG4_SOC_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_PROG4_TIME_START,
+                    default=self._config_entry.data.get(CONF_PROG4_TIME_START),
+                ): selector.TimeSelector(),
+                # Program 5
+                vol.Optional(
+                    CONF_PROG5_SOC_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG5_SOC_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_PROG5_TIME_START,
+                    default=self._config_entry.data.get(CONF_PROG5_TIME_START),
+                ): selector.TimeSelector(),
+                # Program 6
+                vol.Optional(
+                    CONF_PROG6_SOC_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG6_SOC_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_PROG6_TIME_START,
+                    default=self._config_entry.data.get(CONF_PROG6_TIME_START),
+                ): selector.TimeSelector(),
             }
         )
 

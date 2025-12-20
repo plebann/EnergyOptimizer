@@ -106,36 +106,34 @@ def get_active_program_entity(
     """
     from datetime import time as dt_time
     from .const import (
-        CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START, CONF_PROG1_TIME_END,
-        CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START, CONF_PROG2_TIME_END,
-        CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START, CONF_PROG3_TIME_END,
-        CONF_PROG4_SOC_ENTITY, CONF_PROG4_TIME_START, CONF_PROG4_TIME_END,
-        CONF_PROG5_SOC_ENTITY, CONF_PROG5_TIME_START, CONF_PROG5_TIME_END,
-        CONF_PROG6_SOC_ENTITY, CONF_PROG6_TIME_START, CONF_PROG6_TIME_END,
+        CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START,
+        CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START,
+        CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START,
+        CONF_PROG4_SOC_ENTITY, CONF_PROG4_TIME_START,
+        CONF_PROG5_SOC_ENTITY, CONF_PROG5_TIME_START,
+        CONF_PROG6_SOC_ENTITY, CONF_PROG6_TIME_START,
     )
     
     programs = [
-        (CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START, CONF_PROG1_TIME_END),
-        (CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START, CONF_PROG2_TIME_END),
-        (CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START, CONF_PROG3_TIME_END),
-        (CONF_PROG4_SOC_ENTITY, CONF_PROG4_TIME_START, CONF_PROG4_TIME_END),
-        (CONF_PROG5_SOC_ENTITY, CONF_PROG5_TIME_START, CONF_PROG5_TIME_END),
-        (CONF_PROG6_SOC_ENTITY, CONF_PROG6_TIME_START, CONF_PROG6_TIME_END),
+        (CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START),
+        (CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START),
+        (CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START),
+        (CONF_PROG4_SOC_ENTITY, CONF_PROG4_TIME_START),
+        (CONF_PROG5_SOC_ENTITY, CONF_PROG5_TIME_START),
+        (CONF_PROG6_SOC_ENTITY, CONF_PROG6_TIME_START),
     ]
     
-    current_time_only = current_time.time()
-    
-    for soc_key, start_key, end_key in programs:
+    # Build list of configured programs with their start times
+    configured_programs = []
+    for soc_key, start_key in programs:
         soc_entity = config.get(soc_key)
         start_time = config.get(start_key)
-        end_time = config.get(end_key)
         
-        # Skip if program not configured or missing time windows
-        if not soc_entity or not start_time or not end_time:
+        if not soc_entity or not start_time:
             continue
             
         try:
-            # Convert time strings/objects to time objects
+            # Convert time to dt_time object
             if isinstance(start_time, str):
                 start_parts = start_time.split(":")
                 start_dt = dt_time(int(start_parts[0]), int(start_parts[1]))
@@ -145,36 +143,42 @@ def get_active_program_entity(
                 _LOGGER.warning("Invalid start_time format for %s: %s", soc_key, start_time)
                 continue
                 
-            if isinstance(end_time, str):
-                end_parts = end_time.split(":")
-                end_dt = dt_time(int(end_parts[0]), int(end_parts[1]))
-            elif isinstance(end_time, dt_time):
-                end_dt = end_time
-            else:
-                _LOGGER.warning("Invalid end_time format for %s: %s", soc_key, end_time)
-                continue
-            
-            # Check if current time falls within this program's window
-            if start_dt <= end_dt:
-                # Normal case: window doesn't cross midnight
-                if start_dt <= current_time_only < end_dt:
-                    _LOGGER.debug(
-                        "Current time %s matches program %s window %s-%s",
-                        current_time_only, soc_key, start_dt, end_dt
-                    )
-                    return soc_entity
-            else:
-                # Window crosses midnight
-                if current_time_only >= start_dt or current_time_only < end_dt:
-                    _LOGGER.debug(
-                        "Current time %s matches program %s window %s-%s (crosses midnight)",
-                        current_time_only, soc_key, start_dt, end_dt
-                    )
-                    return soc_entity
-                    
+            configured_programs.append((soc_entity, start_dt))
         except (ValueError, AttributeError, IndexError) as err:
-            _LOGGER.warning("Error parsing time window for %s: %s", soc_key, err)
+            _LOGGER.warning("Error parsing time for %s: %s", soc_key, err)
             continue
+    
+    if not configured_programs:
+        _LOGGER.debug("No programs configured")
+        return None
+    
+    # Sort programs by start time
+    configured_programs.sort(key=lambda x: x[1])
+    
+    current_time_only = current_time.time()
+    
+    # Find the active program (current time >= program start and < next program start)
+    for i, (soc_entity, start_dt) in enumerate(configured_programs):
+        # Get next program's start time (or wrap to first program)
+        next_start = configured_programs[(i + 1) % len(configured_programs)][1]
+        
+        # Check if current time is within this program's window
+        if start_dt <= next_start:
+            # Normal case: program runs within same day
+            if start_dt <= current_time_only < next_start:
+                _LOGGER.debug(
+                    "Current time %s matches program starting at %s (until %s)",
+                    current_time_only, start_dt, next_start
+                )
+                return soc_entity
+        else:
+            # Window crosses midnight
+            if current_time_only >= start_dt or current_time_only < next_start:
+                _LOGGER.debug(
+                    "Current time %s matches program starting at %s (until %s, crosses midnight)",
+                    current_time_only, start_dt, next_start
+                )
+                return soc_entity
     
     _LOGGER.debug("No active program found for current time %s", current_time_only)
     return None
