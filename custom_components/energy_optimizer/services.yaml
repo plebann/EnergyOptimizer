@@ -51,7 +51,7 @@ estimate_heat_pump_usage:
       description: Date to estimate (default: today)
       required: false
       selector:
-        date:
+        date: {}
 
 optimize_battery_schedule:
   name: Optimize Battery Schedule
@@ -62,7 +62,7 @@ optimize_battery_schedule:
       description: Date to optimize (default: tomorrow)
       required: false
       selector:
-        date:
+        date: {}
     optimization_goal:
       name: Optimization Goal
       description: Optimization strategy to use
