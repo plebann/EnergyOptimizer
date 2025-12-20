@@ -7,9 +7,9 @@ import sys
 sys.path.insert(0, '../custom_components/energy_optimizer')
 from custom_components.energy_optimizer import get_active_program_entity
 from custom_components.energy_optimizer.const import (
-    CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START, CONF_PROG1_TIME_END,
-    CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START, CONF_PROG2_TIME_END,
-    CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START, CONF_PROG3_TIME_END,
+    CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START,
+    CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START,
+    CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START,
 )
 
 
@@ -27,7 +27,6 @@ def test_single_program_time_match():
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
         CONF_PROG1_TIME_START: "06:00",
-        CONF_PROG1_TIME_END: "12:00",
     }
     
     # Test time within window
@@ -46,10 +45,8 @@ def test_multiple_programs_priority():
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
         CONF_PROG1_TIME_START: "06:00",
-        CONF_PROG1_TIME_END: "12:00",
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
         CONF_PROG2_TIME_START: "14:00",
-        CONF_PROG2_TIME_END: "18:00",
     }
     
     # Test matching program 1
@@ -73,7 +70,6 @@ def test_time_window_boundaries():
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
         CONF_PROG1_TIME_START: "06:00",
-        CONF_PROG1_TIME_END: "12:00",
     }
     
     # At start time (inclusive)
@@ -97,7 +93,6 @@ def test_midnight_crossing_window():
     config = {
         CONF_PROG1_SOC_ENTITY: "number.night_prog",
         CONF_PROG1_TIME_START: "22:00",
-        CONF_PROG1_TIME_END: "06:00",
     }
     
     # Late evening (after start)
@@ -133,7 +128,6 @@ def test_time_object_input():
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
         CONF_PROG1_TIME_START: time(6, 0),
-        CONF_PROG1_TIME_END: time(12, 0),
     }
     
     current_time = datetime(2025, 12, 20, 9, 30)
@@ -146,7 +140,6 @@ def test_invalid_time_format():
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
         CONF_PROG1_TIME_START: "invalid",
-        CONF_PROG1_TIME_END: "12:00",
     }
     
     current_time = datetime(2025, 12, 20, 10, 0)
@@ -160,13 +153,10 @@ def test_all_six_programs():
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1",
         CONF_PROG1_TIME_START: "00:00",
-        CONF_PROG1_TIME_END: "04:00",
         CONF_PROG2_SOC_ENTITY: "number.prog2",
         CONF_PROG2_TIME_START: "04:00",
-        CONF_PROG2_TIME_END: "08:00",
         CONF_PROG3_SOC_ENTITY: "number.prog3",
         CONF_PROG3_TIME_START: "08:00",
-        CONF_PROG3_TIME_END: "12:00",
     }
     
     # Test matching each program
