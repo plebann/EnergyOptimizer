@@ -128,15 +128,15 @@ def get_active_program_entity(
     configured_programs = []
     for soc_key, start_key in programs:
         soc_entity = config.get(soc_key)
-        start_time_entity = config.get(start_key)
+        start_time_entity_id = config.get(start_key)
         
-        if not soc_entity or not start_time_entity:
+        if not soc_entity or not start_time_entity_id:
             continue
         
         # Get the state of the time entity
-        time_state = hass.states.get(start_time_entity)
+        time_state = hass.states.get(start_time_entity_id)
         if not time_state:
-            _LOGGER.warning("Time entity %s not found for %s", start_time_entity, soc_key)
+            _LOGGER.warning("Time entity %s not found for %s", start_time_entity_id, soc_key)
             continue
             
         try:
@@ -146,7 +146,7 @@ def get_active_program_entity(
             time_value = time_state.state
             
             if not time_value or time_value in ("unknown", "unavailable"):
-                _LOGGER.warning("Time entity %s has invalid state: %s", start_time_entity, time_value)
+                _LOGGER.warning("Time entity %s has invalid state: %s", start_time_entity_id, time_value)
                 continue
             
             # Parse time string (handle HH:MM or HH:MM:SS format)
@@ -159,12 +159,12 @@ def get_active_program_entity(
             if len(time_parts) >= 2:
                 start_dt = dt_time(int(time_parts[0]), int(time_parts[1]))
             else:
-                _LOGGER.warning("Invalid time format for %s: %s", start_time_entity, time_value)
+                _LOGGER.warning("Invalid time format for %s: %s", start_time_entity_id, time_value)
                 continue
                 
             configured_programs.append((soc_entity, start_dt))
         except (ValueError, AttributeError, IndexError) as err:
-            _LOGGER.warning("Error parsing time from entity %s: %s", start_time_entity, err)
+            _LOGGER.warning("Error parsing time from entity %s: %s", start_time_entity_id, err)
             continue
     
     if not configured_programs:
