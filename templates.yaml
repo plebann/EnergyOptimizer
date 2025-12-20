@@ -1,0 +1,90 @@
+- trigger:
+    - platform: time_pattern
+      hours: "/1"
+    - platform: homeassistant
+      event: start
+  action:
+    - service: weather.get_forecasts
+      target:
+        entity_id: weather.forecast_home
+      data:
+        type: hourly
+      response_variable: weather_response
+  sensor:
+    - name: "Heat pump estimations"
+      unique_id: heat_pump_estimations
+      state: "{{ now() }}"
+      attributes:
+        values: >
+          {% from 'heat_pump.jinja' import get_hp_usage %}
+          {%- set hourly_forecast = weather_response['weather.forecast_home'].forecast -%}
+          {%- set hp = namespace(value=[]) -%}
+
+          {% for hour in hourly_forecast %}
+            {% set temp = hour.temperature | float %}
+            {% set time = hour.datetime %}
+            {% set local_time = (time | as_timestamp | timestamp_custom('%Y-%m-%d %H:%M', true)) %}
+            {% set usage = get_hp_usage(temp) | float(0) %}
+            {% set hp.value = hp.value + [{'local_time': local_time, 'time': time, 'temp': temp, 'usage': usage}] %}
+          {% endfor %}
+
+          {{ hp.value }}
+    - name: "Weather forecast"
+      unique_id: weather_forecast
+      state: "{{ states('weather.forecast_home') }}"
+      attributes:
+        forecast_data: "{{ weather_response['weather.forecast_home'].forecast }}"
+        heat_pump_estimation: >
+          {% from 'heat_pump.jinja' import get_heat_pump_energy %}
+          {%- set hourly_forecast = forecast_data -%}
+          {%- set hours = namespace(value=[]) -%}
+
+          {% for hour in hourly_forecast %}
+            {% set temp = hour.temperature | float %}
+            {% set time = hour.datetime %}
+            {% set local_time = (time | as_timestamp | timestamp_custom('%Y-%m-%d %H:%M', true)) %}
+            {% set usage = get_heat_pump_energy(temp) | float(0) %}
+            {% set hours.value = hours.value + [{'local_time': local_time, 'time': time, 'temp': temp, 'usage': usage}] %}
+          {% endfor %}
+
+          {{ hours.value }}
+
+- sensor:
+    - unique_id: current_rce_price
+      name: "Current RCE Price"
+      state: >
+        {% set current_hour = now().hour %}
+        {% set prices = state_attr('sensor.rce_prices_today', 'value') %}
+        {% if prices is iterable %}
+          {% set current_hour_index = current_hour * 4 %}
+          {% set data = prices[current_hour_index:current_hour_index + 4] %}
+          {{ [(data | map(attribute='rce_pln') | sum / data | length / 1000) | round(2), 0] | max }}
+        {% else %}
+          {{ none }}
+        {% endif %}
+      unit_of_measurement: "PLN/kWh"
+      device_class: "monetary"
+
+- sensor:
+    - unique_id: forecast_energy_production_today
+      name: "Forecast energy production today"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state: >
+        {{ 
+          states('sensor.energy_production_today') | float(0) +
+          states('sensor.energy_production_today_2') | float(0) +
+          states('sensor.energy_production_today_3') | float(0) 
+        }}
+
+- sensor:
+    - unique_id: forecast_energy_production_tomorrow
+      name: Forecast energy production tomorrow
+      unit_of_measurement: kWh
+      device_class: energy
+      state: >
+        {{ 
+          states('sensor.energy_production_tomorrow') | float(0) +
+          states('sensor.energy_production_tomorrow_2') | float(0) +
+          states('sensor.energy_production_tomorrow_3') | float(0)
+        }}

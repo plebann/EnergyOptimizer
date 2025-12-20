@@ -1,0 +1,46 @@
+{% set ns = namespace(total=0) %}
+{{state_attr('weather.forecast_home', 'forecast')}}   
+{# Get weather forecast for next 24 hours #}
+{% for i in range(24) %}
+  {% set forecast_temp = state_attr('weather.forecast_home', 'forecast')[i].temperature | float(10) %}
+  
+  {# Calculate hours of data we have (approximate) #}
+  {% set collection_days = 14 %}  {# Adjust as your data grows #}
+  {% set hours_collected = collection_days * 24 %}
+  
+  {# Map temperature to historical hourly consumption rate #}
+  {% if forecast_temp >= 15 %}
+    {% set total_kwh = states('sensor.heat_pump_by_temperature_above_15') | float(0) %}
+  {% elif forecast_temp >= 12 %}
+    {% set total_kwh = states('sensor.heat_pump_by_temperature_temp_12_to_15') | float(0) %}
+  {% elif forecast_temp >= 9 %}
+    {% set total_kwh = states('sensor.heat_pump_by_temperature_temp_9_to_12') | float(0) %}
+  {% elif forecast_temp >= 6 %}
+    {% set total_kwh = states('sensor.heat_pump_by_temperature_temp_6_to_9') | float(0) %}
+  {% elif forecast_temp >= 3 %}
+    {% set total_kwh = states('sensor.heat_pump_by_temperature_temp_3_to_6') | float(0) %}
+  {% elif forecast_temp >= 0 %}
+    {% set total_kwh = states('sensor.heat_pump_by_temperature_temp_0_to_3') | float(0) %}
+  {% elif forecast_temp >= -3 %}
+    {% set total_kwh = states('sensor.heat_pump_by_temperature_temp_minus_3_to_0') | float(0) %}
+  {% elif forecast_temp >= -6 %}
+    {% set total_kwh = states('sensor.heat_pump_by_temperature_temp_minus_6_to_minus_3') | float(0) %}
+  {% elif forecast_temp >= -9 %}
+    {% set total_kwh = states('sensor.heat_pump_by_temperature_temp_minus_9_to_minus_6') | float(0) %}
+  {% elif forecast_temp >= -12 %}
+    {% set total_kwh = states('sensor.heat_pump_by_temperature_temp_minus_12_to_minus_9') | float(0) %}
+  {% else %}
+    {% set total_kwh = states('sensor.heat_pump_by_temperature_below_minus_12') | float(0) %}
+  {% endif %}
+  
+  {# Calculate hourly rate from total accumulated data #}
+  {% if total_kwh > 0 and hours_collected > 0 %}
+    {% set hourly_rate = total_kwh / hours_collected %}
+  {% else %}
+    {% set hourly_rate = 0 %}
+  {% endif %}
+  
+  {% set ns.total = ns.total + hourly_rate %}
+{% endfor %}
+
+{{ ns.total | round(2) }}

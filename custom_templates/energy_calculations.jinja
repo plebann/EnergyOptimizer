@@ -1,0 +1,180 @@
+{% macro calculate_usage_ratio() %}
+  {% from 'energy_config.jinja' import get_sensor_config %}
+  {% set get_sensor_config = get_sensor_config | as_function %}
+  {% set sensors = get_sensor_config() %}
+  
+  {% set current_usage = states(sensors.load_usage_daily) | float %}
+  {% set hp_usage = states(sensors.hp_usage_daily) | float(0) %}
+  {% set hours_passed = ((now().hour * 60 + now().minute) / 60) | round(2) %}
+  {% set today_usage_rate = (current_usage - hp_usage) / hours_passed %}
+  {% set avg_usage_rate = state_attr(sensors.load_usage_history, 'hourly_rate') | float(0) %}
+  
+  {% if today_usage_rate > avg_usage_rate %}
+    {{ today_usage_rate / avg_usage_rate }}
+  {% else %}
+    {{ 1.0 }}
+  {% endif %}
+{% endmacro %}
+
+{% macro calculate_battery_reserve() %}
+  {% from 'energy_config.jinja' import get_battery_config, get_sensor_config %}
+  {% set get_battery_config = get_battery_config | as_function %}
+  {% set get_sensor_config = get_sensor_config | as_function %}
+  {% set config = get_battery_config() %}
+  {% set sensors = get_sensor_config() %}
+  
+  {% set current_soc = states(sensors.battery_soc_sensor) | int %}
+  {% set soc = [current_soc - config.min_soc, 0] | max %}
+  {{ soc * config.battery_capacity * config.efficiency / 100 }}
+{% endmacro %}
+
+{% macro calculate_battery_space() %}
+  {% from 'energy_config.jinja' import get_battery_config, get_sensor_config %}
+  {% set get_battery_config = get_battery_config | as_function %}
+  {% set get_sensor_config = get_sensor_config | as_function %}
+  {% set config = get_battery_config() %}
+  {% set sensors = get_sensor_config() %}
+  
+  {% set space_soc = 100 - states(sensors.battery_soc_sensor) | int %}
+  {{ space_soc * config.battery_capacity / config.efficiency / 100 }}
+{% endmacro %}
+
+{% macro calculate_required_energy(start_hour, end_hour, include_tomorrow=false) %}
+  {% from 'usage.jinja' import get_hourly_rates %}
+  {% from 'energy_config.jinja' import get_battery_config, get_sensor_config %}
+  {% from 'heat_pump.jinja' import get_heat_pump_estimation %}
+  {% set get_battery_config = get_battery_config | as_function %}
+  {% set get_sensor_config = get_sensor_config | as_function %}
+  {% set config = get_battery_config() %}
+  {% set sensors = get_sensor_config() %}
+  
+  {% set get_hourly_rates = get_hourly_rates | as_function %}
+  {% set hourly_rates = get_hourly_rates() %}
+  {% if include_tomorrow %}
+    {% set remaining_hours = hourly_rates[:end_hour] + hourly_rates[start_hour:] %}
+  {% else %}
+    {% set remaining_hours = hourly_rates[start_hour:end_hour] %}
+  {% endif %}
+
+  {% set usage_ratio = calculate_usage_ratio() | float %}
+  {% set required_kwh = (remaining_hours | sum) * usage_ratio * config.safety_factor %}
+  {% set avg_losses = state_attr(sensors.inverter_losses_history, 'hourly_rate') | float(0) %}
+  {% set losses = (remaining_hours | count) * avg_losses * config.safety_factor %}
+  {% set hp_usage = get_heat_pump_estimation(start_hour, end_hour, include_tomorrow) | float() %}
+  
+  {{ required_kwh + losses + hp_usage }}
+{% endmacro %}
+
+{% macro calculate_required_energy_suffiency(start_hour, end_hour, include_tomorrow=false, forecast_attribute='detailedHourly') %}
+  {% from 'energy_config.jinja' import get_battery_config, get_sensor_config %}
+  {% from 'heat_pump.jinja' import get_heat_pump_hour_usage %}
+  {% from 'usage.jinja' import get_hourly_rates %}
+  {% set get_battery_config = get_battery_config | as_function %}
+  {% set get_sensor_config = get_sensor_config | as_function %}
+  {% set config = get_battery_config() %}
+  {% set sensors = get_sensor_config() %}
+  {% set usage_ratio = calculate_usage_ratio() | float %}
+  {% set get_hourly_rates = get_hourly_rates | as_function %}
+  {% set hourly_rates = get_hourly_rates() %}
+  {% set forecast_today = state_attr(sensors.pv_forecast_today, forecast_attribute) %}
+  {% set avg_losses_rate = state_attr('sensor.inverter_total_losses_history', 'hourly_rate') | float(0) %}
+  {% set pv = namespace(value=0) %}
+  {% set kwh = namespace(value=0) %}
+  {% set sufficiency_hour = namespace(value=-1) %}
+  {% if forecast_today %}
+    {% for forecast in forecast_today %}
+      {% set forecast_hour = forecast.period_start.hour %}
+      {% if start_hour <= forecast_hour < end_hour %}
+        {% set pv_estimation = forecast.pv_estimate * config.efficiency %}
+        {% set consumption = (hourly_rates[forecast_hour] * usage_ratio + get_heat_pump_hour_usage(forecast_hour) | float(0) + avg_losses_rate) * config.safety_factor %}
+        {% if sufficiency_hour.value == -1 %}
+          {% if pv_estimation > consumption %}
+            {% set sufficiency_hour.value = forecast_hour %}
+            {% break %}
+          {% endif %}
+          {% set pv.value = pv.value + pv_estimation %}
+          {% set kwh.value = kwh.value + consumption %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+  {{ kwh.value - pv.value }}
+{% endmacro %}
+
+{% macro calculate_pv_forecast(start_hour, end_hour, include_tomorrow=false, forecast_attribute='detailedHourly') %}
+  {% from 'energy_config.jinja' import get_battery_config, get_sensor_config %}
+  {% set get_battery_config = get_battery_config | as_function %}
+  {% set get_sensor_config = get_sensor_config | as_function %}
+  {% set config = get_battery_config() %}
+  {% set sensors = get_sensor_config() %}
+  
+  {% set pv_total = namespace(value=0) %}
+  {% set forecast_today = state_attr(sensors.pv_forecast_today, forecast_attribute) %}
+  {% if forecast_today %}
+    {% for forecast in forecast_today %}
+      {% set forecast_hour = as_datetime(forecast.period_start).astimezone(now().tzinfo).hour %}
+      {% if include_tomorrow %}
+        {% if start_hour <= forecast_hour %}
+          {% set pv_total.value = pv_total.value + forecast.pv_estimate %}
+        {% endif %}
+      {% else %}
+        {% if start_hour <= forecast_hour < end_hour %}
+          {% set pv_total.value = pv_total.value + forecast.pv_estimate %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+  {% if include_tomorrow %}
+    {% set forecast_tomorrow = state_attr('sensor.solcast_pv_forecast_forecast_tomorrow', forecast_attribute) %}
+    {% if forecast_tomorrow %}
+      {% for forecast in forecast_tomorrow %}
+        {% set forecast_hour = as_datetime(forecast.period_start).astimezone(now().tzinfo).hour %}
+        {% if end_hour > forecast_hour %}
+          {% set pv_total.value = pv_total.value + forecast.pv_estimate %}
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+  {% endif %}
+  {{ pv_total.value * config.efficiency }}
+{% endmacro %}
+
+{% macro deficite_to_soc(kwh) %}
+  {% from 'energy_config.jinja' import get_battery_config, get_sensor_config %}
+  {% set get_battery_config = get_battery_config | as_function %}
+  {% set get_sensor_config = get_sensor_config | as_function %}
+  {% set config = get_battery_config() %}
+  {% set sensors = get_sensor_config() %}
+  {% set current_soc = states(sensors.battery_soc_sensor) | int %}
+  {% if kwh > 0 %}
+    {% set target_soc = (100 * kwh / config.battery_capacity + current_soc) | round + 1 %}
+    {{ [target_soc, 100] | min }}
+  {% else %}
+    {{ [current_soc, 15] | max }}
+  {% endif %}
+{% endmacro %}
+
+{% macro surplus_to_soc(kwh) %}
+  {% from 'energy_config.jinja' import get_battery_config, get_sensor_config %}
+  {% set get_battery_config = get_battery_config | as_function %}
+  {% set get_sensor_config = get_sensor_config | as_function %}
+  {% set config = get_battery_config() %} 
+  {% set sensors = get_sensor_config() %}
+  {% set current_soc = states(sensors.battery_soc_sensor) | int %}
+  {% if kwh > 0 %}
+    {{ [current_soc - (100 * kwh / config.battery_capacity | float) | int, config.min_soc | int] | max }}
+  {% else %}
+    {{ current_soc }}
+  {% endif %}
+{% endmacro %}
+
+{% macro soc_to_kwh(target_soc) %}
+  {% from 'energy_config.jinja' import get_battery_config, get_sensor_config %}
+  {% set get_battery_config = get_battery_config | as_function %}
+  {% set get_sensor_config = get_sensor_config | as_function %}
+  {% set config = get_battery_config() %}
+  {% set sensors = get_sensor_config() %}
+  
+  {% set current_soc = states(sensors.battery_soc_sensor) | int %}
+  {% set soc_delta = target_soc - current_soc %}
+  {{ soc_delta * config.battery_capacity / 100 }}
+{% endmacro %}

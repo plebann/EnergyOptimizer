@@ -1,0 +1,35 @@
+{% from 'energy_calculations.jinja' import calculate_required_energy, calculate_battery_reserve, calculate_pv_forecast, calculate_required_energy_suffiency %}
+{% from 'energy_config.jinja' import get_battery_config, get_sensor_config %}
+
+{% macro calculate_morning_charge_soc() %}
+  {% set get_battery_config = get_battery_config | as_function %}
+  {% set get_sensor_config = get_sensor_config | as_function %}
+  {% set config = get_battery_config() %}
+  {% set sensors = get_sensor_config() %}
+  {% set tarrif_start = 6 %}
+  {% set tariff_end = today_at(states('input_datetime.low_tarrif_start')).hour %}
+  
+  {% set required = calculate_required_energy(tarrif_start, tariff_end) | float %}
+  {% set battery_reserve = calculate_battery_reserve() | float %}
+  {% set pv_forecast = calculate_pv_forecast(tarrif_start, tariff_end) | float %}
+  
+  {% set deficit = required - battery_reserve - pv_forecast %}
+  {% set sufficiency_deficit = calculate_required_energy_suffiency(tarrif_start, tariff_end) | float - battery_reserve %}
+  {{ [deficit, sufficiency_deficit] | max }}
+{% endmacro %}
+
+{% macro calculate_afternoon_charge_soc() %}
+  {% set get_battery_config = get_battery_config | as_function %}
+  {% set get_sensor_config = get_sensor_config | as_function %}
+  {% set config = get_battery_config() %}
+  {% set sensors = get_sensor_config() %}
+  {% set tariff_start = today_at(states(sensors.low_tarrif_end)).hour %}
+  {% set tariff_end = 22 %}
+  
+  {% set required = calculate_required_energy(tariff_start, tariff_end) | float %}
+  {% set battery_reserve = calculate_battery_reserve() | float %}
+  {% set pv_forecast = states(sensors.pv_forecast_remaining) | float(0) * config.efficiency %}
+
+  {% set deficit = required - battery_reserve - pv_forecast %}
+  {{ deficit }}
+{% endmacro %}
