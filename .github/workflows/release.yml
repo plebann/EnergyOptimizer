@@ -13,9 +13,13 @@ on:
           - minor
           - major
 
+run-name: Create Release ${{ github.event.inputs.version_increment || 'patch' }} → v${{ needs.release.outputs.new_version || '...' }}
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.next_version.outputs.new_version }}
     permissions:
       contents: write
     
@@ -61,6 +65,11 @@ jobs:
           echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
           echo "new_tag=v${NEW_VERSION}" >> $GITHUB_OUTPUT
           echo "Next version: ${NEW_VERSION}"
+      
+      - name: Update workflow run name
+        run: |
+          echo "::notice title=Release Version::Creating release v${{ steps.next_version.outputs.new_version }}"
+          echo "RELEASE_VERSION=${{ steps.next_version.outputs.new_version }}" >> $GITHUB_ENV
       
       - name: Update manifest.json
         run: |
