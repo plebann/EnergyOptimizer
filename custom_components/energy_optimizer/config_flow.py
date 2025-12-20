@@ -548,7 +548,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        self._config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -557,7 +557,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             # Update config entry
             self.hass.config_entries.async_update_entry(
-                self.config_entry, data={**self.config_entry.data, **user_input}
+                self._config_entry, data={**self._config_entry.data, **user_input}
             )
             return self.async_create_entry(title="", data={})
 
@@ -566,15 +566,15 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
             {
                 vol.Optional(
                     CONF_MIN_SOC,
-                    default=self.config_entry.data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC),
+                    default=self._config_entry.data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC),
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
                 vol.Optional(
                     CONF_MAX_SOC,
-                    default=self.config_entry.data.get(CONF_MAX_SOC, DEFAULT_MAX_SOC),
+                    default=self._config_entry.data.get(CONF_MAX_SOC, DEFAULT_MAX_SOC),
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
                 vol.Optional(
                     CONF_BATTERY_EFFICIENCY,
-                    default=self.config_entry.data.get(
+                    default=self._config_entry.data.get(
                         CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY
                     ),
                 ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
