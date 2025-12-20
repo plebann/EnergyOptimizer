@@ -416,8 +416,8 @@ async def async_register_services(hass: HomeAssistant) -> None:
             CONF_BALANCING_PV_THRESHOLD,
             CONF_BATTERY_SOC_SENSOR,
             CONF_MAX_CHARGE_CURRENT_ENTITY,
-            CONF_PROGRAM_MORNING_SOC_ENTITY,
-            CONF_PROGRAM_NIGHT_SOC_ENTITY,
+            CONF_PROG1_SOC_ENTITY,
+            CONF_PROG6_SOC_ENTITY,
             CONF_PV_FORECAST_TOMORROW,
             DEFAULT_BALANCING_INTERVAL_DAYS,
             DEFAULT_BALANCING_PV_THRESHOLD,
@@ -499,27 +499,27 @@ async def async_register_services(hass: HomeAssistant) -> None:
             )
 
             # Set program SOC targets to 100%
-            program_morning_soc = config.get(CONF_PROGRAM_MORNING_SOC_ENTITY)
-            program_night_soc = config.get(CONF_PROGRAM_NIGHT_SOC_ENTITY)
+            prog1_soc = config.get(CONF_PROG1_SOC_ENTITY)
+            prog6_soc = config.get(CONF_PROG6_SOC_ENTITY)
             max_charge_current = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
 
-            if program_morning_soc:
+            if prog1_soc:
                 await hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": program_morning_soc, "value": 100},
+                    {"entity_id": prog1_soc, "value": 100},
                     blocking=True,
                 )
-                _LOGGER.debug("Set %s to 100%%", program_morning_soc)
+                _LOGGER.debug("Set %s to 100%%", prog1_soc)
 
-            if program_night_soc:
+            if prog6_soc:
                 await hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": program_night_soc, "value": 100},
+                    {"entity_id": prog6_soc, "value": 100},
                     blocking=True,
                 )
-                _LOGGER.debug("Set %s to 100%%", program_night_soc)
+                _LOGGER.debug("Set %s to 100%%", prog6_soc)
 
             if max_charge_current:
                 await hass.services.async_call(
@@ -608,28 +608,28 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 battery_space,
             )
 
-            program_morning_soc = config.get(CONF_PROGRAM_MORNING_SOC_ENTITY)
-            program_night_soc = config.get(CONF_PROGRAM_NIGHT_SOC_ENTITY)
+            prog1_soc = config.get(CONF_PROG1_SOC_ENTITY)
+            prog6_soc = config.get(CONF_PROG6_SOC_ENTITY)
 
             # Lock battery at current SOC to avoid inefficient charge/discharge cycles
             # When tomorrow's PV is too low to justify battery usage today
-            if program_morning_soc:
+            if prog1_soc:
                 await hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": program_morning_soc, "value": current_soc},
+                    {"entity_id": prog1_soc, "value": current_soc},
                     blocking=True,
                 )
-                _LOGGER.debug("Set %s to %.1f%% (current SOC)", program_morning_soc, current_soc)
+                _LOGGER.debug("Set %s to %.1f%% (current SOC)", prog1_soc, current_soc)
 
-            if program_night_soc:
+            if prog6_soc:
                 await hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": program_night_soc, "value": current_soc},
+                    {"entity_id": prog6_soc, "value": current_soc},
                     blocking=True,
                 )
-                _LOGGER.debug("Set %s to %.1f%% (current SOC)", program_night_soc, current_soc)
+                _LOGGER.debug("Set %s to %.1f%% (current SOC)", prog6_soc, current_soc)
 
             # Log to optimization sensors
             if "last_optimization_sensor" in hass.data[DOMAIN][entry.entry_id]:
@@ -670,48 +670,48 @@ async def async_register_services(hass: HomeAssistant) -> None:
 
         # SCENARIO 3: Normal Operation Restoration
         _LOGGER.debug("Preservation not needed - checking normal operation restoration")
-        program_night_soc = config.get(CONF_PROGRAM_NIGHT_SOC_ENTITY)
+        prog6_soc = config.get(CONF_PROG6_SOC_ENTITY)
         min_soc = config.get("min_soc", 15)
 
-        current_program_night_soc = None
-        if program_night_soc:
-            night_soc_state = hass.states.get(program_night_soc)
-            if night_soc_state and night_soc_state.state not in ("unknown", "unavailable"):
+        current_prog6_soc = None
+        if prog6_soc:
+            prog6_state = hass.states.get(prog6_soc)
+            if prog6_state and prog6_state.state not in ("unknown", "unavailable"):
                 try:
-                    current_program_night_soc = float(night_soc_state.state)
+                    current_prog6_soc = float(prog6_state.state)
                 except (ValueError, TypeError) as err:
-                    _LOGGER.warning("Could not parse program night SOC: %s", err)
+                    _LOGGER.warning("Could not parse prog6 SOC: %s", err)
 
         if (
-            current_program_night_soc is not None
-            and current_program_night_soc > min_soc
+            current_prog6_soc is not None
+            and current_prog6_soc > min_soc
             and not (pv_with_efficiency < battery_space)
         ):
             _LOGGER.info(
                 "Restoring normal operation (current: %.0f%%, restoring to: %.0f%%)",
-                current_program_night_soc,
+                current_prog6_soc,
                 min_soc,
             )
 
-            program_morning_soc = config.get(CONF_PROGRAM_MORNING_SOC_ENTITY)
+            prog1_soc = config.get(CONF_PROG1_SOC_ENTITY)
 
-            if program_morning_soc:
+            if prog1_soc:
                 await hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": program_morning_soc, "value": min_soc},
+                    {"entity_id": prog1_soc, "value": min_soc},
                     blocking=True,
                 )
-                _LOGGER.debug("Set %s to %.0f%%", program_morning_soc, min_soc)
+                _LOGGER.debug("Set %s to %.0f%%", prog1_soc, min_soc)
 
-            if program_night_soc:
+            if prog6_soc:
                 await hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": program_night_soc, "value": min_soc},
+                    {"entity_id": prog6_soc, "value": min_soc},
                     blocking=True,
                 )
-                _LOGGER.debug("Set %s to %.0f%%", program_night_soc, min_soc)
+                _LOGGER.debug("Set %s to %.0f%%", prog6_soc, min_soc)
 
             # Log to optimization sensors
             if "last_optimization_sensor" in hass.data[DOMAIN][entry.entry_id]:
@@ -719,7 +719,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 opt_sensor.log_optimization(
                     "Normal Operation Restored",
                     {
-                        "previous_soc": round(current_program_night_soc, 1),
+                        "previous_soc": round(current_prog6_soc, 1),
                         "restored_to_soc": min_soc,
                         "pv_forecast_kwh": round(pv_forecast, 2),
                     },
@@ -729,7 +729,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 hist_sensor.add_entry(
                     "Normal Operation",
                     {
-                        "previous": f"{current_program_night_soc:.0f}%",
+                        "previous": f"{current_prog6_soc:.0f}%",
                         "restored_to": f"{min_soc:.0f}%",
                         "reason": "PV within normal range",
                     },
