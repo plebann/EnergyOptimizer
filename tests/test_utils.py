@@ -1,5 +1,4 @@
 """Tests for utility functions."""
-import pytest
 
 from custom_components.energy_optimizer.calculations.utils import (
     clamp,

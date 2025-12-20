@@ -28,7 +28,6 @@ from .calculations.heat_pump import estimate_daily_consumption
 from .const import (
     CONF_BATTERY_CAPACITY_AH,
     CONF_BATTERY_EFFICIENCY,
-    CONF_BATTERY_POWER_SENSOR,
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
     CONF_COP_CURVE,
