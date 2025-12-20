@@ -141,13 +141,16 @@ def get_active_program_entity(
             
         try:
             # Extract time from entity state
-            # input_datetime entities can have date+time or just time
-            # sensor entities should have time in HH:MM or HH:MM:SS format
+            # time domain entities (Solarman): "HH:MM:SS"
+            # input_datetime entities: "HH:MM:SS" or ISO datetime with T
+            # sensor entities: "HH:MM" or "HH:MM:SS"
             time_value = time_state.state
             
             if not time_value or time_value in ("unknown", "unavailable"):
                 _LOGGER.warning("Time entity %s has invalid state: %s", start_time_entity_id, time_value)
                 continue
+            
+            _LOGGER.debug("Parsing time from %s: %s (domain: %s)", start_time_entity_id, time_value, time_state.domain)
             
             # Parse time string (handle HH:MM or HH:MM:SS format)
             # Also handle datetime strings by extracting just the time portion
@@ -155,16 +158,20 @@ def get_active_program_entity(
                 # ISO datetime format, extract time portion
                 time_value = time_value.split("T")[1].split("+")[0].split("-")[0]
             
+            # Strip any whitespace
+            time_value = str(time_value).strip()
+            
             time_parts = time_value.split(":")
             if len(time_parts) >= 2:
                 start_dt = dt_time(int(time_parts[0]), int(time_parts[1]))
+                _LOGGER.debug("Successfully parsed time for %s: %s -> %s", soc_key, time_value, start_dt)
             else:
-                _LOGGER.warning("Invalid time format for %s: %s", start_time_entity_id, time_value)
+                _LOGGER.warning("Invalid time format for %s: %s (expected HH:MM or HH:MM:SS)", start_time_entity_id, time_value)
                 continue
                 
             configured_programs.append((soc_entity, start_dt))
         except (ValueError, AttributeError, IndexError) as err:
-            _LOGGER.warning("Error parsing time from entity %s: %s", start_time_entity_id, err)
+            _LOGGER.error("Error parsing time from entity %s (state: %s): %s", start_time_entity_id, time_value, err)
             continue
     
     if not configured_programs:

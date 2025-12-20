@@ -265,37 +265,37 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG1_TIME_START): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_PROG2_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG2_TIME_START): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_PROG3_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG3_TIME_START): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_PROG4_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG4_TIME_START): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_PROG5_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG5_TIME_START): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_PROG6_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG6_TIME_START): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
             }
         )
@@ -588,7 +588,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     CONF_PROG1_TIME_START,
                     default=self._config_entry.data.get(CONF_PROG1_TIME_START),
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 # Program 2
                 vol.Optional(
@@ -601,7 +601,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     CONF_PROG2_TIME_START,
                     default=self._config_entry.data.get(CONF_PROG2_TIME_START),
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 # Program 3
                 vol.Optional(
@@ -614,7 +614,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     CONF_PROG3_TIME_START,
                     default=self._config_entry.data.get(CONF_PROG3_TIME_START),
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 # Program 4
                 vol.Optional(
@@ -627,7 +627,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     CONF_PROG4_TIME_START,
                     default=self._config_entry.data.get(CONF_PROG4_TIME_START),
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 # Program 5
                 vol.Optional(
@@ -640,7 +640,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     CONF_PROG5_TIME_START,
                     default=self._config_entry.data.get(CONF_PROG5_TIME_START),
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 # Program 6
                 vol.Optional(
@@ -653,7 +653,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     CONF_PROG6_TIME_START,
                     default=self._config_entry.data.get(CONF_PROG6_TIME_START),
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
             }
         )
