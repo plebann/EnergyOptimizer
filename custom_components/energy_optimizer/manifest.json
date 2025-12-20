@@ -7,6 +7,6 @@
   "issue_tracker": "https://github.com/plebann/EnergyOptimizer/issues",
   "iot_class": "calculated",
   "requirements": [],
-  "version": "0.0.12",
+  "version": "0.0.13",
   "after_dependencies": ["rce_pse", "solarman", "solcast_solar"]
 }
