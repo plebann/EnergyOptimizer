@@ -575,9 +575,9 @@ async def async_register_services(hass: HomeAssistant) -> None:
         )
 
         # SCENARIO 2: Battery Preservation Mode
-        if pv_with_efficiency > battery_space:
+        if pv_with_efficiency < battery_space:
             _LOGGER.info(
-                "Activating battery preservation mode (PV %.2f kWh > space %.2f kWh)",
+                "Activating battery preservation mode (PV %.2f kWh < space %.2f kWh)",
                 pv_with_efficiency,
                 battery_space,
             )
@@ -585,7 +585,8 @@ async def async_register_services(hass: HomeAssistant) -> None:
             program_morning_soc = config.get(CONF_PROGRAM_MORNING_SOC_ENTITY)
             program_night_soc = config.get(CONF_PROGRAM_NIGHT_SOC_ENTITY)
 
-            # Set targets to current SOC to prevent discharge
+            # Lock battery at current SOC to avoid inefficient charge/discharge cycles
+            # When tomorrow's PV is too low to justify battery usage today
             if program_morning_soc:
                 await hass.services.async_call(
                     "number",
@@ -624,7 +625,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                         "pv_forecast": f"{pv_forecast:.1f} kWh",
                         "battery_space": f"{battery_space:.1f} kWh",
                         "locked_at": f"{current_soc:.0f}%",
-                        "reason": f"PV surplus exceeds space ({pv_with_efficiency:.1f} > {battery_space:.1f})",
+                        "reason": f"PV too low for battery space ({pv_with_efficiency:.1f} < {battery_space:.1f})",
                     },
                 )
 
@@ -658,7 +659,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
         if (
             current_program_night_soc is not None
             and current_program_night_soc > min_soc
-            and not (pv_with_efficiency > battery_space)
+            and not (pv_with_efficiency < battery_space)
         ):
             _LOGGER.info(
                 "Restoring normal operation (current: %.0f%%, restoring to: %.0f%%)",
