@@ -36,7 +36,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Energy Optimizer from a config entry."""
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = entry.data
+    hass.data[DOMAIN].setdefault(entry.entry_id, {})
 
     # Forward entry setup to sensor platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -63,7 +63,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Store removal callback for cleanup
     if "listeners" not in hass.data[DOMAIN][entry.entry_id]:
-        hass.data[DOMAIN][entry.entry_id] = {"listeners": []}
+        hass.data[DOMAIN][entry.entry_id]["listeners"] = []
     hass.data[DOMAIN][entry.entry_id]["listeners"].append(remove_listener)
 
     _LOGGER.info("Energy Optimizer: Automatic 22:00 schedule optimization enabled")
@@ -401,15 +401,19 @@ async def async_register_services(hass: HomeAssistant) -> None:
         config = entry.data
 
         # Get sensor reference from hass.data
+        last_balancing_sensor = None
         if (
-            DOMAIN not in hass.data
-            or entry.entry_id not in hass.data[DOMAIN]
-            or "last_balancing_sensor" not in hass.data[DOMAIN][entry.entry_id]
+            DOMAIN in hass.data
+            and entry.entry_id in hass.data[DOMAIN]
+            and isinstance(hass.data[DOMAIN][entry.entry_id], dict)
+            and "last_balancing_sensor" in hass.data[DOMAIN][entry.entry_id]
         ):
-            _LOGGER.error("Last balancing sensor not initialized")
-            return
-
-        last_balancing_sensor = hass.data[DOMAIN][entry.entry_id]["last_balancing_sensor"]
+            last_balancing_sensor = hass.data[DOMAIN][entry.entry_id]["last_balancing_sensor"]
+        else:
+            _LOGGER.warning(
+                "Last balancing sensor not yet initialized. "
+                "Balancing timestamp will not be updated this run."
+            )
 
         # Read configuration
         balancing_interval_days = config.get(
@@ -495,7 +499,10 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 _LOGGER.debug("Set %s to 23A", max_charge_current)
 
             # Update balancing timestamp
-            last_balancing_sensor.update_balancing_timestamp()
+            if last_balancing_sensor:
+                last_balancing_sensor.update_balancing_timestamp()
+            else:
+                _LOGGER.warning("Cannot update balancing timestamp - sensor not available")
 
             # Log to optimization sensors
             if "last_optimization_sensor" in hass.data[DOMAIN][entry.entry_id]:
