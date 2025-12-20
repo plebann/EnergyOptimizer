@@ -16,6 +16,7 @@ from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.restore_state import ExtraStoredData
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
@@ -93,7 +94,18 @@ async def async_setup_entry(
     )
     sensors.append(last_balancing_sensor)
 
-    # Store sensor reference for service access
+    # Add optimization tracking sensors
+    last_optimization_sensor = LastOptimizationSensor(
+        coordinator, config_entry, config
+    )
+    sensors.append(last_optimization_sensor)
+
+    optimization_history_sensor = OptimizationHistorySensor(
+        coordinator, config_entry, config
+    )
+    sensors.append(optimization_history_sensor)
+
+    # Store sensor references for service access
     if DOMAIN not in hass.data:
         hass.data[DOMAIN] = {}
     if config_entry.entry_id not in hass.data[DOMAIN]:
@@ -101,6 +113,12 @@ async def async_setup_entry(
     hass.data[DOMAIN][config_entry.entry_id][
         "last_balancing_sensor"
     ] = last_balancing_sensor
+    hass.data[DOMAIN][config_entry.entry_id][
+        "last_optimization_sensor"
+    ] = last_optimization_sensor
+    hass.data[DOMAIN][config_entry.entry_id][
+        "optimization_history_sensor"
+    ] = optimization_history_sensor
 
     async_add_entities(sensors)
 
@@ -443,6 +461,75 @@ class LastBalancingTimestampSensor(EnergyOptimizerSensor, RestoreSensor):
         _LOGGER.debug("Updated balancing timestamp to %s", timestamp)
 
 
+class OptimizationExtraStoredData(ExtraStoredData):
+    """Custom ExtraStoredData for LastOptimizationSensor."""
+
+    def __init__(
+        self,
+        native_value: datetime | None,
+        scenario: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        """Initialize the stored data."""
+        self.native_value = native_value
+        self.scenario = scenario
+        self.details = details or {}
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return dict representation."""
+        return {
+            "native_value": self.native_value.isoformat() if self.native_value else None,
+            "scenario": self.scenario,
+            "details": self.details,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> OptimizationExtraStoredData:
+        """Restore from dict."""
+        native_value = None
+        if data.get("native_value"):
+            native_value = datetime.fromisoformat(data["native_value"])
+        return cls(
+            native_value=native_value,
+            scenario=data.get("scenario"),
+            details=data.get("details", {}),
+        )
+
+
+class HistoryExtraStoredData(ExtraStoredData):
+    """Custom ExtraStoredData for OptimizationHistorySensor."""
+
+    def __init__(
+        self,
+        native_value: str,
+        history: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Initialize the stored data."""
+        self.native_value = native_value
+        self.history = history or []
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return dict representation."""
+        return {
+            "native_value": self.native_value,
+            "history": self.history,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> HistoryExtraStoredData:
+        """Restore from dict."""
+        history = data.get("history", [])
+        # Validate history entries
+        if not isinstance(history, list):
+            history = []
+        # Keep only last 50 entries during restoration
+        history = history[-50:] if len(history) > 50 else history
+        return cls(
+            native_value=data.get("native_value", "No optimizations yet"),
+            history=history,
+        )
+
+
 class LastOptimizationSensor(EnergyOptimizerSensor, RestoreSensor):
     """Sensor tracking last optimization run and decision."""
 
@@ -457,14 +544,22 @@ class LastOptimizationSensor(EnergyOptimizerSensor, RestoreSensor):
         """Restore last state on startup."""
         await super().async_added_to_hass()
 
-        # Restore previous timestamp and attributes
-        if (restored_data := await self.async_get_last_sensor_data()) is not None:
-            self._attr_native_value = restored_data.native_value
-            if restored_data.last_extra_data:
-                self._attr_extra_state_attributes = restored_data.last_extra_data
-            _LOGGER.debug(
-                "Restored last optimization: %s", self._attr_native_value
-            )
+        # Restore from custom ExtraStoredData
+        if (extra_data := await self.async_get_last_extra_data()) is not None:
+            if isinstance(extra_data, OptimizationExtraStoredData):
+                self._attr_native_value = extra_data.native_value
+                if extra_data.scenario:
+                    self._attr_extra_state_attributes = {
+                        "scenario": extra_data.scenario,
+                        **extra_data.details,
+                    }
+                _LOGGER.info(
+                    "Restored LastOptimizationSensor: %s (scenario: %s)",
+                    self._attr_native_value,
+                    extra_data.scenario,
+                )
+            else:
+                _LOGGER.warning("Unexpected extra data type for LastOptimizationSensor")
 
     @property
     def native_value(self) -> datetime | None:
@@ -475,6 +570,24 @@ class LastOptimizationSensor(EnergyOptimizerSensor, RestoreSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
         return self._attr_extra_state_attributes
+
+    @property
+    def extra_restore_state_data(self) -> OptimizationExtraStoredData | None:
+        """Return extra data to persist."""
+        if self._attr_native_value is None:
+            return None
+        scenario = self._attr_extra_state_attributes.get("scenario")
+        # Extract details (all attributes except scenario and timestamp_local)
+        details = {
+            k: v
+            for k, v in self._attr_extra_state_attributes.items()
+            if k not in ("scenario", "timestamp_local")
+        }
+        return OptimizationExtraStoredData(
+            native_value=self._attr_native_value,
+            scenario=scenario,
+            details=details,
+        )
 
     def log_optimization(self, scenario: str, details: dict[str, Any]) -> None:
         """Log an optimization run (called from service)."""
@@ -488,14 +601,39 @@ class LastOptimizationSensor(EnergyOptimizerSensor, RestoreSensor):
         _LOGGER.debug("Logged optimization: %s - %s", scenario, details)
 
 
-class OptimizationHistorySensor(EnergyOptimizerSensor):
+class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
     """Sensor showing recent optimization history as text."""
 
     _attr_name = "Optimization History"
     _attr_unique_id = "optimization_history"
     _attr_icon = "mdi:history"
     _attr_native_value: str = "No optimizations yet"
-    _history: list[dict[str, Any]] = []
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator,
+        config_entry: ConfigEntry,
+        config: dict[str, Any],
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, config_entry, config)
+        self._history: list[dict[str, Any]] = []
+
+    async def async_added_to_hass(self) -> None:
+        """Restore history on startup."""
+        await super().async_added_to_hass()
+
+        # Restore from custom ExtraStoredData
+        if (extra_data := await self.async_get_last_extra_data()) is not None:
+            if isinstance(extra_data, HistoryExtraStoredData):
+                self._attr_native_value = extra_data.native_value
+                self._history = extra_data.history
+                _LOGGER.info(
+                    "Restored OptimizationHistorySensor: %d entries",
+                    len(self._history),
+                )
+            else:
+                _LOGGER.warning("Unexpected extra data type for OptimizationHistorySensor")
 
     @property
     def native_value(self) -> str:
@@ -506,6 +644,16 @@ class OptimizationHistorySensor(EnergyOptimizerSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return full history in attributes."""
         return {"history": self._history[-10:]}  # Keep last 10 entries
+
+    @property
+    def extra_restore_state_data(self) -> HistoryExtraStoredData | None:
+        """Return extra data to persist."""
+        if not self._history:
+            return None
+        return HistoryExtraStoredData(
+            native_value=self._attr_native_value,
+            history=self._history,
+        )
 
     def add_entry(self, scenario: str, details: dict[str, Any]) -> None:
         """Add a new history entry."""
