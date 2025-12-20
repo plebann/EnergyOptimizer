@@ -21,10 +21,6 @@ def calculate_charge_current(
     if voltage == 0:
         return 0.0
     
-    # Calculate target SOC
-    target_soc_delta = kwh_to_soc(energy_kwh, capacity_ah, voltage)
-    target_soc = current_soc + target_soc_delta
-    
     # Use multi-phase logic
     return get_expected_current_multi_phase(energy_kwh, current_soc, capacity_ah, voltage)
 

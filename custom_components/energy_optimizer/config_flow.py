@@ -6,7 +6,6 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.const import CONF_NAME
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
@@ -22,7 +21,6 @@ from .const import (
     CONF_BATTERY_VOLTAGE_SENSOR,
     CONF_CHARGE_CURRENT_ENTITY,
     CONF_CHEAPEST_WINDOW_SENSOR,
-    CONF_COP_CURVE,
     CONF_DAILY_LOAD_SENSOR,
     CONF_DISCHARGE_CURRENT_ENTITY,
     CONF_ENABLE_HEAT_PUMP,
@@ -44,7 +42,6 @@ from .const import (
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
-    DEFAULT_COP_CURVE,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_SOC,
     DOMAIN,
