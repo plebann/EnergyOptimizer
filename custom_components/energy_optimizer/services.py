@@ -6,7 +6,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import ServiceCall
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 if TYPE_CHECKING:
