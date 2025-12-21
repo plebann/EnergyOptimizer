@@ -215,15 +215,15 @@ For Solarman-compatible inverters (DEYE/Sunsynk/SolArk) with multiple time-based
 # Then configure the programs:
 # Program 1 - Night charging (cheap electricity)
 prog1_soc_entity: number.deye_hybrid_prog1_capacity
-prog1_time_start: input_datetime.prog1_start  # Set to "22:00" in HA UI
+prog1_time_start_entity: input_datetime.prog1_start  # Set to "22:00" in HA UI
 
 # Program 2 - Morning (after cheap tariff)
 prog2_soc_entity: number.deye_hybrid_prog2_capacity
-prog2_time_start: input_datetime.prog2_start  # Set to "06:00" in HA UI
+prog2_time_start_entity: input_datetime.prog2_start  # Set to "06:00" in HA UI
 
 # Program 3 - Afternoon (peak solar)
 prog3_soc_entity: number.deye_hybrid_prog3_capacity
-prog3_time_start: input_datetime.prog3_start  # Set to "14:00" in HA UI
+prog3_time_start_entity: input_datetime.prog3_start  # Set to "14:00" in HA UI
 
 # Programs 4-6 can be configured similarly
 ```

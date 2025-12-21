@@ -40,7 +40,12 @@ from .const import (
     CONF_MIN_SOC,
     CONF_OUTSIDE_TEMP_SENSOR,
     CONF_PV_FORECAST_TODAY,
+    DEFAULT_BATTERY_CAPACITY_AH,
+    DEFAULT_BATTERY_EFFICIENCY,
+    DEFAULT_BATTERY_VOLTAGE,
     DEFAULT_COP_CURVE,
+    DEFAULT_MAX_SOC,
+    DEFAULT_MIN_SOC,
     DOMAIN,
     SENSOR_LAST_BALANCING_TIMESTAMP,
     UPDATE_INTERVAL_FAST,
@@ -71,6 +76,12 @@ async def async_setup_entry(
         BatterySpaceSensor(coordinator, config_entry, config),
         BatteryCapacitySensor(coordinator, config_entry, config),
         UsableCapacitySensor(coordinator, config_entry, config),
+        # Configuration value sensors
+        BatteryCapacityAhSensor(coordinator, config_entry, config),
+        BatteryVoltageSensor(coordinator, config_entry, config),
+        BatteryEfficiencySensor(coordinator, config_entry, config),
+        MinSocSensor(coordinator, config_entry, config),
+        MaxSocSensor(coordinator, config_entry, config),
     ]
 
     # Add energy balance sensors if daily load sensor configured
@@ -132,6 +143,16 @@ async def async_setup_entry(
             coordinator.async_set_updated_data(None)
 
         async_track_state_change_event(hass, [soc_sensor], _async_sensor_changed)
+
+    # Set up periodic balancing completion check (every 5 minutes)
+    from homeassistant.helpers.event import async_track_time_interval
+    from .services import check_and_update_balancing_completion
+    
+    async def _check_balancing(_now):
+        """Periodic check for balancing completion."""
+        await check_and_update_balancing_completion(hass, config_entry)
+    
+    async_track_time_interval(hass, _check_balancing, timedelta(minutes=5))
 
 
 class EnergyOptimizerSensor(SensorEntity):
@@ -435,6 +456,7 @@ class LastBalancingTimestampSensor(EnergyOptimizerSensor, RestoreSensor):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:battery-charging-100"
     _attr_native_value: datetime | None = None
+    _attr_extra_state_attributes: dict[str, Any] = {}
 
     async def async_added_to_hass(self) -> None:
         """Restore last state on startup."""
@@ -451,6 +473,11 @@ class LastBalancingTimestampSensor(EnergyOptimizerSensor, RestoreSensor):
     def native_value(self) -> datetime | None:
         """Return the last balancing timestamp."""
         return self._attr_native_value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        return self._attr_extra_state_attributes
 
     def update_balancing_timestamp(self, timestamp: datetime | None = None) -> None:
         """Update the balancing timestamp (called from service)."""
@@ -599,6 +626,82 @@ class LastOptimizationSensor(EnergyOptimizerSensor, RestoreSensor):
         }
         self.async_write_ha_state()
         _LOGGER.debug("Logged optimization: %s - %s", scenario, details)
+
+
+class BatteryCapacityAhSensor(EnergyOptimizerSensor):
+    """Sensor showing configured battery capacity in Ah."""
+
+    _attr_name = "Battery Capacity (Ah)"
+    _attr_unique_id = "battery_capacity_ah"
+    _attr_icon = "mdi:battery-settings"
+    _attr_native_unit_of_measurement = "Ah"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self) -> float:
+        """Return the configured battery capacity in Ah."""
+        return self.config.get(CONF_BATTERY_CAPACITY_AH, DEFAULT_BATTERY_CAPACITY_AH)
+
+
+class BatteryVoltageSensor(EnergyOptimizerSensor):
+    """Sensor showing configured battery voltage."""
+
+    _attr_name = "Battery Voltage"
+    _attr_unique_id = "battery_voltage_config"
+    _attr_icon = "mdi:lightning-bolt"
+    _attr_native_unit_of_measurement = "V"
+    _attr_device_class = SensorDeviceClass.VOLTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self) -> float:
+        """Return the configured battery voltage."""
+        return self.config.get(CONF_BATTERY_VOLTAGE, DEFAULT_BATTERY_VOLTAGE)
+
+
+class BatteryEfficiencySensor(EnergyOptimizerSensor):
+    """Sensor showing configured battery efficiency."""
+
+    _attr_name = "Battery Efficiency"
+    _attr_unique_id = "battery_efficiency_config"
+    _attr_icon = "mdi:percent"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self) -> float:
+        """Return the configured battery efficiency."""
+        return self.config.get(CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY)
+
+
+class MinSocSensor(EnergyOptimizerSensor):
+    """Sensor showing configured minimum SOC."""
+
+    _attr_name = "Minimum SOC"
+    _attr_unique_id = "min_soc_config"
+    _attr_icon = "mdi:battery-low"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self) -> int:
+        """Return the configured minimum SOC."""
+        return self.config.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
+
+
+class MaxSocSensor(EnergyOptimizerSensor):
+    """Sensor showing configured maximum SOC."""
+
+    _attr_name = "Maximum SOC"
+    _attr_unique_id = "max_soc_config"
+    _attr_icon = "mdi:battery-high"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self) -> int:
+        """Return the configured maximum SOC."""
+        return self.config.get(CONF_MAX_SOC, DEFAULT_MAX_SOC)
 
 
 class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):

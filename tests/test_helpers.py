@@ -18,11 +18,11 @@ def create_mock_config():
     """Create a mock configuration."""
     return {
         "prog1_soc_entity": "number.prog1_soc",
-        "prog1_time_start": "time.prog1_start",
+        "prog1_time_start_entity": "time.prog1_start",
         "prog2_soc_entity": "number.prog2_soc",
-        "prog2_time_start": "time.prog2_start",
+        "prog2_time_start_entity": "time.prog2_start",
         "prog3_soc_entity": "number.prog3_soc",
-        "prog3_time_start": "time.prog3_start",
+        "prog3_time_start_entity": "time.prog3_start",
     }
 
 

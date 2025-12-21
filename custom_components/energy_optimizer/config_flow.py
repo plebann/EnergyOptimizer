@@ -32,17 +32,17 @@ from .const import (
     CONF_OUTSIDE_TEMP_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_PROG1_SOC_ENTITY,
-    CONF_PROG1_TIME_START,
+    CONF_PROG1_TIME_START_ENTITY,
     CONF_PROG2_SOC_ENTITY,
-    CONF_PROG2_TIME_START,
+    CONF_PROG2_TIME_START_ENTITY,
     CONF_PROG3_SOC_ENTITY,
-    CONF_PROG3_TIME_START,
+    CONF_PROG3_TIME_START_ENTITY,
     CONF_PROG4_SOC_ENTITY,
-    CONF_PROG4_TIME_START,
+    CONF_PROG4_TIME_START_ENTITY,
     CONF_PROG5_SOC_ENTITY,
-    CONF_PROG5_TIME_START,
+    CONF_PROG5_TIME_START_ENTITY,
     CONF_PROG6_SOC_ENTITY,
-    CONF_PROG6_TIME_START,
+    CONF_PROG6_TIME_START_ENTITY,
     CONF_PV_FORECAST_REMAINING,
     CONF_PV_FORECAST_TODAY,
     CONF_PV_FORECAST_TOMORROW,
@@ -264,37 +264,37 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_PROG1_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(CONF_PROG1_TIME_START): selector.EntitySelector(
+                vol.Optional(CONF_PROG1_TIME_START_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_PROG2_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(CONF_PROG2_TIME_START): selector.EntitySelector(
+                vol.Optional(CONF_PROG2_TIME_START_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_PROG3_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(CONF_PROG3_TIME_START): selector.EntitySelector(
+                vol.Optional(CONF_PROG3_TIME_START_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_PROG4_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(CONF_PROG4_TIME_START): selector.EntitySelector(
+                vol.Optional(CONF_PROG4_TIME_START_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_PROG5_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(CONF_PROG5_TIME_START): selector.EntitySelector(
+                vol.Optional(CONF_PROG5_TIME_START_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_PROG6_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(CONF_PROG6_TIME_START): selector.EntitySelector(
+                vol.Optional(CONF_PROG6_TIME_START_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
             }
@@ -491,12 +491,12 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Validate each configured program
         program_configs = [
-            (CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START),
-            (CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START),
-            (CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START),
-            (CONF_PROG4_SOC_ENTITY, CONF_PROG4_TIME_START),
-            (CONF_PROG5_SOC_ENTITY, CONF_PROG5_TIME_START),
-            (CONF_PROG6_SOC_ENTITY, CONF_PROG6_TIME_START),
+            (CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START_ENTITY),
+            (CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START_ENTITY),
+            (CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START_ENTITY),
+            (CONF_PROG4_SOC_ENTITY, CONF_PROG4_TIME_START_ENTITY),
+            (CONF_PROG5_SOC_ENTITY, CONF_PROG5_TIME_START_ENTITY),
+            (CONF_PROG6_SOC_ENTITY, CONF_PROG6_TIME_START_ENTITY),
         ]
 
         for soc_key, start_key in program_configs:

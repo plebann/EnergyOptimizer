@@ -37,12 +37,12 @@ CONF_PROG6_SOC_ENTITY = "prog6_soc_entity"
 
 # Time start entities for each program (input_datetime or sensor entities with time values)
 # Programs run from start time to next program's start time
-CONF_PROG1_TIME_START = "prog1_time_start"
-CONF_PROG2_TIME_START = "prog2_time_start"
-CONF_PROG3_TIME_START = "prog3_time_start"
-CONF_PROG4_TIME_START = "prog4_time_start"
-CONF_PROG5_TIME_START = "prog5_time_start"
-CONF_PROG6_TIME_START = "prog6_time_start"
+CONF_PROG1_TIME_START_ENTITY = "prog1_time_start_entity"
+CONF_PROG2_TIME_START_ENTITY = "prog2_time_start_entity"
+CONF_PROG3_TIME_START_ENTITY = "prog3_time_start_entity"
+CONF_PROG4_TIME_START_ENTITY = "prog4_time_start_entity"
+CONF_PROG5_TIME_START_ENTITY = "prog5_time_start_entity"
+CONF_PROG6_TIME_START_ENTITY = "prog6_time_start_entity"
 
 CONF_DAILY_LOAD_SENSOR = "daily_load_sensor"
 CONF_PV_FORECAST_TODAY = "pv_forecast_today"

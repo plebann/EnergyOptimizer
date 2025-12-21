@@ -82,31 +82,31 @@
         "description": "Configure multiple SOC targets for different time slots. Ideal for Solarman inverters (DEYE/Sunsynk/SolArk) with 6 programmable charging periods. Skip this step if using single target entity.",
         "data": {
           "prog1_soc_entity": "Program 1 SOC Target",
-          "prog1_time_start": "Program 1 Start Time",
+          "prog1_time_start_entity": "Program 1 Start Time",
           "prog2_soc_entity": "Program 2 SOC Target",
-          "prog2_time_start": "Program 2 Start Time",
+          "prog2_time_start_entity": "Program 2 Start Time",
           "prog3_soc_entity": "Program 3 SOC Target",
-          "prog3_time_start": "Program 3 Start Time",
+          "prog3_time_start_entity": "Program 3 Start Time",
           "prog4_soc_entity": "Program 4 SOC Target",
-          "prog4_time_start": "Program 4 Start Time",
+          "prog4_time_start_entity": "Program 4 Start Time",
           "prog5_soc_entity": "Program 5 SOC Target",
-          "prog5_time_start": "Program 5 Start Time",
+          "prog5_time_start_entity": "Program 5 Start Time",
           "prog6_soc_entity": "Program 6 SOC Target",
-          "prog6_time_start": "Program 6 Start Time"
+          "prog6_time_start_entity": "Program 6 Start Time"
         },
         "data_description": {
           "prog1_soc_entity": "Entity to set SOC target for time slot 1 (e.g., number.deye_hybrid_prog1_capacity)",
-          "prog1_time_start": "Start time for program 1 charging window",
+          "prog1_time_start_entity": "Start time for program 1 charging window",
           "prog2_soc_entity": "Entity to set SOC target for time slot 2",
-          "prog2_time_start": "Start time for program 2 charging window",
+          "prog2_time_start_entity": "Start time for program 2 charging window",
           "prog3_soc_entity": "Entity to set SOC target for time slot 3",
-          "prog3_time_start": "Start time for program 3 charging window",
+          "prog3_time_start_entity": "Start time for program 3 charging window",
           "prog4_soc_entity": "Entity to set SOC target for time slot 4",
-          "prog4_time_start": "Start time for program 4 charging window",
+          "prog4_time_start_entity": "Start time for program 4 charging window",
           "prog5_soc_entity": "Entity to set SOC target for time slot 5",
-          "prog5_time_start": "Start time for program 5 charging window",
+          "prog5_time_start_entity": "Start time for program 5 charging window",
           "prog6_soc_entity": "Entity to set SOC target for time slot 6",
-          "prog6_time_start": "Start time for program 6 charging window"
+          "prog6_time_start_entity": "Start time for program 6 charging window"
         }
       },
       "pv_load_config": {

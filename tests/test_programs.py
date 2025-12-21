@@ -8,9 +8,9 @@ import sys
 sys.path.insert(0, '../custom_components/energy_optimizer')
 from custom_components.energy_optimizer.helpers import get_active_program_entity
 from custom_components.energy_optimizer.const import (
-    CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START,
-    CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START,
-    CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START,
+    CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START_ENTITY,
+    CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START_ENTITY,
+    CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START_ENTITY,
 )
 
 
@@ -46,7 +46,7 @@ def test_single_program_time_match():
     })
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
-        CONF_PROG1_TIME_START: "input_datetime.prog1_start",
+        CONF_PROG1_TIME_START_ENTITY: "input_datetime.prog1_start",
     }
     
     # Test time within window
@@ -69,9 +69,9 @@ def test_multiple_programs_priority():
     })
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
-        CONF_PROG1_TIME_START: "input_datetime.prog1_start",
+        CONF_PROG1_TIME_START_ENTITY: "input_datetime.prog1_start",
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
-        CONF_PROG2_TIME_START: "input_datetime.prog2_start",
+        CONF_PROG2_TIME_START_ENTITY: "input_datetime.prog2_start",
     }
     
     # Test matching program 1
@@ -98,9 +98,9 @@ def test_time_window_boundaries():
     })
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
-        CONF_PROG1_TIME_START: "input_datetime.prog1_start",
+        CONF_PROG1_TIME_START_ENTITY: "input_datetime.prog1_start",
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
-        CONF_PROG2_TIME_START: "input_datetime.prog2_start",
+        CONF_PROG2_TIME_START_ENTITY: "input_datetime.prog2_start",
     }
     
     # At start time (inclusive)
@@ -127,9 +127,9 @@ def test_midnight_crossing_window():
     })
     config = {
         CONF_PROG1_SOC_ENTITY: "number.night_prog",
-        CONF_PROG1_TIME_START: "input_datetime.prog1_start",
+        CONF_PROG1_TIME_START_ENTITY: "input_datetime.prog1_start",
         CONF_PROG2_SOC_ENTITY: "number.morning_prog",
-        CONF_PROG2_TIME_START: "input_datetime.prog2_start",
+        CONF_PROG2_TIME_START_ENTITY: "input_datetime.prog2_start",
     }
     
     # Late evening (after start)
@@ -153,7 +153,7 @@ def test_missing_time_entity():
     hass = create_mock_hass({})  # No entities
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
-        CONF_PROG1_TIME_START: "input_datetime.nonexistent",
+        CONF_PROG1_TIME_START_ENTITY: "input_datetime.nonexistent",
     }
     
     current_time = datetime(2025, 12, 20, 10, 0)
@@ -168,7 +168,7 @@ def test_invalid_time_format():
     })
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
-        CONF_PROG1_TIME_START: "input_datetime.prog1_start",
+        CONF_PROG1_TIME_START_ENTITY: "input_datetime.prog1_start",
     }
     
     current_time = datetime(2025, 12, 20, 10, 0)
@@ -184,7 +184,7 @@ def test_unavailable_entity_state():
     })
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
-        CONF_PROG1_TIME_START: "input_datetime.prog1_start",
+        CONF_PROG1_TIME_START_ENTITY: "input_datetime.prog1_start",
     }
     
     current_time = datetime(2025, 12, 20, 10, 0)
@@ -201,11 +201,11 @@ def test_all_six_programs():
     })
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1",
-        CONF_PROG1_TIME_START: "input_datetime.prog1_start",
+        CONF_PROG1_TIME_START_ENTITY: "input_datetime.prog1_start",
         CONF_PROG2_SOC_ENTITY: "number.prog2",
-        CONF_PROG2_TIME_START: "input_datetime.prog2_start",
+        CONF_PROG2_TIME_START_ENTITY: "input_datetime.prog2_start",
         CONF_PROG3_SOC_ENTITY: "number.prog3",
-        CONF_PROG3_TIME_START: "input_datetime.prog3_start",
+        CONF_PROG3_TIME_START_ENTITY: "input_datetime.prog3_start",
     }
     
     # Test matching each program
@@ -227,7 +227,7 @@ def test_time_with_seconds():
     })
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
-        CONF_PROG1_TIME_START: "input_datetime.prog1_start",
+        CONF_PROG1_TIME_START_ENTITY: "input_datetime.prog1_start",
     }
     
     current_time = datetime(2025, 12, 20, 9, 30)
@@ -242,7 +242,7 @@ def test_iso_datetime_format():
     })
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
-        CONF_PROG1_TIME_START: "input_datetime.prog1_start",
+        CONF_PROG1_TIME_START_ENTITY: "input_datetime.prog1_start",
     }
     
     current_time = datetime(2025, 12, 20, 9, 30)
