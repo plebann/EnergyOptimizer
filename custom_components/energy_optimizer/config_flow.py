@@ -665,28 +665,52 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                         CONF_BALANCING_INTERVAL_DAYS, DEFAULT_BALANCING_INTERVAL_DAYS
                     ),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
-                vol.Optional(CONF_DAILY_LOSSES_SENSOR): selector.EntitySelector(
+                vol.Optional(
+                    CONF_DAILY_LOSSES_SENSOR,
+                    default=self._config_entry.data.get(CONF_DAILY_LOSSES_SENSOR)
+                ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
-                vol.Optional(CONF_TODAY_LOAD_SENSOR): selector.EntitySelector(
+                vol.Optional(
+                    CONF_TODAY_LOAD_SENSOR,
+                    default=self._config_entry.data.get(CONF_TODAY_LOAD_SENSOR)
+                ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
-                vol.Optional(CONF_LOAD_USAGE_00_04): selector.EntitySelector(
+                vol.Optional(
+                    CONF_LOAD_USAGE_00_04,
+                    default=self._config_entry.data.get(CONF_LOAD_USAGE_00_04)
+                ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
-                vol.Optional(CONF_LOAD_USAGE_04_08): selector.EntitySelector(
+                vol.Optional(
+                    CONF_LOAD_USAGE_04_08,
+                    default=self._config_entry.data.get(CONF_LOAD_USAGE_04_08)
+                ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
-                vol.Optional(CONF_LOAD_USAGE_08_12): selector.EntitySelector(
+                vol.Optional(
+                    CONF_LOAD_USAGE_08_12,
+                    default=self._config_entry.data.get(CONF_LOAD_USAGE_08_12)
+                ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
-                vol.Optional(CONF_LOAD_USAGE_12_16): selector.EntitySelector(
+                vol.Optional(
+                    CONF_LOAD_USAGE_12_16,
+                    default=self._config_entry.data.get(CONF_LOAD_USAGE_12_16)
+                ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
-                vol.Optional(CONF_LOAD_USAGE_16_20): selector.EntitySelector(
+                vol.Optional(
+                    CONF_LOAD_USAGE_16_20,
+                    default=self._config_entry.data.get(CONF_LOAD_USAGE_16_20)
+                ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
-                vol.Optional(CONF_LOAD_USAGE_20_24): selector.EntitySelector(
+                vol.Optional(
+                    CONF_LOAD_USAGE_20_24,
+                    default=self._config_entry.data.get(CONF_LOAD_USAGE_20_24)
+                ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
             }
