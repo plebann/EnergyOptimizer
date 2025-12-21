@@ -74,8 +74,19 @@ def get_active_program_entity(
             # Parse time string (handle HH:MM or HH:MM:SS format)
             # Also handle datetime strings by extracting just the time portion
             if "T" in time_value:
-                # ISO datetime format, extract time portion
-                time_value = time_value.split("T")[1].split("+")[0].split("-")[0]
+                # ISO datetime format, extract time portion robustly
+                try:
+                    dt = datetime.fromisoformat(time_value)
+                    # Normalize to HH:MM:SS so downstream parsing is consistent
+                    time_value = dt.time().strftime("%H:%M:%S")
+                except ValueError:
+                    # Fallback: manually strip timezone info from the time part
+                    time_part = time_value.split("T", 1)[1]
+                    for tz_sep in ("+", "-"):
+                        if tz_sep in time_part:
+                            time_part = time_part.split(tz_sep, 1)[0]
+                            break
+                    time_value = time_part
             
             # Strip any whitespace
             time_value = str(time_value).strip()
