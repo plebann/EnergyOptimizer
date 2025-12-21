@@ -47,8 +47,5 @@ class EnergyOptimizerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Raises:
             UpdateFailed: If data update fails
         """
-        try:
-            # Placeholder - will be implemented in Phase 3
-            return {}
-        except Exception as err:
-            raise UpdateFailed(f"Error communicating with integration: {err}") from err
+        # Placeholder - will be implemented in Phase 3
+        return {}
