@@ -1,5 +1,5 @@
 """Tests for helper functions."""
-from datetime import datetime, time
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
