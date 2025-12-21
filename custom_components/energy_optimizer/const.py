@@ -59,8 +59,6 @@ CONF_COP_CURVE = "cop_curve"
 # Battery balancing configuration
 CONF_BALANCING_INTERVAL_DAYS = "balancing_interval_days"
 CONF_BALANCING_PV_THRESHOLD = "balancing_pv_threshold_kwh"
-CONF_PROGRAM_NIGHT_SOC_ENTITY = "program_night_soc_entity"
-CONF_PROGRAM_MORNING_SOC_ENTITY = "program_morning_soc_entity"
 CONF_MAX_CHARGE_CURRENT_ENTITY = "max_charge_current_entity"
 
 # Default values
@@ -88,7 +86,7 @@ DEFAULT_COP_CURVE = [
 SERVICE_CALCULATE_CHARGE_SOC = "calculate_charge_soc"
 SERVICE_CALCULATE_SELL_ENERGY = "calculate_sell_energy"
 SERVICE_ESTIMATE_HEAT_PUMP = "estimate_heat_pump_usage"
-SERVICE_OPTIMIZE_SCHEDULE = "optimize_battery_schedule"
+SERVICE_OVERNIGHT_SCHEDULE = "optimize_battery_schedule"
 
 # Sensor types
 SENSOR_BATTERY_RESERVE = "battery_reserve"

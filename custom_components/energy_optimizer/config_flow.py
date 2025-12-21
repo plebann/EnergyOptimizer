@@ -19,6 +19,7 @@ from .const import (
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
     CONF_BATTERY_VOLTAGE_SENSOR,
+    CONF_BALANCING_INTERVAL_DAYS,
     CONF_CHARGE_CURRENT_ENTITY,
     CONF_CHEAPEST_WINDOW_SENSOR,
     CONF_DAILY_LOAD_SENSOR,
@@ -51,6 +52,7 @@ from .const import (
     CONF_TOMORROW_PRICE_SENSOR,
     CONF_WEATHER_FORECAST,
     CONF_WORK_MODE_ENTITY,
+    DEFAULT_BALANCING_INTERVAL_DAYS,
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
@@ -204,6 +206,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_BATTERY_CAPACITY_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
+                vol.Optional(CONF_BALANCING_INTERVAL_DAYS, default=DEFAULT_BALANCING_INTERVAL_DAYS): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
             }
         )
 
@@ -600,5 +603,11 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                         CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY
                     ),
                 ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
+                vol.Optional(
+                    CONF_BALANCING_INTERVAL_DAYS,
+                    default=self._config_entry.data.get(
+                        CONF_BALANCING_INTERVAL_DAYS, DEFAULT_BALANCING_INTERVAL_DAYS
+                    ),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
             }
         )

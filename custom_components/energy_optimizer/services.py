@@ -134,7 +134,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
         SERVICE_CALCULATE_CHARGE_SOC,
         SERVICE_CALCULATE_SELL_ENERGY,
         SERVICE_ESTIMATE_HEAT_PUMP,
-        SERVICE_OPTIMIZE_SCHEDULE,
+        SERVICE_OVERNIGHT_SCHEDULE,
     )
     from .helpers import get_active_program_entity
 
@@ -327,7 +327,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 except (ValueError, TypeError) as err:
                     _LOGGER.error("Error estimating heat pump usage: %s", err)
 
-    async def handle_optimize_schedule(call: ServiceCall) -> None:
+    async def handle_overnight_schedule(call: ServiceCall) -> None:
         """Handle optimize_battery_schedule service call."""
         _LOGGER.info("=== Battery Schedule Optimization Started ===")
         
@@ -695,7 +695,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
         DOMAIN, SERVICE_ESTIMATE_HEAT_PUMP, handle_estimate_heat_pump
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_OPTIMIZE_SCHEDULE, handle_optimize_schedule
+        DOMAIN, SERVICE_OVERNIGHT_SCHEDULE, handle_overnight_schedule
     )
 
     _LOGGER.info("Energy Optimizer services registered")

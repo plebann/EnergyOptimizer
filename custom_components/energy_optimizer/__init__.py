@@ -12,7 +12,7 @@ from homeassistant.helpers.event import async_track_time_change
 from .const import (
     DOMAIN,
     SERVICE_CALCULATE_CHARGE_SOC,
-    SERVICE_OPTIMIZE_SCHEDULE,
+    SERVICE_OVERNIGHT_SCHEDULE,
 )
 from .services import async_register_services
 
@@ -42,20 +42,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.services.has_service(DOMAIN, SERVICE_CALCULATE_CHARGE_SOC):
         await async_register_services(hass)
 
-    # Register automatic daily schedule optimization at 22:00
-    async def _trigger_optimize_schedule(now):
-        """Trigger battery schedule optimization at 22:00."""
-        _LOGGER.info("Auto-triggering battery schedule optimization at 22:00")
+    # Register automatic daily overnight handling at 22:00
+    async def _trigger_overnight_handling(now):
+        """Trigger battery overnight handling at 22:00."""
+        _LOGGER.info("Auto-triggering battery overnight handling at 22:00")
         await hass.services.async_call(
             DOMAIN,
-            SERVICE_OPTIMIZE_SCHEDULE,
+            SERVICE_OVERNIGHT_SCHEDULE,
             {},
             blocking=False,
         )
 
     # Track time change: trigger at 22:00 every day
     remove_listener = async_track_time_change(
-        hass, _trigger_optimize_schedule, hour=22, minute=0, second=0
+        hass, _trigger_overnight_handling, hour=22, minute=0, second=0
     )
 
     # Store removal callback for cleanup
@@ -63,7 +63,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN][entry.entry_id]["listeners"] = []
     hass.data[DOMAIN][entry.entry_id]["listeners"].append(remove_listener)
 
-    _LOGGER.info("Energy Optimizer: Automatic 22:00 schedule optimization enabled")
+    _LOGGER.info("Energy Optimizer: Automatic 22:00 overnight handling enabled")
 
     return True
 
