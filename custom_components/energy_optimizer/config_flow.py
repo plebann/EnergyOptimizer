@@ -29,6 +29,12 @@ from .const import (
     CONF_EXPENSIVE_WINDOW_SENSOR,
     CONF_GRID_CHARGE_SWITCH,
     CONF_HEAT_PUMP_POWER_SENSOR,
+    CONF_LOAD_USAGE_00_04,
+    CONF_LOAD_USAGE_04_08,
+    CONF_LOAD_USAGE_08_12,
+    CONF_LOAD_USAGE_12_16,
+    CONF_LOAD_USAGE_16_20,
+    CONF_LOAD_USAGE_20_24,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
     CONF_OUTSIDE_TEMP_SENSOR,
@@ -50,6 +56,7 @@ from .const import (
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PEAK_FORECAST,
     CONF_TARGET_SOC_ENTITY,
+    CONF_TODAY_LOAD_SENSOR,
     CONF_TOMORROW_PRICE_SENSOR,
     CONF_WEATHER_FORECAST,
     CONF_WORK_MODE_ENTITY,
@@ -314,7 +321,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle PV forecast and load sensor configuration."""
         if user_input is not None:
             self._data.update(user_input)
-            return await self.async_step_heat_pump()
+            return await self.async_step_load_windows()
 
         schema = vol.Schema(
             {
@@ -343,6 +350,51 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
         return self.async_show_form(step_id="pv_load_config", data_schema=schema)
+
+    async def async_step_load_windows(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle time-windowed load sensor configuration."""
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_heat_pump()
+
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_TODAY_LOAD_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor"),
+                    description={"suggested_value": "sensor.load_usage_daily"}
+                ),
+                vol.Optional(CONF_LOAD_USAGE_00_04): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_LOAD_USAGE_04_08): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_LOAD_USAGE_08_12): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_LOAD_USAGE_12_16): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_LOAD_USAGE_16_20): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_LOAD_USAGE_20_24): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="load_windows",
+            data_schema=schema,
+            description_placeholders={
+                "info": "Configure time-windowed load sensors for more accurate energy calculations. "
+                       "These sensors should track average consumption (kWh/h) for each 4-hour period. "
+                       "This configuration is optional but highly recommended for better accuracy."
+            }
+        )
 
     async def async_step_heat_pump(
         self, user_input: dict[str, Any] | None = None
@@ -614,6 +666,27 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     ),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
                 vol.Optional(CONF_DAILY_LOSSES_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_TODAY_LOAD_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_LOAD_USAGE_00_04): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_LOAD_USAGE_04_08): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_LOAD_USAGE_08_12): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_LOAD_USAGE_12_16): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_LOAD_USAGE_16_20): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_LOAD_USAGE_20_24): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
             }

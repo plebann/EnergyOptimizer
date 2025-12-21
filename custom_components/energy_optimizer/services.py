@@ -145,7 +145,15 @@ async def async_register_services(hass: HomeAssistant) -> None:
             kwh_to_soc,
             soc_to_kwh,
         )
-        from .calculations.energy import calculate_required_energy
+        from .calculations.energy import calculate_required_energy, calculate_required_energy_windowed
+        from .const import (
+            CONF_LOAD_USAGE_00_04,
+            CONF_LOAD_USAGE_04_08,
+            CONF_LOAD_USAGE_08_12,
+            CONF_LOAD_USAGE_12_16,
+            CONF_LOAD_USAGE_16_20,
+            CONF_LOAD_USAGE_20_24,
+        )
 
         # Get config entry (use first one if multiple exist)
         entries = hass.config_entries.async_entries(DOMAIN)
@@ -173,12 +181,50 @@ async def async_register_services(hass: HomeAssistant) -> None:
             capacity_ah = config.get("battery_capacity_ah", 200)
             voltage = config.get("battery_voltage", 48)
             max_soc = config.get("max_soc", 100)
+            efficiency = config.get("battery_efficiency", 95)
 
-            # Calculate required energy (simplified for now)
-            # TODO: Integrate with load history and PV forecast
-            required_energy = calculate_required_energy(
-                hourly_usage=2.0, hourly_losses=0, hours=12, efficiency=0.95
+            # Calculate required energy using time-windowed data if available
+            now = datetime.now()
+            hours_until_end = call.data.get("hours_until_end", 12)
+            end_hour = (now.hour + hours_until_end) % 24
+            include_tomorrow = (now.hour + hours_until_end) >= 24
+            
+            # Check if windowed config available
+            has_windowed = any(
+                config.get(key)
+                for key in [
+                    CONF_LOAD_USAGE_00_04, CONF_LOAD_USAGE_04_08,
+                    CONF_LOAD_USAGE_08_12, CONF_LOAD_USAGE_12_16,
+                    CONF_LOAD_USAGE_16_20, CONF_LOAD_USAGE_20_24,
+                ]
             )
+            
+            if has_windowed:
+                try:
+                    required_energy = calculate_required_energy_windowed(
+                        start_hour=now.hour,
+                        end_hour=end_hour,
+                        config=config,
+                        hass_states_get=hass.states.get,
+                        efficiency=efficiency,
+                        include_tomorrow=include_tomorrow,
+                        current_hour=now.hour,
+                        current_minute=now.minute,
+                    )
+                    _LOGGER.debug("Using time-windowed calculation: %.2f kWh", required_energy)
+                except Exception as ex:
+                    _LOGGER.warning("Time-windowed calculation failed, using fallback: %s", ex)
+                    required_energy = calculate_required_energy(
+                        hourly_usage=2.0, hourly_losses=0,
+                        hours=hours_until_end, efficiency=efficiency / 100.0
+                    )
+            else:
+                # Fallback to simplified calculation
+                required_energy = calculate_required_energy(
+                    hourly_usage=2.0, hourly_losses=0,
+                    hours=hours_until_end, efficiency=efficiency / 100.0
+                )
+                _LOGGER.debug("Using simple calculation (no time windows): %.2f kWh", required_energy)
 
             # Determine if we should charge based on price
             if current_price < avg_price * 0.8:  # Charge if price is 20% below average
@@ -245,7 +291,15 @@ async def async_register_services(hass: HomeAssistant) -> None:
     async def handle_calculate_sell_energy(call: ServiceCall) -> None:
         """Handle calculate_sell_energy service call."""
         from .calculations.battery import calculate_battery_reserve
-        from .calculations.energy import calculate_required_energy, calculate_surplus_energy
+        from .calculations.energy import calculate_required_energy, calculate_required_energy_windowed, calculate_surplus_energy
+        from .const import (
+            CONF_LOAD_USAGE_00_04,
+            CONF_LOAD_USAGE_04_08,
+            CONF_LOAD_USAGE_08_12,
+            CONF_LOAD_USAGE_12_16,
+            CONF_LOAD_USAGE_16_20,
+            CONF_LOAD_USAGE_20_24,
+        )
 
         entries = hass.config_entries.async_entries(DOMAIN)
         if not entries:
@@ -264,16 +318,55 @@ async def async_register_services(hass: HomeAssistant) -> None:
             capacity_ah = config.get("battery_capacity_ah", 200)
             voltage = config.get("battery_voltage", 48)
             min_soc = config.get("min_soc", 10)
+            efficiency = config.get("battery_efficiency", 95)
 
             # Calculate available reserve
             battery_reserve = calculate_battery_reserve(
                 current_soc, min_soc, capacity_ah, voltage
             )
 
-            # Calculate required energy (simplified)
-            required_energy = calculate_required_energy(
-                hourly_usage=2.0, hourly_losses=0, hours=4, efficiency=0.95
+            # Calculate required energy using time-windowed data if available
+            now = datetime.now()
+            hours_remaining = call.data.get("hours_remaining", 4)
+            end_hour = (now.hour + hours_remaining) % 24
+            include_tomorrow = (now.hour + hours_remaining) >= 24
+            
+            # Check if windowed config available
+            has_windowed = any(
+                config.get(key)
+                for key in [
+                    CONF_LOAD_USAGE_00_04, CONF_LOAD_USAGE_04_08,
+                    CONF_LOAD_USAGE_08_12, CONF_LOAD_USAGE_12_16,
+                    CONF_LOAD_USAGE_16_20, CONF_LOAD_USAGE_20_24,
+                ]
             )
+            
+            if has_windowed:
+                try:
+                    required_energy = calculate_required_energy_windowed(
+                        start_hour=now.hour,
+                        end_hour=end_hour,
+                        config=config,
+                        hass_states_get=hass.states.get,
+                        efficiency=efficiency,
+                        include_tomorrow=include_tomorrow,
+                        current_hour=now.hour,
+                        current_minute=now.minute,
+                    )
+                    _LOGGER.debug("Using time-windowed calculation: %.2f kWh", required_energy)
+                except Exception as ex:
+                    _LOGGER.warning("Time-windowed calculation failed, using fallback: %s", ex)
+                    required_energy = calculate_required_energy(
+                        hourly_usage=2.0, hourly_losses=0,
+                        hours=hours_remaining, efficiency=efficiency / 100.0
+                    )
+            else:
+                # Fallback to simplified calculation
+                required_energy = calculate_required_energy(
+                    hourly_usage=2.0, hourly_losses=0,
+                    hours=hours_remaining, efficiency=efficiency / 100.0
+                )
+                _LOGGER.debug("Using simple calculation (no time windows): %.2f kWh", required_energy)
 
             # Calculate surplus
             surplus = calculate_surplus_energy(battery_reserve, required_energy)

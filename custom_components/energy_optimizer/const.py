@@ -46,6 +46,18 @@ CONF_PROG6_TIME_START_ENTITY = "prog6_time_start_entity"
 
 CONF_DAILY_LOAD_SENSOR = "daily_load_sensor"
 CONF_DAILY_LOSSES_SENSOR = "daily_losses_sensor"
+
+# Time-windowed load sensors (4-hour average consumption in kWh/h)
+CONF_LOAD_USAGE_00_04 = "load_usage_00_04"
+CONF_LOAD_USAGE_04_08 = "load_usage_04_08"
+CONF_LOAD_USAGE_08_12 = "load_usage_08_12"
+CONF_LOAD_USAGE_12_16 = "load_usage_12_16"
+CONF_LOAD_USAGE_16_20 = "load_usage_16_20"
+CONF_LOAD_USAGE_20_24 = "load_usage_20_24"
+
+# Today's consumption tracking for dynamic ratio
+CONF_TODAY_LOAD_SENSOR = "today_load_sensor"
+
 CONF_PV_FORECAST_TODAY = "pv_forecast_today"
 CONF_PV_FORECAST_TOMORROW = "pv_forecast_tomorrow"
 CONF_PV_FORECAST_REMAINING = "pv_forecast_remaining"

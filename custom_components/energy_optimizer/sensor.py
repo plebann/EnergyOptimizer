@@ -299,7 +299,29 @@ class RequiredEnergyMorningSensor(EnergyOptimizerSensor):
     @property
     def native_value(self) -> float | None:
         """Return the state of the sensor."""
-        # Simplified calculation - should use history API in production
+        from datetime import datetime
+        from .calculations.energy import calculate_required_energy_windowed
+        
+        # Try time-windowed calculation first
+        if self._has_time_windowed_config():
+            now = datetime.now()
+            try:
+                return calculate_required_energy_windowed(
+                    start_hour=0,
+                    end_hour=12,
+                    config=self.config,
+                    hass_states_get=self.hass.states.get,
+                    efficiency=self.config.get(CONF_BATTERY_EFFICIENCY, 95),
+                    current_hour=now.hour,
+                    current_minute=now.minute,
+                )
+            except Exception as ex:
+                _LOGGER.warning(
+                    "Time-windowed calculation failed for %s, falling back: %s",
+                    self.name, ex
+                )
+        
+        # Fallback to legacy calculation
         daily_load = self._get_sensor_state(self.config.get(CONF_DAILY_LOAD_SENSOR))
         if daily_load is None:
             return None
@@ -310,6 +332,29 @@ class RequiredEnergyMorningSensor(EnergyOptimizerSensor):
             0,
             12,  # Morning until noon
             self.config.get(CONF_BATTERY_EFFICIENCY, 95),
+        )
+    
+    def _has_time_windowed_config(self) -> bool:
+        """Check if time-windowed sensors are configured."""
+        from .const import (
+            CONF_LOAD_USAGE_00_04,
+            CONF_LOAD_USAGE_04_08,
+            CONF_LOAD_USAGE_08_12,
+            CONF_LOAD_USAGE_12_16,
+            CONF_LOAD_USAGE_16_20,
+            CONF_LOAD_USAGE_20_24,
+        )
+        
+        return any(
+            self.config.get(key)
+            for key in [
+                CONF_LOAD_USAGE_00_04,
+                CONF_LOAD_USAGE_04_08,
+                CONF_LOAD_USAGE_08_12,
+                CONF_LOAD_USAGE_12_16,
+                CONF_LOAD_USAGE_16_20,
+                CONF_LOAD_USAGE_20_24,
+            ]
         )
 
 
@@ -326,6 +371,29 @@ class RequiredEnergyAfternoonSensor(EnergyOptimizerSensor):
     @property
     def native_value(self) -> float | None:
         """Return the state of the sensor."""
+        from datetime import datetime
+        from .calculations.energy import calculate_required_energy_windowed
+        
+        # Try time-windowed calculation first
+        if self._has_time_windowed_config():
+            now = datetime.now()
+            try:
+                return calculate_required_energy_windowed(
+                    start_hour=12,
+                    end_hour=18,
+                    config=self.config,
+                    hass_states_get=self.hass.states.get,
+                    efficiency=self.config.get(CONF_BATTERY_EFFICIENCY, 95),
+                    current_hour=now.hour,
+                    current_minute=now.minute,
+                )
+            except Exception as ex:
+                _LOGGER.warning(
+                    "Time-windowed calculation failed for %s, falling back: %s",
+                    self.name, ex
+                )
+        
+        # Fallback to legacy calculation
         daily_load = self._get_sensor_state(self.config.get(CONF_DAILY_LOAD_SENSOR))
         if daily_load is None:
             return None
@@ -336,6 +404,29 @@ class RequiredEnergyAfternoonSensor(EnergyOptimizerSensor):
             0,
             6,  # Afternoon 12:00-18:00
             self.config.get(CONF_BATTERY_EFFICIENCY, 95),
+        )
+    
+    def _has_time_windowed_config(self) -> bool:
+        """Check if time-windowed sensors are configured."""
+        from .const import (
+            CONF_LOAD_USAGE_00_04,
+            CONF_LOAD_USAGE_04_08,
+            CONF_LOAD_USAGE_08_12,
+            CONF_LOAD_USAGE_12_16,
+            CONF_LOAD_USAGE_16_20,
+            CONF_LOAD_USAGE_20_24,
+        )
+        
+        return any(
+            self.config.get(key)
+            for key in [
+                CONF_LOAD_USAGE_00_04,
+                CONF_LOAD_USAGE_04_08,
+                CONF_LOAD_USAGE_08_12,
+                CONF_LOAD_USAGE_12_16,
+                CONF_LOAD_USAGE_16_20,
+                CONF_LOAD_USAGE_20_24,
+            ]
         )
 
 
@@ -352,6 +443,29 @@ class RequiredEnergyEveningSensor(EnergyOptimizerSensor):
     @property
     def native_value(self) -> float | None:
         """Return the state of the sensor."""
+        from datetime import datetime
+        from .calculations.energy import calculate_required_energy_windowed
+        
+        # Try time-windowed calculation first
+        if self._has_time_windowed_config():
+            now = datetime.now()
+            try:
+                return calculate_required_energy_windowed(
+                    start_hour=18,
+                    end_hour=22,
+                    config=self.config,
+                    hass_states_get=self.hass.states.get,
+                    efficiency=self.config.get(CONF_BATTERY_EFFICIENCY, 95),
+                    current_hour=now.hour,
+                    current_minute=now.minute,
+                )
+            except Exception as ex:
+                _LOGGER.warning(
+                    "Time-windowed calculation failed for %s, falling back: %s",
+                    self.name, ex
+                )
+        
+        # Fallback to legacy calculation
         daily_load = self._get_sensor_state(self.config.get(CONF_DAILY_LOAD_SENSOR))
         if daily_load is None:
             return None
@@ -366,6 +480,29 @@ class RequiredEnergyEveningSensor(EnergyOptimizerSensor):
             0,
             4,  # Evening 18:00-22:00
             self.config.get(CONF_BATTERY_EFFICIENCY, 95),
+        )
+    
+    def _has_time_windowed_config(self) -> bool:
+        """Check if time-windowed sensors are configured."""
+        from .const import (
+            CONF_LOAD_USAGE_00_04,
+            CONF_LOAD_USAGE_04_08,
+            CONF_LOAD_USAGE_08_12,
+            CONF_LOAD_USAGE_12_16,
+            CONF_LOAD_USAGE_16_20,
+            CONF_LOAD_USAGE_20_24,
+        )
+        
+        return any(
+            self.config.get(key)
+            for key in [
+                CONF_LOAD_USAGE_00_04,
+                CONF_LOAD_USAGE_04_08,
+                CONF_LOAD_USAGE_08_12,
+                CONF_LOAD_USAGE_12_16,
+                CONF_LOAD_USAGE_16_20,
+                CONF_LOAD_USAGE_20_24,
+            ]
         )
 
 
