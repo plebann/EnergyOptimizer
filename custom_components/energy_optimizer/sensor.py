@@ -35,6 +35,7 @@ from .const import (
     CONF_BATTERY_VOLTAGE,
     CONF_COP_CURVE,
     CONF_DAILY_LOAD_SENSOR,
+    CONF_DAILY_LOSSES_SENSOR,
     CONF_ENABLE_HEAT_PUMP,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
@@ -306,6 +307,7 @@ class RequiredEnergyMorningSensor(EnergyOptimizerSensor):
         hourly_usage = daily_load / 24
         return calculate_required_energy(
             hourly_usage,
+            0,
             12,  # Morning until noon
             self.config.get(CONF_BATTERY_EFFICIENCY, 95),
         )
@@ -331,6 +333,7 @@ class RequiredEnergyAfternoonSensor(EnergyOptimizerSensor):
         hourly_usage = daily_load / 24
         return calculate_required_energy(
             hourly_usage,
+            0,
             6,  # Afternoon 12:00-18:00
             self.config.get(CONF_BATTERY_EFFICIENCY, 95),
         )
@@ -352,10 +355,15 @@ class RequiredEnergyEveningSensor(EnergyOptimizerSensor):
         daily_load = self._get_sensor_state(self.config.get(CONF_DAILY_LOAD_SENSOR))
         if daily_load is None:
             return None
+        daily_losses = self._get_sensor_state(self.config.get(CONF_DAILY_LOSSES_SENSOR))
+        if daily_losses is None:
+            return None
 
         hourly_usage = daily_load / 24
+        hourly_losses = daily_losses / 24
         return calculate_required_energy(
             hourly_usage,
+            0,
             4,  # Evening 18:00-22:00
             self.config.get(CONF_BATTERY_EFFICIENCY, 95),
         )
@@ -391,7 +399,7 @@ class SurplusEnergySensor(EnergyOptimizerSensor):
         # Calculate required energy (simplified)
         hourly_usage = daily_load / 24
         required_energy = calculate_required_energy(
-            hourly_usage, 6, self.config.get(CONF_BATTERY_EFFICIENCY, 95)
+            hourly_usage, 0, 6, self.config.get(CONF_BATTERY_EFFICIENCY, 95)
         )
 
         # Get PV forecast if available

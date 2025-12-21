@@ -45,6 +45,7 @@ CONF_PROG5_TIME_START_ENTITY = "prog5_time_start_entity"
 CONF_PROG6_TIME_START_ENTITY = "prog6_time_start_entity"
 
 CONF_DAILY_LOAD_SENSOR = "daily_load_sensor"
+CONF_DAILY_LOSSES_SENSOR = "daily_losses_sensor"
 CONF_PV_FORECAST_TODAY = "pv_forecast_today"
 CONF_PV_FORECAST_TOMORROW = "pv_forecast_tomorrow"
 CONF_PV_FORECAST_REMAINING = "pv_forecast_remaining"
@@ -86,7 +87,7 @@ DEFAULT_COP_CURVE = [
 SERVICE_CALCULATE_CHARGE_SOC = "calculate_charge_soc"
 SERVICE_CALCULATE_SELL_ENERGY = "calculate_sell_energy"
 SERVICE_ESTIMATE_HEAT_PUMP = "estimate_heat_pump_usage"
-SERVICE_OVERNIGHT_SCHEDULE = "optimize_battery_schedule"
+SERVICE_OVERNIGHT_SCHEDULE = "overnight_schedule"
 
 # Sensor types
 SENSOR_BATTERY_RESERVE = "battery_reserve"

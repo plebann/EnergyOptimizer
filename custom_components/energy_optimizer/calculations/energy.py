@@ -5,12 +5,13 @@ from .battery import kwh_to_soc
 
 
 def calculate_required_energy(
-    hourly_usage: float, hours: int, efficiency: float, margin: float = 1.1
+    hourly_usage: float, hourly_losses: float, hours: int, efficiency: float, margin: float = 1.1
 ) -> float:
     """Calculate required energy for time period with losses and margin.
     
     Args:
         hourly_usage: Average hourly usage (kWh)
+        hourly_losses: Average hourly losses (kWh)
         hours: Number of hours in period
         efficiency: Battery efficiency (%)
         margin: Safety margin multiplier (default 1.1 = 10%)
@@ -145,7 +146,7 @@ def calculate_required_energy_with_heat_pump(
         Total required energy (kWh)
     """
     # Calculate base required energy
-    base_required = calculate_required_energy(base_usage, hours, efficiency, margin)
+    base_required = calculate_required_energy(base_usage, 0, hours, efficiency, margin)
     
     # Add heat pump consumption (already includes losses)
     total_required = base_required + heat_pump_consumption

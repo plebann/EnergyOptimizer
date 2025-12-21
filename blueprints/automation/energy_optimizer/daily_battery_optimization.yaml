@@ -35,7 +35,7 @@ trigger:
     at: !input schedule_time
 
 action:
-  - service: energy_optimizer.optimize_battery_schedule
+  - service: energy_optimizer.overnight_schedule
     data:
       optimization_goal: !input optimization_goal
     response_variable: schedule_result

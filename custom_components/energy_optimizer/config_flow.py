@@ -23,6 +23,7 @@ from .const import (
     CONF_CHARGE_CURRENT_ENTITY,
     CONF_CHEAPEST_WINDOW_SENSOR,
     CONF_DAILY_LOAD_SENSOR,
+    CONF_DAILY_LOSSES_SENSOR,
     CONF_DISCHARGE_CURRENT_ENTITY,
     CONF_ENABLE_HEAT_PUMP,
     CONF_EXPENSIVE_WINDOW_SENSOR,
@@ -320,6 +321,9 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_DAILY_LOAD_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
+                vol.Optional(CONF_DAILY_LOSSES_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
                 vol.Optional(CONF_PV_FORECAST_TODAY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -609,5 +613,8 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                         CONF_BALANCING_INTERVAL_DAYS, DEFAULT_BALANCING_INTERVAL_DAYS
                     ),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
+                vol.Optional(CONF_DAILY_LOSSES_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
             }
         )

@@ -302,7 +302,7 @@ data:
   date: "2024-12-21"
 ```
 
-### `energy_optimizer.optimize_battery_schedule`
+### `energy_optimizer.overnight_schedule`
 
 Generate optimal daily battery charge/discharge schedule.
 
@@ -312,7 +312,7 @@ Generate optimal daily battery charge/discharge schedule.
 
 **Example:**
 ```yaml
-service: energy_optimizer.optimize_battery_schedule
+service: energy_optimizer.overnight_schedule
 data:
   date: "2024-12-21"
   optimization_goal: "cost_minimize"

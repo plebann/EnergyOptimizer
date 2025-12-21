@@ -17,16 +17,15 @@ def test_calculate_required_energy():
     # Base = 2 * 6 = 12 kWh
     # With losses = 12 / 0.95 = 12.63 kWh
     # With margin = 12.63 * 1.1 = 13.89 kWh
-    required = calculate_required_energy(2.0, 6, 95, 1.1)
+    required = calculate_required_energy(2.0, 0, 6, 95, 1.1)
     assert required == pytest.approx(13.89, rel=0.01)
     
     # No margin (1.0 multiplier)
-    required = calculate_required_energy(2.0, 6, 95, 1.0)
+    required = calculate_required_energy(2.0, 0, 6, 95, 1.0)
     assert required == pytest.approx(12.63, rel=0.01)
     
     # Zero efficiency should return 0
-    assert calculate_required_energy(2.0, 6, 0) == 0.0
-
+    assert calculate_required_energy(2.0, 0, 6, 0) == 0.0
 
 def test_calculate_usage_ratio():
     """Test usage ratio calculation."""

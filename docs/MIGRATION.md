@@ -186,7 +186,7 @@ action:
 | `script.calculate_charge_target` | `energy_optimizer.calculate_charge_soc` | More parameters available |
 | `script.calculate_sell_energy` | `energy_optimizer.calculate_sell_energy` | Built-in profitability check |
 | `script.estimate_heat_pump` | `energy_optimizer.estimate_heat_pump_usage` | Temperature-based COP |
-| N/A | `energy_optimizer.optimize_battery_schedule` | New comprehensive scheduler |
+| N/A | `energy_optimizer.overnight_schedule` | New comprehensive scheduler |
 
 ## Advanced Migration
 

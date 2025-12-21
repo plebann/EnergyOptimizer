@@ -53,8 +53,8 @@ estimate_heat_pump_usage:
       selector:
         date:
 
-optimize_battery_schedule:
-  name: Optimize Battery Schedule
+overnight_schedule:
+  name: Overnight Schedule
   description: Generate optimal daily battery charge/discharge schedule
   fields:
     date:

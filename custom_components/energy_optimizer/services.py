@@ -177,7 +177,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
             # Calculate required energy (simplified for now)
             # TODO: Integrate with load history and PV forecast
             required_energy = calculate_required_energy(
-                hourly_usage=2.0, hours=12, efficiency=0.95
+                hourly_usage=2.0, hourly_losses=0, hours=12, efficiency=0.95
             )
 
             # Determine if we should charge based on price
@@ -272,7 +272,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
 
             # Calculate required energy (simplified)
             required_energy = calculate_required_energy(
-                hourly_usage=2.0, hours=4, efficiency=0.95
+                hourly_usage=2.0, hourly_losses=0, hours=4, efficiency=0.95
             )
 
             # Calculate surplus
@@ -328,8 +328,8 @@ async def async_register_services(hass: HomeAssistant) -> None:
                     _LOGGER.error("Error estimating heat pump usage: %s", err)
 
     async def handle_overnight_schedule(call: ServiceCall) -> None:
-        """Handle optimize_battery_schedule service call."""
-        _LOGGER.info("=== Battery Schedule Optimization Started ===")
+        """Handle overnight_schedule service call."""
+        _LOGGER.info("=== Battery Overnight Handling Started ===")
         
         from .calculations.battery import calculate_battery_space
         from .const import (

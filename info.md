@@ -29,7 +29,7 @@ Intelligent battery charging and energy optimization for Home Assistant.
 - `calculate_charge_soc`: Calculate optimal charge target
 - `calculate_sell_energy`: Determine sellable surplus
 - `estimate_heat_pump_usage`: Forecast heat pump consumption
-- `optimize_battery_schedule`: Generate daily optimization schedule
+- `overnight_schedule`: Generate daily optimization schedule
 
 ## Documentation
 
