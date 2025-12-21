@@ -166,13 +166,25 @@
     "step": {
       "init": {
         "title": "Energy Optimizer Options",
-        "description": "Reconfigure Energy Optimizer parameters",
+        "description": "Reconfigure battery parameters.",
         "data": {
+          "battery_capacity_ah": "Battery Capacity (Ah)",
+          "battery_voltage": "Battery Nominal Voltage (V)",
           "min_soc": "Minimum SOC (%)",
           "max_soc": "Maximum SOC (%)",
           "battery_efficiency": "Battery Efficiency (%)"
+        },
+        "data_description": {
+          "battery_capacity_ah": "Battery capacity in Ampere-hours",
+          "battery_voltage": "Battery system voltage (typically 48V)",
+          "min_soc": "Minimum SOC to preserve battery health",
+          "max_soc": "Maximum SOC (may be limited by inverter)",
+          "battery_efficiency": "Round-trip efficiency (90-95% typical)"
         }
       }
+    },
+    "error": {
+      "min_greater_than_max": "Minimum SOC must be less than maximum SOC."
     }
   }
 }

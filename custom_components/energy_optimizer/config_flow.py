@@ -554,15 +554,38 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
     ) -> config_entries.FlowResult:
         """Manage the options."""
         if user_input is not None:
+            # Validate min/max SOC relationship
+            if user_input[CONF_MIN_SOC] >= user_input[CONF_MAX_SOC]:
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=self._get_options_schema(),
+                    errors={"base": "min_greater_than_max"},
+                )
+            
             # Update config entry
             self.hass.config_entries.async_update_entry(
                 self._config_entry, data={**self._config_entry.data, **user_input}
             )
             return self.async_create_entry(title="", data={})
 
-        # Allow reconfiguring key parameters and program entities
-        schema = vol.Schema(
+        return self.async_show_form(step_id="init", data_schema=self._get_options_schema())
+    
+    def _get_options_schema(self) -> vol.Schema:
+        """Get options schema with all parameters for calculate_usable_capacity."""
+        return vol.Schema(
             {
+                vol.Optional(
+                    CONF_BATTERY_CAPACITY_AH,
+                    default=self._config_entry.data.get(
+                        CONF_BATTERY_CAPACITY_AH, DEFAULT_BATTERY_CAPACITY_AH
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=1000)),
+                vol.Optional(
+                    CONF_BATTERY_VOLTAGE,
+                    default=self._config_entry.data.get(
+                        CONF_BATTERY_VOLTAGE, DEFAULT_BATTERY_VOLTAGE
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=12, max=600)),
                 vol.Optional(
                     CONF_MIN_SOC,
                     default=self._config_entry.data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC),
@@ -579,5 +602,3 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
             }
         )
-
-        return self.async_show_form(step_id="init", data_schema=schema)
