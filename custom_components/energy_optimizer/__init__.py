@@ -2,23 +2,18 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.helpers import entity_registry as er
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_change
 
 from .const import (
     DOMAIN,
     SERVICE_CALCULATE_CHARGE_SOC,
-    SERVICE_CALCULATE_SELL_ENERGY,
-    SERVICE_ESTIMATE_HEAT_PUMP,
     SERVICE_OPTIMIZE_SCHEDULE,
 )
-from .helpers import get_active_program_entity
 from .services import async_register_services
 
 if TYPE_CHECKING:
