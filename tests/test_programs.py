@@ -6,7 +6,7 @@ from unittest.mock import Mock, MagicMock
 # Import the function to test
 import sys
 sys.path.insert(0, '../custom_components/energy_optimizer')
-from custom_components.energy_optimizer import get_active_program_entity
+from custom_components.energy_optimizer.helpers import get_active_program_entity
 from custom_components.energy_optimizer.const import (
     CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START,
     CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START,

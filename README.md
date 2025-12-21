@@ -41,6 +41,56 @@ Energy Optimizer is a Home Assistant custom integration that intelligently manag
 - Compatible with any integration providing similar entities
 - Reconfigurable via Options Flow
 
+## Architecture
+
+Energy Optimizer follows Home Assistant best practices with a modular, maintainable architecture:
+
+### Module Structure
+
+```
+custom_components/energy_optimizer/
+├── __init__.py          # Integration setup (90 lines)
+├── config_flow.py       # Configuration UI
+├── const.py             # Constants and defaults
+├── manifest.json        # Integration metadata
+├── sensor.py            # Sensor platform (676 lines)
+├── services.yaml        # Service definitions
+├── strings.json         # UI translations
+├── helpers.py           # Utility functions (135 lines)
+├── services.py          # Service handlers (600 lines)
+├── coordinator.py       # Data coordinator scaffolding
+└── calculations/        # Calculation modules
+    ├── battery.py       # Battery calculations
+    ├── charging.py      # Charging logic
+    ├── energy.py        # Energy balance
+    ├── heat_pump.py     # Heat pump estimations
+    └── utils.py         # Math utilities
+```
+
+### Key Design Principles
+
+- **Separation of Concerns**: Service handlers, helpers, and calculations in dedicated modules
+- **HACS Compliance**: Follows Home Assistant Custom Component best practices
+- **Maintainability**: Small, focused modules (~90-600 lines each)
+- **Testability**: 48 unit tests covering edge cases and calculations
+- **Extensibility**: Easy to add new services and sensors
+
+### Service Architecture
+
+All service handlers are in `services.py`:
+- `handle_calculate_charge_soc` - Battery charging optimization
+- `handle_calculate_sell_energy` - Surplus energy calculation
+- `handle_estimate_heat_pump` - Heat pump consumption estimation
+- `handle_optimize_schedule` - Battery schedule optimization (3 scenarios)
+
+### Sensor Platform
+
+Base sensor class with coordinator integration:
+- Battery monitoring sensors (reserve, space, capacity)
+- Energy balance sensors (required energy, surplus)
+- Heat pump estimation sensor
+- Optimization tracking sensors (last balancing, history)
+
 ## Prerequisites
 
 ### Recommended Integrations
