@@ -21,7 +21,6 @@ CONF_MIN_SOC = "min_soc"
 CONF_MAX_SOC = "max_soc"
 CONF_BATTERY_CAPACITY_ENTITY = "battery_capacity_entity"
 
-CONF_TARGET_SOC_ENTITY = "target_soc_entity"
 CONF_WORK_MODE_ENTITY = "work_mode_entity"
 CONF_CHARGE_CURRENT_ENTITY = "charge_current_entity"
 CONF_DISCHARGE_CURRENT_ENTITY = "discharge_current_entity"

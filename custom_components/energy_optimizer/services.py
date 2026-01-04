@@ -256,12 +256,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 target_entity = program_entity
                 _LOGGER.info("Using program entity: %s", program_entity)
             else:
-                # Fall back to single target entity
-                target_entity = config.get("target_soc_entity")
-                if target_entity:
-                    _LOGGER.info("Using single target entity: %s", target_entity)
-                else:
-                    _LOGGER.warning("No target SOC entity configured (neither program nor single)")
+                _LOGGER.warning("No target SOC entity configured (neither program nor single)")
             
             # Write target SOC to the determined entity
             if target_entity:

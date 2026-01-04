@@ -63,14 +63,12 @@
         "title": "Control Entity Configuration",
         "description": "Select entities for controlling battery/inverter behavior. Configure either a single target SOC entity or use time-based programs in the next step.",
         "data": {
-          "target_soc_entity": "Target SOC Control (Optional)",
           "work_mode_entity": "Work Mode Control (Optional)",
           "charge_current_entity": "Charge Current Control (Optional)",
           "discharge_current_entity": "Discharge Current Control (Optional)",
           "grid_charge_switch": "Grid Charge Switch (Optional)"
         },
         "data_description": {
-          "target_soc_entity": "Entity to set battery charge target. Leave empty if using time-based programs.",
           "work_mode_entity": "Entity to switch inverter work modes",
           "charge_current_entity": "Entity to control charge current limit",
           "discharge_current_entity": "Entity to control discharge current limit",

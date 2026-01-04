@@ -55,7 +55,6 @@ from .const import (
     CONF_PV_FORECAST_TODAY,
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PEAK_FORECAST,
-    CONF_TARGET_SOC_ENTITY,
     CONF_TODAY_LOAD_SENSOR,
     CONF_TOMORROW_PRICE_SENSOR,
     CONF_WEATHER_FORECAST,
@@ -236,9 +235,6 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Optional(CONF_TARGET_SOC_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="number")
-                ),
                 vol.Optional(CONF_WORK_MODE_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="select")
                 ),
@@ -361,9 +357,11 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Optional(CONF_TODAY_LOAD_SENSOR): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor"),
-                    description={"suggested_value": "sensor.load_usage_daily"}
+                vol.Optional(
+                    CONF_TODAY_LOAD_SENSOR,
+                    description={"suggested_value": "sensor.load_usage_daily"},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(CONF_LOAD_USAGE_00_04): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
@@ -439,9 +437,6 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         review_data = {
             "Price Sensor": self._data.get(CONF_PRICE_SENSOR, "Not configured"),
             "Battery SOC": self._data.get(CONF_BATTERY_SOC_SENSOR, "Not configured"),
-            "Target SOC Control": self._data.get(
-                CONF_TARGET_SOC_ENTITY, "Not configured"
-            ),
             "Battery Capacity": f"{self._data.get(CONF_BATTERY_CAPACITY_AH, 0)} Ah",
             "Battery Voltage": f"{self._data.get(CONF_BATTERY_VOLTAGE, 0)} V",
         }
@@ -528,14 +523,6 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Validate control entity configuration."""
         errors = {}
 
-        # Check target SOC entity if provided (now optional)
-        if CONF_TARGET_SOC_ENTITY in user_input and user_input[CONF_TARGET_SOC_ENTITY]:
-            target_state = self.hass.states.get(user_input[CONF_TARGET_SOC_ENTITY])
-            if not target_state:
-                errors[CONF_TARGET_SOC_ENTITY] = "entity_not_found"
-            elif target_state.domain != "number":
-                errors[CONF_TARGET_SOC_ENTITY] = "not_number_entity"
-
         return errors
 
     async def _validate_program_entities(
@@ -545,7 +532,6 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         # Check that at least one targeting method is configured
-        has_single_target = self._data.get(CONF_TARGET_SOC_ENTITY)
         has_programs = False
 
         # Validate each configured program
@@ -579,7 +565,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
 
         # Ensure at least one targeting method is configured
-        if not has_single_target and not has_programs:
+        if not has_programs:
             errors["base"] = "no_target_configured"
 
         return errors
