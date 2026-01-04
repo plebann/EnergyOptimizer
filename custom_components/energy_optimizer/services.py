@@ -5,6 +5,7 @@ from datetime import datetime
 import logging
 from typing import TYPE_CHECKING
 
+from custom_components.energy_optimizer.const import CONF_MAX_SOC, DEFAULT_MAX_CHARGE_CURRENT, DEFAULT_MAX_SOC
 from homeassistant.core import ServiceCall
 from homeassistant.util import dt as dt_util
 
@@ -426,11 +427,13 @@ async def async_register_services(hass: HomeAssistant) -> None:
         
         from .calculations.battery import calculate_battery_space
         from .const import (
+            CONF_MAX_SOC,
             CONF_BALANCING_INTERVAL_DAYS,
             CONF_BALANCING_PV_THRESHOLD,
             CONF_BATTERY_SOC_SENSOR,
             CONF_MAX_CHARGE_CURRENT_ENTITY,
             CONF_PROG1_SOC_ENTITY,
+            CONF_PROG2_SOC_ENTITY,
             CONF_PROG6_SOC_ENTITY,
             CONF_PV_FORECAST_TOMORROW,
             DEFAULT_BALANCING_INTERVAL_DAYS,
@@ -514,35 +517,36 @@ async def async_register_services(hass: HomeAssistant) -> None:
 
             # Set program SOC targets to 100%
             prog1_soc = config.get(CONF_PROG1_SOC_ENTITY)
+            prog2_soc = config.get(CONF_PROG2_SOC_ENTITY)
             prog6_soc = config.get(CONF_PROG6_SOC_ENTITY)
-            max_charge_current = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
+            max_soc = config.get(CONF_MAX_SOC, DEFAULT_MAX_SOC)
+            max_charge_current_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
+            max_charge_current = DEFAULT_MAX_CHARGE_CURRENT
 
-            if prog1_soc:
+            async def _set_program_soc(entity_id: str | None, value: float) -> None:
+                """Set a program SOC entity if provided."""
+                if not entity_id:
+                    return
                 await hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": prog1_soc, "value": 100},
+                    {"entity_id": entity_id, "value": value},
                     blocking=True,
                 )
-                _LOGGER.debug("Set %s to 100%%", prog1_soc)
+                _LOGGER.debug("Set %s to %s%%", entity_id, value)
 
-            if prog6_soc:
+            await _set_program_soc(prog1_soc, max_soc)
+            await _set_program_soc(prog2_soc, max_soc)
+            await _set_program_soc(prog6_soc, max_soc)
+
+            if max_charge_current_entity:
                 await hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": prog6_soc, "value": 100},
+                    {"entity_id": max_charge_current_entity, "value": max_charge_current},
                     blocking=True,
                 )
-                _LOGGER.debug("Set %s to 100%%", prog6_soc)
-
-            if max_charge_current:
-                await hass.services.async_call(
-                    "number",
-                    "set_value",
-                    {"entity_id": max_charge_current, "value": 23},
-                    blocking=True,
-                )
-                _LOGGER.debug("Set %s to 23A", max_charge_current)
+                _LOGGER.debug("Set %s to %sA", max_charge_current_entity, max_charge_current)
 
             # Note: Balancing timestamp will be updated automatically
             # when SOC stays above 97% for 2+ hours (checked in check_and_update_balancing_completion)
@@ -706,23 +710,9 @@ async def async_register_services(hass: HomeAssistant) -> None:
 
             prog1_soc = config.get(CONF_PROG1_SOC_ENTITY)
 
-            if prog1_soc:
-                await hass.services.async_call(
-                    "number",
-                    "set_value",
-                    {"entity_id": prog1_soc, "value": min_soc},
-                    blocking=True,
-                )
-                _LOGGER.debug("Set %s to %.0f%%", prog1_soc, min_soc)
-
-            if prog6_soc:
-                await hass.services.async_call(
-                    "number",
-                    "set_value",
-                    {"entity_id": prog6_soc, "value": min_soc},
-                    blocking=True,
-                )
-                _LOGGER.debug("Set %s to %.0f%%", prog6_soc, min_soc)
+            await _set_program_soc(prog1_soc, min_soc)
+            await _set_program_soc(prog2_soc, min_soc)
+            await _set_program_soc(prog6_soc, min_soc)
 
             # Log to optimization sensors
             if "last_optimization_sensor" in hass.data[DOMAIN][entry.entry_id]:
