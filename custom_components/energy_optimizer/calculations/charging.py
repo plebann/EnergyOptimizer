@@ -4,55 +4,6 @@ from __future__ import annotations
 from .battery import kwh_to_soc, soc_to_kwh
 
 
-def calculate_charge_current(
-    energy_kwh: float, current_soc: float, capacity_ah: float, voltage: float
-) -> float:
-    """Calculate required charge current for target energy.
-    
-    Args:
-        energy_kwh: Energy to charge (kWh)
-        current_soc: Current state of charge (%)
-        capacity_ah: Battery capacity (Ah)
-        voltage: Battery voltage (V)
-        
-    Returns:
-        Required charge current (A)
-    """
-    if voltage == 0:
-        return 0.0
-    
-    # Use multi-phase logic
-    return get_expected_current_multi_phase(energy_kwh, current_soc, capacity_ah, voltage)
-
-
-def calculate_charge_time(
-    energy_kwh: float, current_a: float, voltage: float, efficiency: float
-) -> float:
-    """Calculate estimated charge time.
-    
-    Args:
-        energy_kwh: Energy to charge (kWh)
-        current_a: Charge current (A)
-        voltage: Battery voltage (V)
-        efficiency: Charge efficiency (%)
-        
-    Returns:
-        Charge time (hours)
-    """
-    if current_a == 0 or efficiency == 0:
-        return 0.0
-    
-    # Account for efficiency losses
-    required_energy = energy_kwh / (efficiency / 100.0)
-    
-    # Time = Energy / Power, where Power = Voltage * Current
-    power_kw = voltage * current_a / 1000.0
-    if power_kw == 0:
-        return 0.0
-    
-    return required_energy / power_kw
-
-
 def get_expected_current_multi_phase(
     energy_to_charge: float, current_soc: float, capacity_ah: float, voltage: float
 ) -> float:

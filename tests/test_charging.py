@@ -2,8 +2,6 @@
 import pytest
 
 from custom_components.energy_optimizer.calculations.charging import (
-    calculate_charge_current,
-    calculate_charge_time,
     get_expected_current_multi_phase,
 )
 
@@ -28,29 +26,3 @@ def test_get_expected_current_multi_phase():
     # No charging needed
     assert get_expected_current_multi_phase(0, 50, 200, 48) == 0.0
 
-
-def test_calculate_charge_time():
-    """Test charge time calculation."""
-    # 5 kWh at 23A, 48V, 95% efficiency
-    # Power = 48V * 23A / 1000 = 1.104 kW
-    # Required = 5 / 0.95 = 5.26 kWh
-    # Time = 5.26 / 1.104 = ~4.76 hours
-    time = calculate_charge_time(5, 23, 48, 95)
-    assert time == pytest.approx(4.76, rel=0.01)
-    
-    # Zero current should return 0
-    assert calculate_charge_time(5, 0, 48, 95) == 0.0
-    
-    # Zero efficiency should return 0
-    assert calculate_charge_time(5, 23, 48, 0) == 0.0
-
-
-def test_calculate_charge_current():
-    """Test charge current calculation."""
-    # Should use multi-phase logic
-    current = calculate_charge_current(3.0, 50, 200, 48)
-    assert current > 0
-    
-    # Zero energy should return valid current (but calculation will show 0)
-    current = calculate_charge_current(0, 50, 200, 48)
-    assert current >= 0

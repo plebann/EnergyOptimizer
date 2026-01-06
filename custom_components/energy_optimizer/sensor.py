@@ -26,29 +26,22 @@ from .calculations.battery import (
     calculate_total_capacity,
     calculate_usable_capacity,
 )
-from .calculations.energy import calculate_required_energy, calculate_surplus_energy
-from .calculations.heat_pump import estimate_daily_consumption
 from .const import (
     CONF_BATTERY_CAPACITY_AH,
     CONF_BATTERY_EFFICIENCY,
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
-    CONF_COP_CURVE,
     CONF_DAILY_LOAD_SENSOR,
-    CONF_DAILY_LOSSES_SENSOR,
     CONF_ENABLE_HEAT_PUMP,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
     CONF_OUTSIDE_TEMP_SENSOR,
-    CONF_PV_FORECAST_TODAY,
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
-    DEFAULT_COP_CURVE,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_SOC,
     DOMAIN,
-    SENSOR_LAST_BALANCING_TIMESTAMP,
     UPDATE_INTERVAL_FAST,
 )
 
@@ -64,11 +57,16 @@ async def async_setup_entry(
     config = config_entry.data
 
     # Create coordinator for sensor updates
+    async def _async_update_data() -> None:
+        """No-op update; entities push their own state."""
+        return None
+
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
         name="energy_optimizer",
         update_interval=timedelta(seconds=UPDATE_INTERVAL_FAST),
+        update_method=_async_update_data,
     )
 
     # Create sensors
@@ -202,7 +200,6 @@ class BatteryReserveSensor(EnergyOptimizerSensor):
     _attr_name = "Battery Reserve"
     _attr_unique_id = "battery_reserve"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-arrow-up"
 
@@ -227,7 +224,6 @@ class BatterySpaceSensor(EnergyOptimizerSensor):
     _attr_name = "Battery Space"
     _attr_unique_id = "battery_space"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-arrow-down"
 
@@ -252,7 +248,6 @@ class BatteryCapacitySensor(EnergyOptimizerSensor):
     _attr_name = "Battery Capacity"
     _attr_unique_id = "battery_capacity"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery"
 
@@ -271,7 +266,6 @@ class UsableCapacitySensor(EnergyOptimizerSensor):
     _attr_name = "Usable Capacity"
     _attr_unique_id = "usable_capacity"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-check"
 
@@ -284,313 +278,6 @@ class UsableCapacitySensor(EnergyOptimizerSensor):
             self.config.get(CONF_MIN_SOC, 10),
             self.config.get(CONF_MAX_SOC, 100),
         )
-
-
-class RequiredEnergyMorningSensor(EnergyOptimizerSensor):
-    """Sensor for required energy until noon."""
-
-    _attr_name = "Required Energy Morning"
-    _attr_unique_id = "required_energy_morning"
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_icon = "mdi:weather-sunset-up"
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the state of the sensor."""
-        from datetime import datetime
-        from .calculations.energy import calculate_required_energy_windowed
-        
-        # Try time-windowed calculation first
-        if self._has_time_windowed_config():
-            now = datetime.now()
-            try:
-                return calculate_required_energy_windowed(
-                    start_hour=0,
-                    end_hour=12,
-                    config=self.config,
-                    hass_states_get=self.hass.states.get,
-                    efficiency=self.config.get(CONF_BATTERY_EFFICIENCY, 95),
-                    current_hour=now.hour,
-                    current_minute=now.minute,
-                )
-            except Exception as ex:
-                _LOGGER.warning(
-                    "Time-windowed calculation failed for %s, falling back: %s",
-                    self.name, ex
-                )
-        
-        # Fallback to legacy calculation
-        daily_load = self._get_sensor_state(self.config.get(CONF_DAILY_LOAD_SENSOR))
-        if daily_load is None:
-            return None
-
-        hourly_usage = daily_load / 24
-        return calculate_required_energy(
-            hourly_usage,
-            0,
-            12,  # Morning until noon
-            self.config.get(CONF_BATTERY_EFFICIENCY, 95),
-        )
-    
-    def _has_time_windowed_config(self) -> bool:
-        """Check if time-windowed sensors are configured."""
-        from .const import (
-            CONF_LOAD_USAGE_00_04,
-            CONF_LOAD_USAGE_04_08,
-            CONF_LOAD_USAGE_08_12,
-            CONF_LOAD_USAGE_12_16,
-            CONF_LOAD_USAGE_16_20,
-            CONF_LOAD_USAGE_20_24,
-        )
-        
-        return any(
-            self.config.get(key)
-            for key in [
-                CONF_LOAD_USAGE_00_04,
-                CONF_LOAD_USAGE_04_08,
-                CONF_LOAD_USAGE_08_12,
-                CONF_LOAD_USAGE_12_16,
-                CONF_LOAD_USAGE_16_20,
-                CONF_LOAD_USAGE_20_24,
-            ]
-        )
-
-
-class RequiredEnergyAfternoonSensor(EnergyOptimizerSensor):
-    """Sensor for required energy in afternoon."""
-
-    _attr_name = "Required Energy Afternoon"
-    _attr_unique_id = "required_energy_afternoon"
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_icon = "mdi:weather-sunny"
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the state of the sensor."""
-        from datetime import datetime
-        from .calculations.energy import calculate_required_energy_windowed
-        
-        # Try time-windowed calculation first
-        if self._has_time_windowed_config():
-            now = datetime.now()
-            try:
-                return calculate_required_energy_windowed(
-                    start_hour=12,
-                    end_hour=18,
-                    config=self.config,
-                    hass_states_get=self.hass.states.get,
-                    efficiency=self.config.get(CONF_BATTERY_EFFICIENCY, 95),
-                    current_hour=now.hour,
-                    current_minute=now.minute,
-                )
-            except Exception as ex:
-                _LOGGER.warning(
-                    "Time-windowed calculation failed for %s, falling back: %s",
-                    self.name, ex
-                )
-        
-        # Fallback to legacy calculation
-        daily_load = self._get_sensor_state(self.config.get(CONF_DAILY_LOAD_SENSOR))
-        if daily_load is None:
-            return None
-
-        hourly_usage = daily_load / 24
-        return calculate_required_energy(
-            hourly_usage,
-            0,
-            6,  # Afternoon 12:00-18:00
-            self.config.get(CONF_BATTERY_EFFICIENCY, 95),
-        )
-    
-    def _has_time_windowed_config(self) -> bool:
-        """Check if time-windowed sensors are configured."""
-        from .const import (
-            CONF_LOAD_USAGE_00_04,
-            CONF_LOAD_USAGE_04_08,
-            CONF_LOAD_USAGE_08_12,
-            CONF_LOAD_USAGE_12_16,
-            CONF_LOAD_USAGE_16_20,
-            CONF_LOAD_USAGE_20_24,
-        )
-        
-        return any(
-            self.config.get(key)
-            for key in [
-                CONF_LOAD_USAGE_00_04,
-                CONF_LOAD_USAGE_04_08,
-                CONF_LOAD_USAGE_08_12,
-                CONF_LOAD_USAGE_12_16,
-                CONF_LOAD_USAGE_16_20,
-                CONF_LOAD_USAGE_20_24,
-            ]
-        )
-
-
-class RequiredEnergyEveningSensor(EnergyOptimizerSensor):
-    """Sensor for required energy in evening."""
-
-    _attr_name = "Required Energy Evening"
-    _attr_unique_id = "required_energy_evening"
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_icon = "mdi:weather-night"
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the state of the sensor."""
-        from datetime import datetime
-        from .calculations.energy import calculate_required_energy_windowed
-        
-        # Try time-windowed calculation first
-        if self._has_time_windowed_config():
-            now = datetime.now()
-            try:
-                return calculate_required_energy_windowed(
-                    start_hour=18,
-                    end_hour=22,
-                    config=self.config,
-                    hass_states_get=self.hass.states.get,
-                    efficiency=self.config.get(CONF_BATTERY_EFFICIENCY, 95),
-                    current_hour=now.hour,
-                    current_minute=now.minute,
-                )
-            except Exception as ex:
-                _LOGGER.warning(
-                    "Time-windowed calculation failed for %s, falling back: %s",
-                    self.name, ex
-                )
-        
-        # Fallback to legacy calculation
-        daily_load = self._get_sensor_state(self.config.get(CONF_DAILY_LOAD_SENSOR))
-        if daily_load is None:
-            return None
-        daily_losses = self._get_sensor_state(self.config.get(CONF_DAILY_LOSSES_SENSOR))
-        if daily_losses is None:
-            return None
-
-        hourly_usage = daily_load / 24
-        hourly_losses = daily_losses / 24
-        return calculate_required_energy(
-            hourly_usage,
-            0,
-            4,  # Evening 18:00-22:00
-            self.config.get(CONF_BATTERY_EFFICIENCY, 95),
-        )
-    
-    def _has_time_windowed_config(self) -> bool:
-        """Check if time-windowed sensors are configured."""
-        from .const import (
-            CONF_LOAD_USAGE_00_04,
-            CONF_LOAD_USAGE_04_08,
-            CONF_LOAD_USAGE_08_12,
-            CONF_LOAD_USAGE_12_16,
-            CONF_LOAD_USAGE_16_20,
-            CONF_LOAD_USAGE_20_24,
-        )
-        
-        return any(
-            self.config.get(key)
-            for key in [
-                CONF_LOAD_USAGE_00_04,
-                CONF_LOAD_USAGE_04_08,
-                CONF_LOAD_USAGE_08_12,
-                CONF_LOAD_USAGE_12_16,
-                CONF_LOAD_USAGE_16_20,
-                CONF_LOAD_USAGE_20_24,
-            ]
-        )
-
-
-class SurplusEnergySensor(EnergyOptimizerSensor):
-    """Sensor for surplus energy available above requirements."""
-
-    _attr_name = "Surplus Energy"
-    _attr_unique_id = "surplus_energy"
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_icon = "mdi:battery-plus"
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the state of the sensor."""
-        soc = self._get_sensor_state(self.config.get(CONF_BATTERY_SOC_SENSOR))
-        daily_load = self._get_sensor_state(self.config.get(CONF_DAILY_LOAD_SENSOR))
-
-        if soc is None or daily_load is None:
-            return None
-
-        # Calculate battery reserve
-        battery_reserve = calculate_battery_reserve(
-            soc,
-            self.config.get(CONF_MIN_SOC, 10),
-            self.config.get(CONF_BATTERY_CAPACITY_AH, 200),
-            self.config.get(CONF_BATTERY_VOLTAGE, 48),
-        )
-
-        # Calculate required energy (simplified)
-        hourly_usage = daily_load / 24
-        required_energy = calculate_required_energy(
-            hourly_usage, 0, 6, self.config.get(CONF_BATTERY_EFFICIENCY, 95)
-        )
-
-        # Get PV forecast if available
-        pv_forecast = 0.0
-        if self.config.get(CONF_PV_FORECAST_TODAY):
-            pv_forecast = (
-                self._get_sensor_state(self.config.get(CONF_PV_FORECAST_TODAY)) or 0.0
-            )
-
-        return calculate_surplus_energy(battery_reserve, required_energy, pv_forecast)
-
-
-class HeatPumpEstimationSensor(EnergyOptimizerSensor):
-    """Sensor for daily heat pump consumption estimation."""
-
-    _attr_name = "Heat Pump Estimation"
-    _attr_unique_id = "heat_pump_estimation"
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_icon = "mdi:heat-pump"
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the state of the sensor."""
-        temp = self._get_sensor_state(self.config.get(CONF_OUTSIDE_TEMP_SENSOR))
-        if temp is None:
-            return None
-
-        # Simplified: use current temp as average, estimate min/max
-        min_temp = temp - 5
-        max_temp = temp + 5
-
-        cop_curve = self.config.get(CONF_COP_CURVE, DEFAULT_COP_CURVE)
-
-        return estimate_daily_consumption(
-            min_temp=min_temp,
-            max_temp=max_temp,
-            avg_temp=temp,
-            cop_curve=cop_curve,
-        )
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional attributes."""
-        temp = self._get_sensor_state(self.config.get(CONF_OUTSIDE_TEMP_SENSOR))
-        if temp is None:
-            return {}
-
-        return {
-            "outside_temperature": temp,
-            "estimated_min_temp": temp - 5,
-            "estimated_max_temp": temp + 5,
-        }
 
 
 class LastBalancingTimestampSensor(EnergyOptimizerSensor, RestoreSensor):

@@ -99,26 +99,3 @@ def calculate_heating_hours(
     heating_hours = int(24 * min(1.0, max(0.0, heating_fraction)))
     
     return heating_hours
-
-
-def calculate_peak_consumption(
-    min_temp: float, cop_curve: list[tuple[float, float]], rated_power: float = 2.5
-) -> float:
-    """Calculate peak heat pump power consumption.
-    
-    Args:
-        min_temp: Minimum temperature (°C)
-        cop_curve: List of (temperature, COP) tuples
-        rated_power: Rated heating power (kW)
-        
-    Returns:
-        Peak electrical consumption (kW)
-    """
-    # COP at minimum temperature
-    cop_at_min = interpolate_cop(min_temp, cop_curve)
-    
-    if cop_at_min == 0:
-        return 0.0
-    
-    # Peak electrical power = Heating power / COP
-    return rated_power / cop_at_min

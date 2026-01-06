@@ -48,7 +48,7 @@ estimate_heat_pump_usage:
   fields:
     date:
       name: Date
-      description: Date to estimate (default: today)
+      description: "Date to estimate (default: today)"
       required: false
       selector:
         date:
@@ -59,7 +59,7 @@ overnight_schedule:
   fields:
     date:
       name: Date
-      description: Date to optimize (default: tomorrow)
+      description: "Date to optimize (default: tomorrow)"
       required: false
       selector:
         date:
