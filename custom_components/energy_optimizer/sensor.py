@@ -83,21 +83,6 @@ async def async_setup_entry(
         MaxSocSensor(coordinator, config_entry, config),
     ]
 
-    # Add energy balance sensors if daily load sensor configured
-    if config.get(CONF_DAILY_LOAD_SENSOR):
-        sensors.extend(
-            [
-                RequiredEnergyMorningSensor(coordinator, config_entry, config),
-                RequiredEnergyAfternoonSensor(coordinator, config_entry, config),
-                RequiredEnergyEveningSensor(coordinator, config_entry, config),
-                SurplusEnergySensor(coordinator, config_entry, config),
-            ]
-        )
-
-    # Add heat pump sensor if enabled
-    if config.get(CONF_ENABLE_HEAT_PUMP) and config.get(CONF_OUTSIDE_TEMP_SENSOR):
-        sensors.append(HeatPumpEstimationSensor(coordinator, config_entry, config))
-
     # Add last balancing timestamp sensor
     last_balancing_sensor = LastBalancingTimestampSensor(
         coordinator, config_entry, config
