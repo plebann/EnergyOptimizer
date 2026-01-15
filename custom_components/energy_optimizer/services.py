@@ -595,7 +595,16 @@ async def async_register_services(hass: HomeAssistant) -> None:
         if current_soc is None:
             _LOGGER.warning("Current battery SOC not available, skipping preservation check")
             return
-
+        
+        min_soc = config.get("min_soc", 15)
+        if current_soc < min_soc:
+            _LOGGER.info(
+                "Current SOC %.1f%% below minimum %.1f%%, using min_soc as lock target",
+                current_soc,
+                min_soc,
+            )
+            current_soc = min_soc
+        
         # Calculate battery space
         capacity_ah = config.get("battery_capacity_ah", 200)
         voltage = config.get("battery_voltage", 48)
