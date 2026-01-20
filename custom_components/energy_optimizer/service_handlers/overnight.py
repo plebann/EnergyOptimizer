@@ -45,6 +45,11 @@ async def async_handle_overnight_schedule(hass: HomeAssistant, call: ServiceCall
     entry = entries[0]
     config = entry.data
 
+    # Program SOC entity IDs reused across scenarios
+    prog1_soc = config.get(CONF_PROG1_SOC_ENTITY)
+    prog2_soc = config.get(CONF_PROG2_SOC_ENTITY)
+    prog6_soc = config.get(CONF_PROG6_SOC_ENTITY)
+
     async def _set_program_soc(entity_id: str | None, value: float) -> None:
         """Set a program SOC entity if provided."""
         if not entity_id:
@@ -124,9 +129,6 @@ async def async_handle_overnight_schedule(hass: HomeAssistant, call: ServiceCall
         )
 
         # Set program SOC targets to 100%
-        prog1_soc = config.get(CONF_PROG1_SOC_ENTITY)
-        prog2_soc = config.get(CONF_PROG2_SOC_ENTITY)
-        prog6_soc = config.get(CONF_PROG6_SOC_ENTITY)
         max_soc = config.get(CONF_MAX_SOC, DEFAULT_MAX_SOC)
         max_charge_current_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
         max_charge_current = DEFAULT_MAX_CHARGE_CURRENT
@@ -227,9 +229,6 @@ async def async_handle_overnight_schedule(hass: HomeAssistant, call: ServiceCall
             battery_space,
         )
 
-        prog1_soc = config.get(CONF_PROG1_SOC_ENTITY)
-        prog6_soc = config.get(CONF_PROG6_SOC_ENTITY)
-
         # Lock battery at current SOC to avoid inefficient charge/discharge cycles
         if prog1_soc:
             await hass.services.async_call(
@@ -310,8 +309,6 @@ async def async_handle_overnight_schedule(hass: HomeAssistant, call: ServiceCall
             current_prog6_soc,
             min_soc,
         )
-
-        prog1_soc = config.get(CONF_PROG1_SOC_ENTITY)
 
         await _set_program_soc(prog1_soc, min_soc)
         await _set_program_soc(prog2_soc, min_soc)
