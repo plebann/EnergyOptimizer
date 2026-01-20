@@ -96,10 +96,8 @@ DEFAULT_COP_CURVE = [
 ]
 
 # Services
-SERVICE_CALCULATE_CHARGE_SOC = "calculate_charge_soc"
-SERVICE_CALCULATE_SELL_ENERGY = "calculate_sell_energy"
-SERVICE_ESTIMATE_HEAT_PUMP = "estimate_heat_pump_usage"
 SERVICE_OVERNIGHT_SCHEDULE = "overnight_schedule"
+SERVICE_MORNING_GRID_CHARGE = "morning_grid_charge"
 
 # Sensor types
 SENSOR_BATTERY_RESERVE = "battery_reserve"

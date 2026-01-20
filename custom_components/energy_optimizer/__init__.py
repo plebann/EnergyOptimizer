@@ -9,11 +9,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_change
 
-from .const import (
-    DOMAIN,
-    SERVICE_CALCULATE_CHARGE_SOC,
-    SERVICE_OVERNIGHT_SCHEDULE,
-)
+from .const import DOMAIN, SERVICE_OVERNIGHT_SCHEDULE
 from .services import async_register_services
 
 if TYPE_CHECKING:
@@ -39,7 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Register services (only once, not per config entry)
-    if not hass.services.has_service(DOMAIN, SERVICE_CALCULATE_CHARGE_SOC):
+    if not hass.services.has_service(DOMAIN, SERVICE_OVERNIGHT_SCHEDULE):
         await async_register_services(hass)
 
     # Register automatic daily overnight handling at 22:00

@@ -4,10 +4,8 @@ Intelligent battery charging and energy optimization for Home Assistant.
 
 ## Features
 
-- 🔋 Smart battery charge/discharge scheduling based on electricity prices
-- 💰 Cost optimization with price-based decision making
-- ☀️ PV forecast integration for intelligent charging
-- 🌡️ Heat pump consumption estimation
+- 🔋 Smart battery scheduling with overnight and morning routines
+- ☀️ PV forecast integration for intelligent charging decisions
 - 📊 Comprehensive energy monitoring sensors
 - 🔧 Flexible entity-based configuration
 
@@ -26,9 +24,7 @@ Intelligent battery charging and energy optimization for Home Assistant.
 
 ## Services
 
-- `calculate_charge_soc`: Calculate optimal charge target
-- `calculate_sell_energy`: Determine sellable surplus
-- `estimate_heat_pump_usage`: Forecast heat pump consumption
+- `morning_grid_charge`: Size and set Program 2 SOC for the morning window when reserve is insufficient
 - `overnight_schedule`: Generate daily optimization schedule
 
 ## Documentation

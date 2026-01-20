@@ -7,7 +7,6 @@ Energy Optimizer is a Home Assistant custom integration focused on price-aware b
 
 ## What It Does
 
-- Price-aware charging: compares current price to average, sizes required energy, and writes targets to the active program SOC entity.
 - Overnight handling: runs nightly at 22:00 (manual calls behave the same) and picks one of three modes using PV forecast, balancing cadence, and battery space:
    - Battery Balancing: if balancing is due and tomorrow's PV forecast is below the balancing PV threshold, set program SOCs 1/2/6 to max SOC and optional max charge current to 23 A.
    - Battery Preservation: if PV forecast × 0.9 is lower than available battery space, lock program SOC 1 and 6 to the current SOC (bounded by min SOC) to avoid inefficient cycling. Program 2 is intentionally untouched here because a separate 04:00 optimization will manage it.
@@ -15,18 +14,17 @@ Energy Optimizer is a Home Assistant custom integration focused on price-aware b
    - If none of the above match, no changes are made.
    - Balancing completion is stamped only after SOC stays ≥97% for 2 hours; schedule `check_and_update_balancing_completion` periodically (e.g., every 5 minutes) to advance the timestamp.
 - Balancing completion check: every 5 minutes, stamps last balancing when SOC stays ≥97% for 2 hours.
-- Optional heat pump estimate logging when enabled and a temperature sensor is provided.
+- Morning grid charge: at 04:00 (trigger via automation), if Program 2 SOC < 100% and battery reserve is below required morning energy (06:00-13:00), set Program 2 SOC to cover the deficit using windowed load sensors and daily losses.
 
 ## Behavior Notes
 
-- Targeting: calculate_charge_soc only writes to the active program SOC entity selected by configured start times; there is no single target SOC fallback.
 - Notifications: overnight_schedule sends notify messages when modes change. Service call data (`date`, `optimization_goal`) is currently ignored.
 - Data sources: services rely on current Home Assistant states; ensure numeric sensors return valid values.
 
 ## What’s Included
 
 - Platforms: Sensor only.
-- Services: calculate_charge_soc, calculate_sell_energy, estimate_heat_pump_usage, overnight_schedule.
+- Services: morning_grid_charge, overnight_schedule.
 - Sensors:
   - Battery: battery_reserve, battery_space, battery_capacity, usable_capacity
   - Config values: battery_capacity_ah, battery_voltage_config, battery_efficiency_config, min_soc_config, max_soc_config
@@ -40,11 +38,9 @@ Energy Optimizer is a Home Assistant custom integration focused on price-aware b
 
 ### Service Architecture
 
-All service handlers are in `services.py`:
-- `handle_calculate_charge_soc` - Battery charging optimization
-- `handle_calculate_sell_energy` - Surplus energy calculation
-- `handle_estimate_heat_pump` - Heat pump consumption estimation
-- `handle_overnight_schedule` - Battery schedule optimization (three scenarios at 22:00)
+Service handlers live in `custom_components/energy_optimizer/service_handlers/`:
+- `morning.py` - Morning grid charge sizing and Program 2 SOC adjustment
+- `overnight.py` - Battery schedule optimization (balancing/preservation/normal at 22:00)
 
 ### Sensor Platform
 
