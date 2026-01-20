@@ -27,6 +27,8 @@ from ..const import (
     DEFAULT_MIN_SOC,
     DOMAIN,
 )
+from .control import set_program_soc
+from .logging import get_logging_sensors, log_decision, notify_user
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -44,6 +46,8 @@ async def async_handle_morning_grid_charge(hass: HomeAssistant, call: ServiceCal
 
     entry = entries[0]
     config = entry.data
+
+    opt_sensor, hist_sensor = get_logging_sensors(hass, entry.entry_id)
 
     prog2_soc_entity = config.get(CONF_PROG2_SOC_ENTITY)
     if not prog2_soc_entity:
@@ -140,40 +144,36 @@ async def async_handle_morning_grid_charge(hass: HomeAssistant, call: ServiceCal
             required_kwh,
         )
 
-        if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
-            data = hass.data[DOMAIN][entry.entry_id]
-            if "last_optimization_sensor" in data:
-                data["last_optimization_sensor"].log_optimization(
-                    "Morning Grid Charge - No Action",
-                    {
-                        "reserve_kwh": round(reserve_kwh, 2),
-                        "required_kwh": round(required_kwh, 2),
-                        "lu_04_08": round(lu0408, 2),
-                        "lu_08_12": round(lu0812, 2),
-                        "lu_12_16": round(lu1216, 2),
-                    },
-                )
-            if "optimization_history_sensor" in data:
-                data["optimization_history_sensor"].add_entry(
-                    "Morning Grid Charge",
-                    {
-                        "result": "No action",
-                        "reserve": f"{reserve_kwh:.1f} kWh",
-                        "required": f"{required_kwh:.1f} kWh",
-                    },
-                )
+        log_decision(
+            opt_sensor,
+            hist_sensor,
+            "Morning Grid Charge - No Action",
+            {
+                "reserve_kwh": round(reserve_kwh, 2),
+                "required_kwh": round(required_kwh, 2),
+                "lu_04_08": round(lu0408, 2),
+                "lu_08_12": round(lu0812, 2),
+                "lu_12_16": round(lu1216, 2),
+            },
+            history_scenario="Morning Grid Charge",
+            history_details={
+                "result": "No action",
+                "reserve": f"{reserve_kwh:.1f} kWh",
+                "required": f"{required_kwh:.1f} kWh",
+            },
+        )
+
+        await notify_user(
+            hass,
+            f"Morning grid charge: no action (reserve {reserve_kwh:.1f} kWh >= required {required_kwh:.1f} kWh)",
+        )
         return
 
     deficit_kwh = required_kwh - reserve_kwh
     soc_delta = kwh_to_soc(deficit_kwh, capacity_ah, voltage)
     target_soc = min(current_soc + soc_delta, max_soc)
 
-    await hass.services.async_call(
-        "number",
-        "set_value",
-        {"entity_id": prog2_soc_entity, "value": target_soc},
-        blocking=True,
-    )
+    await set_program_soc(hass, prog2_soc_entity, target_soc, logger=_LOGGER)
 
     _LOGGER.info(
         "Morning grid charge set Program 2 SOC to %.1f%% (current SOC %.1f%%, reserve %.2f kWh, required %.2f kWh)",
@@ -183,32 +183,32 @@ async def async_handle_morning_grid_charge(hass: HomeAssistant, call: ServiceCal
         required_kwh,
     )
 
-    if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
-        data = hass.data[DOMAIN][entry.entry_id]
-        if "last_optimization_sensor" in data:
-            data["last_optimization_sensor"].log_optimization(
-                "Morning Grid Charge",
-                {
-                    "target_soc": round(target_soc, 1),
-                    "current_soc": round(current_soc, 1),
-                    "reserve_kwh": round(reserve_kwh, 2),
-                    "required_kwh": round(required_kwh, 2),
-                    "deficit_kwh": round(deficit_kwh, 2),
-                    "lu_04_08": round(lu0408, 2),
-                    "lu_08_12": round(lu0812, 2),
-                    "lu_12_16": round(lu1216, 2),
-                    "losses_kwh": round(losses_kwh, 2),
-                    "efficiency": round(efficiency, 1),
-                    "margin": margin,
-                },
-            )
-        if "optimization_history_sensor" in data:
-            data["optimization_history_sensor"].add_entry(
-                "Morning Grid Charge",
-                {
-                    "set_to": f"{target_soc:.0f}%",
-                    "required": f"{required_kwh:.1f} kWh",
-                    "reserve": f"{reserve_kwh:.1f} kWh",
-                    "deficit": f"{deficit_kwh:.1f} kWh",
-                },
-            )
+    log_decision(
+        opt_sensor,
+        hist_sensor,
+        "Morning Grid Charge",
+        {
+            "target_soc": round(target_soc, 1),
+            "current_soc": round(current_soc, 1),
+            "reserve_kwh": round(reserve_kwh, 2),
+            "required_kwh": round(required_kwh, 2),
+            "deficit_kwh": round(deficit_kwh, 2),
+            "lu_04_08": round(lu0408, 2),
+            "lu_08_12": round(lu0812, 2),
+            "lu_12_16": round(lu1216, 2),
+            "losses_kwh": round(losses_kwh, 2),
+            "efficiency": round(efficiency, 1),
+            "margin": margin,
+        },
+        history_details={
+            "set_to": f"{target_soc:.0f}%",
+            "required": f"{required_kwh:.1f} kWh",
+            "reserve": f"{reserve_kwh:.1f} kWh",
+            "deficit": f"{deficit_kwh:.1f} kWh",
+        },
+    )
+
+    await notify_user(
+        hass,
+        f"Morning grid charge set Program 2 SOC to {target_soc:.0f}%",
+    )
