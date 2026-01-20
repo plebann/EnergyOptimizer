@@ -124,322 +124,54 @@ While Energy Optimizer can work with any compatible entities, these integrations
 
 ### Manual Installation
 
-1. Download the latest release from [GitHub](https://github.com/plebann/EnergyOptimizer/releases)
-2. Extract the `custom_components/energy_optimizer` folder
-3. Copy to your Home Assistant `config/custom_components/` directory
-4. Restart Home Assistant
+# Energy Optimizer for Home Assistant
 
-## Configuration
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
+[![GitHub release](https://img.shields.io/github/release/plebann/EnergyOptimizer.svg)](https://github.com/plebann/EnergyOptimizer/releases)
 
-### Initial Setup
+Energy Optimizer is a Home Assistant custom integration focused on price-aware battery optimization with programmable SOC targets.
 
-1. Go to **Settings** → **Devices & Services**
-2. Click **+ Add Integration**
-3. Search for **Energy Optimizer**
-4. Follow the 9-step configuration wizard:
+## What It Does
 
-#### Step 1: Welcome
-- Read integration overview and recommendations
+- Price-aware charging: compares current price to average, sizes required energy, and writes targets to the active program SOC entity.
+- Overnight handling: runs nightly at 22:00 to choose one of three modes based on PV forecast and balancing interval:
+  - Battery Balancing (push to 100% and max charge current when due and PV is low)
+  - Battery Preservation (lock at current/min SOC when PV is insufficient for the available space)
+  - Normal Operation (restore program SOCs to minimum when conditions improve)
+- Balancing completion check: every 5 minutes, stamps last balancing when SOC stays ≥97% for 2 hours.
+- Optional heat pump estimate logging when enabled and a temperature sensor is provided.
 
-#### Step 2: Price Entities
-- **Required**: Current price sensor, Average price sensor
-- **Optional**: Cheapest/expensive window sensors, Tomorrow price sensor
+## What’s Included
 
-#### Step 3: Battery Sensors
-- **Required**: Battery SOC sensor, Battery power sensor
-- **Optional**: Voltage sensor, Current sensor
+- Platforms: Sensor only.
+- Services: calculate_charge_soc, calculate_sell_energy, estimate_heat_pump_usage, overnight_schedule.
+- Sensors:
+  - Battery: battery_reserve, battery_space, battery_capacity, usable_capacity
+  - Config values: battery_capacity_ah, battery_voltage_config, battery_efficiency_config, min_soc_config, max_soc_config
+  - Tracking: last_balancing_timestamp, last_optimization, optimization_history
 
-#### Step 4: Battery Parameters
-- **Capacity**: 200 Ah (default)
-- **Voltage**: 48V (default)
-- **Efficiency**: 95% (default)
-- **Min/Max SOC**: 10% / 100% (default)
+## Configuration (UI-Only)
 
-#### Step 5: Control Entities
-- **Required**: Target SOC control entity
-- **Optional**: Work mode, Charge/discharge current, Grid charge switch
+- Mandatory: price sensor, average price sensor, battery SOC sensor, battery power sensor, battery capacity/voltage/efficiency, min/max SOC, and at least one program SOC entity with a start-time entity.
+- Optional: program SOCs 2-6 with start times, PV forecast sensors, daily or windowed load sensors, work mode/charge/discharge/grid charge entities, heat pump toggle plus temperature/power sensors, balancing interval and PV threshold.
+- Options flow: adjust battery parameters, efficiency, balancing interval, and load-window sensors after setup.
 
-#### Step 6: PV & Load Configuration
-- **Optional**: Daily load sensor, PV forecast sensors, Weather entity
+## Behavior Notes
 
-#### Step 7: Heat Pump Configuration
-- **Optional**: Enable heat pump, Temperature sensor, Power sensor
+- Targeting: calculate_charge_soc only writes to the active program SOC entity selected by configured start times; there is no single target SOC fallback.
+- Notifications: overnight_schedule sends notify messages when modes change.
+- Data sources: services rely on current Home Assistant states; ensure numeric sensors return valid values.
 
-#### Step 8: Review
-- Verify all configured entities
+## Installation
 
-### Example Entity Configuration
-
-```yaml
-# Price entities (ha-rce-pse)
-price_sensor: sensor.rce_pse_price
-average_price_sensor: sensor.rce_pse_today_average_price
-cheapest_window_sensor: binary_sensor.rce_pse_today_cheapest_window_active
-expensive_window_sensor: binary_sensor.rce_pse_today_expensive_window_active
-
-# Battery sensors (ha-solarman)
-battery_soc_sensor: sensor.deye_hybrid_battery_soc
-battery_power_sensor: sensor.deye_hybrid_battery_power
-battery_voltage_sensor: sensor.deye_hybrid_battery_voltage
-battery_current_sensor: sensor.deye_hybrid_battery_current
-
-# Control entities (ha-solarman)
-target_soc_entity: number.deye_hybrid_max_soc
-work_mode_entity: select.deye_hybrid_work_mode
-charge_current_entity: number.deye_hybrid_max_charge_current
-
-# PV forecast (Solcast Solar)
-pv_forecast_today: sensor.solcast_pv_forecast_forecast_today
-pv_forecast_tomorrow: sensor.solcast_pv_forecast_forecast_tomorrow
-pv_forecast_remaining: sensor.solcast_pv_forecast_forecast_remaining_today
-```
-
-### Multi-Program Configuration (Solarman Inverters)
-
-For Solarman-compatible inverters (DEYE/Sunsynk/SolArk) with multiple time-based charging programs, you can configure up to 6 programmable SOC targets instead of a single entity. The integration will automatically select the appropriate program entity based on the current time.
-
-**When to Use Multi-Program Mode:**
-- Your inverter supports time-slot based charging (common in DEYE/Sunsynk/SolArk)
-- You want different SOC targets for different times of day
-- You're using the Solarman integration which exposes program entities
-
-**Configuration Example:**
-```yaml
-# Leave target_soc_entity empty or unconfigured
-
-# First, create input_datetime helpers to store the program start times:
-# input_datetime.prog1_start
-# input_datetime.prog2_start
-# input_datetime.prog3_start
-
-# Then configure the programs:
-# Program 1 - Night charging (cheap electricity)
-prog1_soc_entity: number.deye_hybrid_prog1_capacity
-prog1_time_start_entity: input_datetime.prog1_start  # Set to "22:00" in HA UI
-
-# Program 2 - Morning (after cheap tariff)
-prog2_soc_entity: number.deye_hybrid_prog2_capacity
-prog2_time_start_entity: input_datetime.prog2_start  # Set to "06:00" in HA UI
-
-# Program 3 - Afternoon (peak solar)
-prog3_soc_entity: number.deye_hybrid_prog3_capacity
-prog3_time_start_entity: input_datetime.prog3_start  # Set to "14:00" in HA UI
-
-# Programs 4-6 can be configured similarly
-```
-
-**How It Works:**
-1. During configuration, optionally configure time-based programs in addition to or instead of single target entity
-2. Program time starts must reference Home Assistant entities (input_datetime or sensor) that contain time values
-3. When `calculate_charge_soc` service runs, it reads the time from each configured entity and checks against current time
-4. If a matching time window is found, the corresponding program SOC entity is updated
-5. If no program matches, it falls back to the single `target_soc_entity` (if configured)
-6. Time windows can cross midnight (e.g., 22:00 to 06:00)
-
-**Entity Naming Patterns:**
-
-Solarman integration typically creates entities like:
-- `number.deye_hybrid_prog1_capacity` (SOC target for slot 1)
-- `number.deye_hybrid_prog2_capacity` (SOC target for slot 2)
-- `time.deye_hybrid_prog1_time` (Start time for slot 1)
-- etc.
-
-Check your Solarman integration entities for the exact naming pattern.
-
-**Migration from Single Entity:**
-
-Existing configurations using `target_soc_entity` will continue to work without changes. To migrate:
-1. Go to Integrations → Energy Optimizer → Configure
-2. Navigate to the Time Programs step
-3. Configure your desired program entities and time windows
-4. Optionally clear `target_soc_entity` if you only want program-based control
-
-## Services
-
-### `energy_optimizer.calculate_charge_soc`
-
-Calculate optimal battery charge target based on current conditions.
-
-**Parameters:**
-- `hours` (optional): Hours to cover with charge (default: 12)
-- `force_charge` (optional): Force charging regardless of price (default: false)
-
-**Example:**
-```yaml
-service: energy_optimizer.calculate_charge_soc
-data:
-  hours: 12
-  force_charge: false
-```
-
-### `energy_optimizer.calculate_sell_energy`
-
-Calculate sellable battery surplus based on price favorability.
-
-**Parameters:**
-- `min_profit_margin` (optional): Minimum price premium required (default: 20%)
-- `auto_set_work_mode` (optional): Automatically switch to sell mode (default: false)
-
-**Example:**
-```yaml
-service: energy_optimizer.calculate_sell_energy
-data:
-  min_profit_margin: 20
-  auto_set_work_mode: true
-```
-
-### `energy_optimizer.estimate_heat_pump_usage`
-
-Forecast daily heat pump consumption based on weather.
-
-**Parameters:**
-- `date` (optional): Date to estimate (default: today)
-
-**Example:**
-```yaml
-service: energy_optimizer.estimate_heat_pump_usage
-data:
-  date: "2024-12-21"
-```
-
-### `energy_optimizer.overnight_schedule`
-
-Generate optimal daily battery charge/discharge schedule.
-
-**Parameters:**
-- `date` (optional): Date to optimize (default: tomorrow)
-- `optimization_goal` (optional): Strategy - "cost_minimize", "self_consumption", "balanced" (default: "balanced")
-
-**Example:**
-```yaml
-service: energy_optimizer.overnight_schedule
-data:
-  date: "2024-12-21"
-  optimization_goal: "cost_minimize"
-```
-
-## Sensors
-
-| Sensor | Description | Unit |
-|--------|-------------|------|
-| `battery_reserve` | Energy above minimum SOC | kWh |
-| `battery_space` | Space available for charging | kWh |
-| `battery_capacity` | Total battery capacity | kWh |
-| `usable_capacity` | Usable capacity (between min/max SOC) | kWh |
-| `required_energy_morning` | Energy needed until noon | kWh |
-| `required_energy_afternoon` | Energy needed 12:00-18:00 | kWh |
-| `required_energy_evening` | Energy needed 18:00-22:00 | kWh |
-| `surplus_energy` | Available surplus above requirements | kWh |
-| `heat_pump_estimation` | Daily heat pump consumption forecast | kWh |
-
-## Automation Examples
-
-### Morning Grid Charging
-
-```yaml
-automation:
-  - alias: "Energy: Morning Cheap Charging"
-    trigger:
-      - platform: state
-        entity_id: binary_sensor.rce_pse_today_cheapest_window_active
-        to: "on"
-    condition:
-      - condition: numeric_state
-        entity_id: sensor.energy_optimizer_battery_soc
-        below: 80
-    action:
-      - service: energy_optimizer.calculate_charge_soc
-        data:
-          hours: 12
-          force_charge: true
-```
-
-### Evening Grid Selling
-
-```yaml
-automation:
-  - alias: "Energy: Evening Expensive Selling"
-    trigger:
-      - platform: state
-        entity_id: binary_sensor.rce_pse_today_expensive_window_active
-        to: "on"
-    condition:
-      - condition: numeric_state
-        entity_id: sensor.energy_optimizer_surplus_energy
-        above: 5
-    action:
-      - service: energy_optimizer.calculate_sell_energy
-        data:
-          min_profit_margin: 20
-          auto_set_work_mode: true
-```
-
-## Troubleshooting
-
-### Integration Not Loading
-- Check Home Assistant logs for errors
-- Verify all required entities exist and are accessible
-- Ensure Home Assistant version is 2024.1.0 or later
-
-### Sensors Show "Unavailable"
-- Verify source sensor entities are available
-- Check that battery SOC sensor provides numeric values
-- Review configuration in Settings → Integrations → Energy Optimizer
-
-### Services Not Working
-- Ensure target SOC entity is writable (number domain)
-- Check that price sensors provide numeric states
-- Verify service parameters are within valid ranges
-
-### Calculation Issues
-- Review battery parameters (capacity, voltage, efficiency)
-- Check SOC limits (min < max)
-- Ensure price sensors provide consistent units
-
-## Migration from YAML
-
-See [MIGRATION.md](docs/MIGRATION.md) for detailed migration guide from YAML-based automations.
-
-## Development
-
-### Running Tests
-
-```bash
-pytest tests/
-```
-
-### Code Quality
-
-```bash
-# Format code
-black custom_components/energy_optimizer/
-
-# Lint
-pylint custom_components/energy_optimizer/
-```
-
-## Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details
-
-## Credits
-
-- **Author**: [@plebann](https://github.com/plebann)
-- **Inspired by**: YAML-based energy optimization automations
-- **Dependencies**: Home Assistant Core, ha-rce-pse, ha-solarman, Solcast Solar
+- HACS: add the repository as a custom integration and install.
+- Manual: copy custom_components/energy_optimizer into your Home Assistant config and restart.
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/plebann/EnergyOptimizer/issues)
-- **Documentation**: [GitHub Wiki](https://github.com/plebann/EnergyOptimizer/wiki)
-- **Community**: [Home Assistant Community](https://community.home-assistant.io/)
+- Issues and requests: GitHub Issues.
+- Updates: GitHub Releases.
+
+## License
+
+- MIT License (see LICENSE).
