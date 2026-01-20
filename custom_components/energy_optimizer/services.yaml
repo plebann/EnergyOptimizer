@@ -1,27 +1,6 @@
 overnight_schedule:
   name: Overnight Schedule
   description: Generate optimal daily battery charge/discharge schedule
-  fields:
-    date:
-      name: Date
-      description: "Date to optimize (default: tomorrow)"
-      required: false
-      selector:
-        date:
-    optimization_goal:
-      name: Optimization Goal
-      description: Optimization strategy to use
-      required: false
-      default: "balanced"
-      selector:
-        select:
-          options:
-            - label: "Cost Minimize"
-              value: "cost_minimize"
-            - label: "Self Consumption"
-              value: "self_consumption"
-            - label: "Balanced"
-              value: "balanced"
 
 morning_grid_charge:
   name: Morning Grid Charge

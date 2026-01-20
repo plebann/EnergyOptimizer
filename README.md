@@ -18,7 +18,7 @@ Energy Optimizer is a Home Assistant custom integration focused on price-aware b
 
 ## Behavior Notes
 
-- Notifications: overnight_schedule sends notify messages when modes change. Service call data (`date`, `optimization_goal`) is currently ignored.
+- Notifications: overnight_schedule sends notify messages when modes change. The service is parameterless.
 - Data sources: services rely on current Home Assistant states; ensure numeric sensors return valid values.
 
 ## What’s Included
