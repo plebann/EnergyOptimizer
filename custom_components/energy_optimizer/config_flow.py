@@ -19,6 +19,7 @@ from .const import (
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
     CONF_BATTERY_VOLTAGE_SENSOR,
+    CONF_BALANCING_PV_THRESHOLD,
     CONF_BALANCING_INTERVAL_DAYS,
     CONF_CHARGE_CURRENT_ENTITY,
     CONF_CHEAPEST_WINDOW_SENSOR,
@@ -35,6 +36,7 @@ from .const import (
     CONF_LOAD_USAGE_12_16,
     CONF_LOAD_USAGE_16_20,
     CONF_LOAD_USAGE_20_24,
+    CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
     CONF_OUTSIDE_TEMP_SENSOR,
@@ -63,6 +65,7 @@ from .const import (
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
+    DEFAULT_BALANCING_PV_THRESHOLD,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_SOC,
     DOMAIN,
@@ -213,7 +216,12 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_BATTERY_CAPACITY_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(CONF_BALANCING_INTERVAL_DAYS, default=DEFAULT_BALANCING_INTERVAL_DAYS): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
+                vol.Optional(
+                    CONF_BALANCING_INTERVAL_DAYS, default=DEFAULT_BALANCING_INTERVAL_DAYS
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
+                vol.Optional(
+                    CONF_BALANCING_PV_THRESHOLD, default=DEFAULT_BALANCING_PV_THRESHOLD
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=200)),
             }
         )
 
@@ -242,6 +250,9 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_DISCHARGE_CURRENT_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(CONF_MAX_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_GRID_CHARGE_SWITCH): selector.EntitySelector(
@@ -523,6 +534,15 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Validate control entity configuration."""
         errors = {}
 
+        # Validate max charge current entity if provided
+        max_charge_entity = user_input.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
+        if max_charge_entity:
+            max_charge_state = self.hass.states.get(max_charge_entity)
+            if not max_charge_state:
+                errors[CONF_MAX_CHARGE_CURRENT_ENTITY] = "entity_not_found"
+            elif max_charge_state.domain != "number":
+                errors[CONF_MAX_CHARGE_CURRENT_ENTITY] = "not_number_entity"
+
         return errors
 
     async def _validate_program_entities(
@@ -652,6 +672,12 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     ),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
                 vol.Optional(
+                    CONF_BALANCING_PV_THRESHOLD,
+                    default=self._config_entry.data.get(
+                        CONF_BALANCING_PV_THRESHOLD, DEFAULT_BALANCING_PV_THRESHOLD
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=200)),
+                vol.Optional(
                     CONF_DAILY_LOSSES_SENSOR,
                     default=self._config_entry.data.get(CONF_DAILY_LOSSES_SENSOR)
                 ): selector.EntitySelector(
@@ -698,6 +724,14 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     default=self._config_entry.data.get(CONF_LOAD_USAGE_20_24)
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_MAX_CHARGE_CURRENT_ENTITY,
+                    default=self._config_entry.data.get(
+                        CONF_MAX_CHARGE_CURRENT_ENTITY
+                    ),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
                 ),
             }
         )

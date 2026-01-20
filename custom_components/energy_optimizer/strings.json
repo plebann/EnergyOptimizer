@@ -48,7 +48,9 @@
           "battery_efficiency": "Battery Efficiency (%)",
           "min_soc": "Minimum SOC (%)",
           "max_soc": "Maximum SOC (%)",
-          "battery_capacity_entity": "Battery Capacity Entity (Optional)"
+          "battery_capacity_entity": "Battery Capacity Entity (Optional)",
+          "balancing_interval_days": "Balancing Interval (Days)",
+          "balancing_pv_threshold_kwh": "Balancing PV Threshold (kWh)"
         },
         "data_description": {
           "battery_capacity_ah": "Battery capacity in Ampere-hours",
@@ -56,7 +58,9 @@
           "battery_efficiency": "Round-trip efficiency (90-95% typical)",
           "min_soc": "Minimum SOC to preserve battery health",
           "max_soc": "Maximum SOC (may be limited by inverter)",
-          "battery_capacity_entity": "Entity to read/write capacity dynamically"
+          "battery_capacity_entity": "Entity to read/write capacity dynamically",
+          "balancing_interval_days": "How often to trigger full balancing if PV forecast is low (default 14 days)",
+          "balancing_pv_threshold_kwh": "Only enable balancing when tomorrow's PV forecast is below this threshold"
         }
       },
       "control_entities": {
@@ -66,12 +70,14 @@
           "work_mode_entity": "Work Mode Control (Optional)",
           "charge_current_entity": "Charge Current Control (Optional)",
           "discharge_current_entity": "Discharge Current Control (Optional)",
+          "max_charge_current_entity": "Max Charge Current (Optional)",
           "grid_charge_switch": "Grid Charge Switch (Optional)"
         },
         "data_description": {
           "work_mode_entity": "Entity to switch inverter work modes",
           "charge_current_entity": "Entity to control charge current limit",
           "discharge_current_entity": "Entity to control discharge current limit",
+          "max_charge_current_entity": "Entity to cap charge current (set to default 23A during balancing)",
           "grid_charge_switch": "Switch to enable/disable grid charging"
         }
       },
@@ -170,14 +176,20 @@
           "battery_voltage": "Battery Nominal Voltage (V)",
           "min_soc": "Minimum SOC (%)",
           "max_soc": "Maximum SOC (%)",
-          "battery_efficiency": "Battery Efficiency (%)"
+          "battery_efficiency": "Battery Efficiency (%)",
+          "balancing_interval_days": "Balancing Interval (Days)",
+          "balancing_pv_threshold_kwh": "Balancing PV Threshold (kWh)",
+          "max_charge_current_entity": "Max Charge Current (Optional)"
         },
         "data_description": {
           "battery_capacity_ah": "Battery capacity in Ampere-hours",
           "battery_voltage": "Battery system voltage (typically 48V)",
           "min_soc": "Minimum SOC to preserve battery health",
           "max_soc": "Maximum SOC (may be limited by inverter)",
-          "battery_efficiency": "Round-trip efficiency (90-95% typical)"
+          "battery_efficiency": "Round-trip efficiency (90-95% typical)",
+          "balancing_interval_days": "How often to trigger full balancing if PV forecast is low (default 14 days)",
+          "balancing_pv_threshold_kwh": "Only enable balancing when tomorrow's PV forecast is below this threshold",
+          "max_charge_current_entity": "Entity to cap charge current (set to default 23A during balancing)"
         }
       }
     },

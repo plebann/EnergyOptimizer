@@ -3,77 +3,40 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![GitHub release](https://img.shields.io/github/release/plebann/EnergyOptimizer.svg)](https://github.com/plebann/EnergyOptimizer/releases)
 
-Energy Optimizer is a Home Assistant custom integration that intelligently manages battery charging and energy optimization based on electricity prices, battery state, PV forecasts, and load patterns.
+Energy Optimizer is a Home Assistant custom integration focused on price-aware battery optimization with programmable SOC targets.
 
-## Features
+## What It Does
 
-### 🔋 **Smart Battery Management**
-- Automated battery charge/discharge scheduling based on price forecasts
-- Multi-phase charging current calculation (23A → 9A → 4A)
-- Battery health protection with configurable SOC limits
-- Real-time battery reserve and space monitoring
+- Price-aware charging: compares current price to average, sizes required energy, and writes targets to the active program SOC entity.
+- Overnight handling: runs nightly at 22:00 (manual calls behave the same) and picks one of three modes using PV forecast, balancing cadence, and battery space:
+   - Battery Balancing: if balancing is due and tomorrow's PV forecast is below the balancing PV threshold, set program SOCs 1/2/6 to max SOC and optional max charge current to 23 A.
+   - Battery Preservation: if PV forecast × 0.9 is lower than available battery space, lock program SOC 1 and 6 to the current SOC (bounded by min SOC) to avoid inefficient cycling. Program 2 is intentionally untouched here because a separate 04:00 optimization will manage it.
+   - Normal Operation: if previously locked and conditions improve, restore program SOCs 1/2/6 to min SOC.
+   - If none of the above match, no changes are made.
+   - Balancing completion is stamped only after SOC stays ≥97% for 2 hours; schedule `check_and_update_balancing_completion` periodically (e.g., every 5 minutes) to advance the timestamp.
+- Balancing completion check: every 5 minutes, stamps last balancing when SOC stays ≥97% for 2 hours.
+- Optional heat pump estimate logging when enabled and a temperature sensor is provided.
 
-### 💰 **Cost Optimization**
-- Charge during cheap electricity periods
-- Sell surplus energy during expensive periods
-- Price-based decision making with configurable thresholds
-- Integration with RCE PSE pricing data
+## Behavior Notes
 
-### ☀️ **PV Forecast Integration**
-- Solcast Solar integration for production forecasting
-- Intelligent charging based on expected PV generation
-- Surplus energy calculation considering future production
+- Targeting: calculate_charge_soc only writes to the active program SOC entity selected by configured start times; there is no single target SOC fallback.
+- Notifications: overnight_schedule sends notify messages when modes change. Service call data (`date`, `optimization_goal`) is currently ignored.
+- Data sources: services rely on current Home Assistant states; ensure numeric sensors return valid values.
 
-### 🌡️ **Heat Pump Support**
-- Temperature-based consumption estimation
-- COP curve interpolation for accurate forecasting
-- Integration with energy balance calculations
+## What’s Included
 
-### 📊 **Comprehensive Sensors**
-- Battery Reserve, Space, Capacity sensors
-- Required Energy (Morning, Afternoon, Evening)
-- Surplus Energy calculation
-- Heat Pump daily estimation
+- Platforms: Sensor only.
+- Services: calculate_charge_soc, calculate_sell_energy, estimate_heat_pump_usage, overnight_schedule.
+- Sensors:
+  - Battery: battery_reserve, battery_space, battery_capacity, usable_capacity
+  - Config values: battery_capacity_ah, battery_voltage_config, battery_efficiency_config, min_soc_config, max_soc_config
+  - Tracking: last_balancing_timestamp, last_optimization, optimization_history
 
-### 🔧 **Flexible Configuration**
-- Entity-based configuration (no hard integration dependencies)
-- 9-step guided configuration flow
-- Compatible with any integration providing similar entities
-- Reconfigurable via Options Flow
+## Configuration (UI-Only)
 
-## Architecture
-
-Energy Optimizer follows Home Assistant best practices with a modular, maintainable architecture:
-
-### Module Structure
-
-```
-custom_components/energy_optimizer/
-├── __init__.py          # Integration setup (90 lines)
-├── config_flow.py       # Configuration UI
-├── const.py             # Constants and defaults
-├── manifest.json        # Integration metadata
-├── sensor.py            # Sensor platform (676 lines)
-├── services.yaml        # Service definitions
-├── strings.json         # UI translations
-├── helpers.py           # Utility functions (135 lines)
-├── services.py          # Service handlers (600 lines)
-├── coordinator.py       # Data coordinator scaffolding
-└── calculations/        # Calculation modules
-    ├── battery.py       # Battery calculations
-    ├── charging.py      # Charging logic
-    ├── energy.py        # Energy balance
-    ├── heat_pump.py     # Heat pump estimations
-    └── utils.py         # Math utilities
-```
-
-### Key Design Principles
-
-- **Separation of Concerns**: Service handlers, helpers, and calculations in dedicated modules
-- **HACS Compliance**: Follows Home Assistant Custom Component best practices
-- **Maintainability**: Small, focused modules (~90-600 lines each)
-- **Testability**: 48 unit tests covering edge cases and calculations
-- **Extensibility**: Easy to add new services and sensors
+- Mandatory: price sensor, average price sensor, battery SOC sensor, battery power sensor, battery capacity/voltage/efficiency, min/max SOC, and at least one program SOC entity with a start-time entity.
+- Optional: program SOCs 2-6 with start times, PV forecast sensors, daily or windowed load sensors, work mode/charge/discharge/grid charge entities, heat pump toggle plus temperature/power sensors, balancing interval and PV threshold, and optional max charge current entity for balancing.
+- Options flow: adjust battery parameters, efficiency, balancing interval/PV threshold, max charge current entity, and load-window sensors after setup.
 
 ### Service Architecture
 
@@ -81,7 +44,7 @@ All service handlers are in `services.py`:
 - `handle_calculate_charge_soc` - Battery charging optimization
 - `handle_calculate_sell_energy` - Surplus energy calculation
 - `handle_estimate_heat_pump` - Heat pump consumption estimation
-- `handle_optimize_schedule` - Battery schedule optimization (3 scenarios)
+- `handle_overnight_schedule` - Battery schedule optimization (three scenarios at 22:00)
 
 ### Sensor Platform
 
@@ -109,58 +72,13 @@ While Energy Optimizer can work with any compatible entities, these integrations
    - Provides: PV production forecasts
    - Install from HACS
 
-## Installation
+### Key Design Principles
 
-### HACS (Recommended)
-
-1. Open HACS in Home Assistant
-2. Click on "Integrations"
-3. Click the three dots in the top right corner
-4. Select "Custom repositories"
-5. Add this repository URL: `https://github.com/plebann/EnergyOptimizer`
-6. Select category: "Integration"
-7. Click "Add"
-8. Search for "Energy Optimizer" and install
-
-### Manual Installation
-
-# Energy Optimizer for Home Assistant
-
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![GitHub release](https://img.shields.io/github/release/plebann/EnergyOptimizer.svg)](https://github.com/plebann/EnergyOptimizer/releases)
-
-Energy Optimizer is a Home Assistant custom integration focused on price-aware battery optimization with programmable SOC targets.
-
-## What It Does
-
-- Price-aware charging: compares current price to average, sizes required energy, and writes targets to the active program SOC entity.
-- Overnight handling: runs nightly at 22:00 to choose one of three modes based on PV forecast and balancing interval:
-  - Battery Balancing (push to 100% and max charge current when due and PV is low)
-  - Battery Preservation (lock at current/min SOC when PV is insufficient for the available space)
-  - Normal Operation (restore program SOCs to minimum when conditions improve)
-- Balancing completion check: every 5 minutes, stamps last balancing when SOC stays ≥97% for 2 hours.
-- Optional heat pump estimate logging when enabled and a temperature sensor is provided.
-
-## What’s Included
-
-- Platforms: Sensor only.
-- Services: calculate_charge_soc, calculate_sell_energy, estimate_heat_pump_usage, overnight_schedule.
-- Sensors:
-  - Battery: battery_reserve, battery_space, battery_capacity, usable_capacity
-  - Config values: battery_capacity_ah, battery_voltage_config, battery_efficiency_config, min_soc_config, max_soc_config
-  - Tracking: last_balancing_timestamp, last_optimization, optimization_history
-
-## Configuration (UI-Only)
-
-- Mandatory: price sensor, average price sensor, battery SOC sensor, battery power sensor, battery capacity/voltage/efficiency, min/max SOC, and at least one program SOC entity with a start-time entity.
-- Optional: program SOCs 2-6 with start times, PV forecast sensors, daily or windowed load sensors, work mode/charge/discharge/grid charge entities, heat pump toggle plus temperature/power sensors, balancing interval and PV threshold.
-- Options flow: adjust battery parameters, efficiency, balancing interval, and load-window sensors after setup.
-
-## Behavior Notes
-
-- Targeting: calculate_charge_soc only writes to the active program SOC entity selected by configured start times; there is no single target SOC fallback.
-- Notifications: overnight_schedule sends notify messages when modes change.
-- Data sources: services rely on current Home Assistant states; ensure numeric sensors return valid values.
+- **Separation of Concerns**: Service handlers, helpers, and calculations in dedicated modules
+- **HACS Compliance**: Follows Home Assistant Custom Component best practices
+- **Maintainability**: Small, focused modules (~90-600 lines each)
+- **Testability**: 48 unit tests covering edge cases and calculations
+- **Extensibility**: Easy to add new services and sensors
 
 ## Installation
 
