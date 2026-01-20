@@ -363,11 +363,10 @@ class HistoryExtraStoredData(ExtraStoredData):
     def from_dict(cls, data: dict[str, Any]) -> HistoryExtraStoredData:
         """Restore from dict."""
         history = data.get("history", [])
-        # Validate history entries
         if not isinstance(history, list):
             history = []
-        # Keep only last 50 entries during restoration
-        history = history[-50:] if len(history) > 50 else history
+        # Keep only newest 50 entries (list is stored newest-first)
+        history = history[:50] if len(history) > 50 else history
         return cls(
             native_value=data.get("native_value", "No optimizations yet"),
             history=history,
@@ -545,9 +544,15 @@ class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
 
         # Restore from custom ExtraStoredData
         if (extra_data := await self.async_get_last_extra_data()) is not None:
+            restored_data = None
             if isinstance(extra_data, HistoryExtraStoredData):
-                self._attr_native_value = extra_data.native_value
-                self._history = extra_data.history
+                restored_data = extra_data
+            elif hasattr(extra_data, "as_dict"):
+                restored_data = HistoryExtraStoredData.from_dict(extra_data.as_dict())
+
+            if restored_data is not None:
+                self._attr_native_value = restored_data.native_value
+                self._history = restored_data.history
                 _LOGGER.info(
                     "Restored OptimizationHistorySensor: %d entries",
                     len(self._history),
@@ -563,13 +568,11 @@ class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return full history in attributes."""
-        return {"history": self._history[-10:]}  # Keep last 10 entries
+        return {"history": self._history}
 
     @property
     def extra_restore_state_data(self) -> HistoryExtraStoredData | None:
         """Return extra data to persist."""
-        if not self._history:
-            return None
         return HistoryExtraStoredData(
             native_value=self._attr_native_value,
             history=self._history,
@@ -583,11 +586,11 @@ class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
             "scenario": scenario,
             **details,
         }
-        self._history.append(entry)
+        # Insert newest entry first
+        self._history.insert(0, entry)
         
-        # Keep only last 50 entries in memory
         if len(self._history) > 50:
-            self._history = self._history[-50:]
+            self._history = self._history[:50]
         
         # Update display value to show most recent
         self._attr_native_value = f"{timestamp.strftime('%H:%M:%S')} - {scenario}"
