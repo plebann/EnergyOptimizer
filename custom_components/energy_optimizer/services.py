@@ -444,6 +444,18 @@ async def async_register_services(hass: HomeAssistant) -> None:
         entry = entries[0]
         config = entry.data
 
+        async def _set_program_soc(entity_id: str | None, value: float) -> None:
+            """Set a program SOC entity if provided."""
+            if not entity_id:
+                return
+            await hass.services.async_call(
+                "number",
+                "set_value",
+                {"entity_id": entity_id, "value": value},
+                blocking=True,
+            )
+            _LOGGER.debug("Set %s to %s%%", entity_id, value)
+
         # Get sensor reference from hass.data
         last_balancing_sensor = None
         if (
@@ -517,18 +529,6 @@ async def async_register_services(hass: HomeAssistant) -> None:
             max_soc = config.get(CONF_MAX_SOC, DEFAULT_MAX_SOC)
             max_charge_current_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
             max_charge_current = DEFAULT_MAX_CHARGE_CURRENT
-
-            async def _set_program_soc(entity_id: str | None, value: float) -> None:
-                """Set a program SOC entity if provided."""
-                if not entity_id:
-                    return
-                await hass.services.async_call(
-                    "number",
-                    "set_value",
-                    {"entity_id": entity_id, "value": value},
-                    blocking=True,
-                )
-                _LOGGER.debug("Set %s to %s%%", entity_id, value)
 
             await _set_program_soc(prog1_soc, max_soc)
             await _set_program_soc(prog2_soc, max_soc)
