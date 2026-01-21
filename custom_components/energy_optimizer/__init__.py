@@ -6,8 +6,10 @@ from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_change
+
+from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, SERVICE_OVERNIGHT_SCHEDULE
 from .services import async_register_services
@@ -18,6 +20,44 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate config entry to preserve entity registry stability."""
+
+    _LOGGER.debug("Migrating %s entry from version %s", DOMAIN, entry.version)
+
+    if entry.version == 1:
+        old_unique_ids = {
+            "battery_reserve",
+            "battery_space",
+            "battery_capacity",
+            "usable_capacity",
+            "last_balancing_timestamp",
+            "last_optimization",
+            "optimization_history",
+            "battery_capacity_ah",
+            "battery_voltage_config",
+            "battery_efficiency_config",
+            "min_soc_config",
+            "max_soc_config",
+        }
+
+        entry_id = entry.entry_id
+
+        @callback
+        def _migrate_unique_id(entity_entry: er.RegistryEntry) -> dict[str, str] | None:
+            unique_id = str(entity_entry.unique_id)
+            if unique_id.startswith(f"{entry_id}_"):
+                return None
+            if unique_id not in old_unique_ids:
+                return None
+            return {"new_unique_id": f"{entry_id}_{unique_id}"}
+
+        await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
+        hass.config_entries.async_update_entry(entry, version=2)
+
+    return True
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -45,7 +85,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.services.async_call(
             DOMAIN,
             SERVICE_OVERNIGHT_SCHEDULE,
-            {},
+            {"entry_id": entry.entry_id},
             blocking=False,
         )
 

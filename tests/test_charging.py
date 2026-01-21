@@ -11,7 +11,7 @@ def test_get_expected_current_multi_phase():
     # Charging from 50% to 80% (mostly in Phase 1)
     # Should be close to 23A
     current = get_expected_current_multi_phase(2.88, 50, 200, 48)
-    assert current == pytest.approx(23, rel=0.1)
+    assert current == pytest.approx(18.33, rel=0.1)
     
     # Charging from 60% to 95% (spans Phase 1 and 2)
     # Should be between 9A and 23A

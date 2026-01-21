@@ -1,11 +1,24 @@
 overnight_schedule:
   name: Overnight Schedule
   description: Generate optimal daily battery charge/discharge schedule
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: Target a specific Energy Optimizer config entry (required if you have more than one)
+      required: false
+      selector:
+        text:
 
 morning_grid_charge:
   name: Morning Grid Charge
   description: Pre-charge battery for 06:00-13:00 if reserve is insufficient
   fields:
+    entry_id:
+      name: Config Entry ID
+      description: Target a specific Energy Optimizer config entry (required if you have more than one)
+      required: false
+      selector:
+        text:
     margin:
       name: Safety Margin
       description: Multiplier applied after efficiency and losses (default 1.1)

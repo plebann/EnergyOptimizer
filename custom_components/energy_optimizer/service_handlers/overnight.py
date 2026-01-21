@@ -39,12 +39,24 @@ async def async_handle_overnight_schedule(hass: HomeAssistant, call: ServiceCall
 
     _LOGGER.info("=== Battery Overnight Handling Started ===")
 
-    entries = hass.config_entries.async_entries(DOMAIN)
-    if not entries:
-        _LOGGER.error("No Energy Optimizer configuration found")
-        return
-
-    entry = entries[0]
+    entry_id = call.data.get("entry_id")
+    if entry_id:
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None or entry.domain != DOMAIN:
+            _LOGGER.error("Invalid entry_id '%s' for %s", entry_id, DOMAIN)
+            return
+    else:
+        entries = hass.config_entries.async_entries(DOMAIN)
+        if not entries:
+            _LOGGER.error("No Energy Optimizer configuration found")
+            return
+        if len(entries) > 1:
+            _LOGGER.error(
+                "Multiple %s config entries exist; service call must include entry_id",
+                DOMAIN,
+            )
+            return
+        entry = entries[0]
     config = entry.data
 
     opt_sensor, hist_sensor = get_logging_sensors(hass, entry.entry_id)

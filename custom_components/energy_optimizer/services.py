@@ -5,6 +5,7 @@ from datetime import datetime
 import logging
 from typing import TYPE_CHECKING
 
+import voluptuous as vol
 from homeassistant.core import ServiceCall
 from homeassistant.util import dt as dt_util
 
@@ -16,6 +17,24 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
+
+SERVICE_FIELD_ENTRY_ID = "entry_id"
+
+SERVICE_SCHEMA_OVERNIGHT_SCHEDULE = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_ENTRY_ID): vol.Coerce(str),
+    }
+)
+
+SERVICE_SCHEMA_MORNING_GRID_CHARGE = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_ENTRY_ID): vol.Coerce(str),
+        vol.Optional("margin", default=1.1): vol.All(
+            vol.Coerce(float), vol.Range(min=1.0, max=1.5)
+        ),
+    }
+)
 
 
 async def check_and_update_balancing_completion(hass: HomeAssistant, entry) -> None:
@@ -140,10 +159,16 @@ async def async_register_services(hass: HomeAssistant) -> None:
         await async_handle_overnight_schedule(hass, call)
 
     hass.services.async_register(
-        DOMAIN, SERVICE_MORNING_GRID_CHARGE, _handle_morning_grid_charge
+        DOMAIN,
+        SERVICE_MORNING_GRID_CHARGE,
+        _handle_morning_grid_charge,
+        schema=SERVICE_SCHEMA_MORNING_GRID_CHARGE,
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_OVERNIGHT_SCHEDULE, _handle_overnight_schedule
+        DOMAIN,
+        SERVICE_OVERNIGHT_SCHEDULE,
+        _handle_overnight_schedule,
+        schema=SERVICE_SCHEMA_OVERNIGHT_SCHEDULE,
     )
 
     _LOGGER.info("Energy Optimizer services registered")

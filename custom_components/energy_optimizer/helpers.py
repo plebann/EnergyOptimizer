@@ -110,6 +110,13 @@ def get_active_program_entity(
     
     # Sort programs by start time
     configured_programs.sort(key=lambda x: x[1])
+
+    # Special case: a single configured program is active all day.
+    # Without this, next_start == start_dt and no time can match the empty window.
+    if len(configured_programs) == 1:
+        soc_entity, _start_dt = configured_programs[0]
+        _LOGGER.debug("Only one program configured; treating %s as always active", soc_entity)
+        return soc_entity
     
     current_time_only = current_time.time()
     

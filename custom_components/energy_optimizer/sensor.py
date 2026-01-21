@@ -16,6 +16,7 @@ from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.restore_state import ExtraStoredData
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -115,6 +116,9 @@ async def async_setup_entry(
         "optimization_history_sensor"
     ] = optimization_history_sensor
 
+    if "listeners" not in hass.data[DOMAIN][config_entry.entry_id]:
+        hass.data[DOMAIN][config_entry.entry_id]["listeners"] = []
+
     async_add_entities(sensors)
 
     # Track state changes for battery sensors
@@ -126,17 +130,22 @@ async def async_setup_entry(
             """Handle sensor state change."""
             coordinator.async_set_updated_data(None)
 
-        async_track_state_change_event(hass, [soc_sensor], _async_sensor_changed)
+        remove_listener = async_track_state_change_event(
+            hass, [soc_sensor], _async_sensor_changed
+        )
+        hass.data[DOMAIN][config_entry.entry_id]["listeners"].append(remove_listener)
 
     # Set up periodic balancing completion check (every 5 minutes)
-    from homeassistant.helpers.event import async_track_time_interval
     from .services import check_and_update_balancing_completion
     
     async def _check_balancing(_now):
         """Periodic check for balancing completion."""
         await check_and_update_balancing_completion(hass, config_entry)
     
-    async_track_time_interval(hass, _check_balancing, timedelta(minutes=5))
+    remove_listener = async_track_time_interval(
+        hass, _check_balancing, timedelta(minutes=5)
+    )
+    hass.data[DOMAIN][config_entry.entry_id]["listeners"].append(remove_listener)
 
 
 class EnergyOptimizerSensor(SensorEntity):
@@ -161,6 +170,12 @@ class EnergyOptimizerSensor(SensorEntity):
             "manufacturer": "Energy Optimizer",
             "model": "Battery Optimizer",
         }
+
+        base_unique_id = getattr(self, "_attr_unique_id", None)
+        if base_unique_id and isinstance(base_unique_id, str):
+            prefix = f"{config_entry.entry_id}_"
+            if not base_unique_id.startswith(prefix):
+                self._attr_unique_id = f"{prefix}{base_unique_id}"
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass."""
