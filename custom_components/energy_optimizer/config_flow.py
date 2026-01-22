@@ -480,21 +480,63 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Validate price entity configuration."""
         errors = {}
 
-        # Check price sensor
-        price_state = self.hass.states.get(user_input[CONF_PRICE_SENSOR])
-        if not price_state:
-            errors[CONF_PRICE_SENSOR] = "entity_not_found"
-        elif not self._is_numeric_state(price_state.state):
-            errors[CONF_PRICE_SENSOR] = "not_numeric"
-
-        # Check average price sensor
-        avg_state = self.hass.states.get(user_input[CONF_AVERAGE_PRICE_SENSOR])
-        if not avg_state:
-            errors[CONF_AVERAGE_PRICE_SENSOR] = "entity_not_found"
-        elif not self._is_numeric_state(avg_state.state):
-            errors[CONF_AVERAGE_PRICE_SENSOR] = "not_numeric"
+        self._validate_entity(
+            entity_id=user_input.get(CONF_PRICE_SENSOR),
+            field=CONF_PRICE_SENSOR,
+            errors=errors,
+            value_type=float,
+        )
+        self._validate_entity(
+            entity_id=user_input.get(CONF_AVERAGE_PRICE_SENSOR),
+            field=CONF_AVERAGE_PRICE_SENSOR,
+            errors=errors,
+            value_type=float,
+        )
 
         return errors
+
+    def _validate_entity(
+        self,
+        *,
+        entity_id: str | None,
+        field: str,
+        errors: dict[str, str],
+        value_type: type[float] | type[int] | None = None,
+        expected_domain: str | None = None,
+        domain_error: str = "not_number_entity",
+    ) -> Any | None:
+        """Validate an entity from config flow input.
+
+        Populates the config-flow `errors` dict using existing translation keys.
+        Returns the coerced value (if `value_type` provided) or `None` if invalid.
+        """
+        if not entity_id:
+            errors[field] = "entity_not_found"
+            return None
+
+        state = self.hass.states.get(entity_id)
+        if not state:
+            errors[field] = "entity_not_found"
+            return None
+
+        if expected_domain is not None and state.domain != expected_domain:
+            errors[field] = domain_error
+            return None
+
+        if value_type is None:
+            return state
+
+        if value_type is float:
+            if not self._is_numeric_state(state.state):
+                errors[field] = "not_numeric"
+                return None
+            return float(state.state)
+
+        try:
+            return value_type(state.state)
+        except (ValueError, TypeError):
+            errors[field] = "not_numeric"
+            return None
 
     async def _validate_battery_sensors(
         self, user_input: dict[str, Any]
@@ -502,19 +544,18 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Validate battery sensor configuration."""
         errors = {}
 
-        # Check SOC sensor
-        soc_state = self.hass.states.get(user_input[CONF_BATTERY_SOC_SENSOR])
-        if not soc_state:
-            errors[CONF_BATTERY_SOC_SENSOR] = "entity_not_found"
-        elif not self._is_numeric_state(soc_state.state):
-            errors[CONF_BATTERY_SOC_SENSOR] = "not_numeric"
-
-        # Check power sensor
-        power_state = self.hass.states.get(user_input[CONF_BATTERY_POWER_SENSOR])
-        if not power_state:
-            errors[CONF_BATTERY_POWER_SENSOR] = "entity_not_found"
-        elif not self._is_numeric_state(power_state.state):
-            errors[CONF_BATTERY_POWER_SENSOR] = "not_numeric"
+        self._validate_entity(
+            entity_id=user_input.get(CONF_BATTERY_SOC_SENSOR),
+            field=CONF_BATTERY_SOC_SENSOR,
+            errors=errors,
+            value_type=float,
+        )
+        self._validate_entity(
+            entity_id=user_input.get(CONF_BATTERY_POWER_SENSOR),
+            field=CONF_BATTERY_POWER_SENSOR,
+            errors=errors,
+            value_type=float,
+        )
 
         return errors
 
@@ -537,11 +578,13 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Validate max charge current entity if provided
         max_charge_entity = user_input.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
         if max_charge_entity:
-            max_charge_state = self.hass.states.get(max_charge_entity)
-            if not max_charge_state:
-                errors[CONF_MAX_CHARGE_CURRENT_ENTITY] = "entity_not_found"
-            elif max_charge_state.domain != "number":
-                errors[CONF_MAX_CHARGE_CURRENT_ENTITY] = "not_number_entity"
+            self._validate_entity(
+                entity_id=max_charge_entity,
+                field=CONF_MAX_CHARGE_CURRENT_ENTITY,
+                errors=errors,
+                expected_domain="number",
+                domain_error="not_number_entity",
+            )
 
         return errors
 
@@ -570,12 +613,13 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             if soc_entity:
                 has_programs = True
-                # Check entity exists and is writable
-                prog_state = self.hass.states.get(soc_entity)
-                if not prog_state:
-                    errors[soc_key] = "entity_not_found"
-                elif prog_state.domain != "number":
-                    errors[soc_key] = "not_number_entity"
+                self._validate_entity(
+                    entity_id=soc_entity,
+                    field=soc_key,
+                    errors=errors,
+                    expected_domain="number",
+                    domain_error="not_number_entity",
+                )
 
                 # Warn if start time not configured (optional but recommended)
                 if not start_time:
