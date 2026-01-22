@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from homeassistant.core import ServiceCall
 
 from ..calculations.battery import calculate_battery_reserve, kwh_to_soc
-from ..calculations.utils import safe_float
+from ..helpers import get_float_state_info, get_float_value
 from ..const import (
     CONF_BATTERY_CAPACITY_AH,
     CONF_BATTERY_EFFICIENCY,
@@ -66,19 +66,18 @@ async def async_handle_morning_grid_charge(hass: HomeAssistant, call: ServiceCal
         _LOGGER.error("Program 2 SOC entity not configured")
         return
 
-    prog2_state = hass.states.get(prog2_soc_entity)
-    if not prog2_state or prog2_state.state in (None, "unknown", "unavailable"):
-        _LOGGER.warning("Program 2 SOC entity %s unavailable", prog2_soc_entity)
-        return
-
-    try:
-        prog2_soc_value = float(prog2_state.state)
-    except (ValueError, TypeError):
-        _LOGGER.warning(
-            "Program 2 SOC entity %s has invalid value: %s",
-            prog2_soc_entity,
-            prog2_state.state,
-        )
+    prog2_soc_value, prog2_raw, prog2_error = get_float_state_info(
+        hass, prog2_soc_entity
+    )
+    if prog2_error is not None or prog2_soc_value is None:
+        if prog2_error in ("missing", "unavailable"):
+            _LOGGER.warning("Program 2 SOC entity %s unavailable", prog2_soc_entity)
+        else:
+            _LOGGER.warning(
+                "Program 2 SOC entity %s has invalid value: %s",
+                prog2_soc_entity,
+                prog2_raw,
+            )
         return
 
     if prog2_soc_value >= 100.0:
@@ -90,19 +89,16 @@ async def async_handle_morning_grid_charge(hass: HomeAssistant, call: ServiceCal
         _LOGGER.error("Battery SOC sensor not configured")
         return
 
-    soc_state = hass.states.get(battery_soc_entity)
-    if not soc_state or soc_state.state in (None, "unknown", "unavailable"):
-        _LOGGER.warning("Battery SOC sensor %s unavailable", battery_soc_entity)
-        return
-
-    try:
-        current_soc = float(soc_state.state)
-    except (ValueError, TypeError):
-        _LOGGER.warning(
-            "Battery SOC sensor %s has invalid value: %s",
-            battery_soc_entity,
-            soc_state.state,
-        )
+    current_soc, soc_raw, soc_error = get_float_state_info(hass, battery_soc_entity)
+    if soc_error is not None or current_soc is None:
+        if soc_error in ("missing", "unavailable"):
+            _LOGGER.warning("Battery SOC sensor %s unavailable", battery_soc_entity)
+        else:
+            _LOGGER.warning(
+                "Battery SOC sensor %s has invalid value: %s",
+                battery_soc_entity,
+                soc_raw,
+            )
         return
 
     capacity_ah = config.get(CONF_BATTERY_CAPACITY_AH, DEFAULT_BATTERY_CAPACITY_AH)
@@ -116,12 +112,7 @@ async def async_handle_morning_grid_charge(hass: HomeAssistant, call: ServiceCal
 
     def _read_usage(conf_key: str) -> float:
         entity_id = config.get(conf_key)
-        if not entity_id:
-            return 0.0
-        state = hass.states.get(entity_id)
-        if not state or state.state in (None, "unknown", "unavailable"):
-            return 0.0
-        return safe_float(state.state, 0.0)
+        return get_float_value(hass, entity_id, default=0.0)
 
     lu0408 = _read_usage(CONF_LOAD_USAGE_04_08)
     lu0812 = _read_usage(CONF_LOAD_USAGE_08_12)
@@ -138,9 +129,8 @@ async def async_handle_morning_grid_charge(hass: HomeAssistant, call: ServiceCal
     losses_kwh = 0.0
     losses_entity = config.get(CONF_DAILY_LOSSES_SENSOR)
     if losses_entity:
-        loss_state = hass.states.get(losses_entity)
-        if loss_state and loss_state.state not in (None, "unknown", "unavailable"):
-            daily_losses = safe_float(loss_state.state, 0.0)
+        daily_losses = get_float_value(hass, losses_entity, default=0.0)
+        if daily_losses:
             losses_kwh = (daily_losses / 24.0) * hours_morning * margin
 
     required_kwh += losses_kwh

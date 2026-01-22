@@ -10,6 +10,7 @@ from homeassistant.core import ServiceCall
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, SERVICE_MORNING_GRID_CHARGE, SERVICE_OVERNIGHT_SCHEDULE
+from .helpers import get_float_state_info
 from .service_handlers.morning import async_handle_morning_grid_charge
 from .service_handlers.overnight import async_handle_overnight_schedule
 
@@ -55,14 +56,9 @@ async def check_and_update_balancing_completion(hass: HomeAssistant, entry) -> N
     soc_sensor = config.get(CONF_BATTERY_SOC_SENSOR)
     if not soc_sensor:
         return
-    
-    soc_state = hass.states.get(soc_sensor)
-    if not soc_state or soc_state.state in ("unknown", "unavailable"):
-        return
-    
-    try:
-        current_soc = float(soc_state.state)
-    except (ValueError, TypeError):
+
+    current_soc, _raw, error = get_float_state_info(hass, soc_sensor)
+    if error is not None or current_soc is None:
         return
     
     # Get last balancing sensor

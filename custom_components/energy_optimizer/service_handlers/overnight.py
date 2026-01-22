@@ -9,6 +9,7 @@ from homeassistant.core import ServiceCall
 from homeassistant.util import dt as dt_util
 
 from ..calculations.battery import calculate_battery_space
+from ..helpers import get_float_state_info
 from ..const import (
     CONF_BALANCING_INTERVAL_DAYS,
     CONF_BALANCING_PV_THRESHOLD,
@@ -110,12 +111,11 @@ async def async_handle_overnight_schedule(hass: HomeAssistant, call: ServiceCall
     pv_forecast_entity = config.get(CONF_PV_FORECAST_TOMORROW)
     pv_forecast = 0.0
     if pv_forecast_entity:
-        pv_state = hass.states.get(pv_forecast_entity)
-        if pv_state and pv_state.state not in ("unknown", "unavailable"):
-            try:
-                pv_forecast = float(pv_state.state)
-            except (ValueError, TypeError) as err:
-                _LOGGER.warning("Could not parse PV forecast: %s", err)
+        pv_value, pv_raw, pv_error = get_float_state_info(hass, pv_forecast_entity)
+        if pv_error is None and pv_value is not None:
+            pv_forecast = pv_value
+        elif pv_error == "invalid":
+            _LOGGER.warning("Could not parse PV forecast: %s", pv_raw)
 
     _LOGGER.debug(
         "Balancing check: due=%s, pv_forecast=%.2f kWh, threshold=%.2f kWh",
@@ -179,12 +179,11 @@ async def async_handle_overnight_schedule(hass: HomeAssistant, call: ServiceCall
     soc_sensor = config.get(CONF_BATTERY_SOC_SENSOR)
     current_soc = None
     if soc_sensor:
-        soc_state = hass.states.get(soc_sensor)
-        if soc_state and soc_state.state not in ("unknown", "unavailable"):
-            try:
-                current_soc = float(soc_state.state)
-            except (ValueError, TypeError) as err:
-                _LOGGER.warning("Could not parse battery SOC: %s", err)
+        soc_value, soc_raw, soc_error = get_float_state_info(hass, soc_sensor)
+        if soc_error is None and soc_value is not None:
+            current_soc = soc_value
+        elif soc_error == "invalid":
+            _LOGGER.warning("Could not parse battery SOC: %s", soc_raw)
 
     if current_soc is None:
         _LOGGER.warning("Current battery SOC not available, skipping preservation check")
@@ -256,12 +255,11 @@ async def async_handle_overnight_schedule(hass: HomeAssistant, call: ServiceCall
 
     current_prog6_soc = None
     if prog6_soc:
-        prog6_state = hass.states.get(prog6_soc)
-        if prog6_state and prog6_state.state not in ("unknown", "unavailable"):
-            try:
-                current_prog6_soc = float(prog6_state.state)
-            except (ValueError, TypeError) as err:
-                _LOGGER.warning("Could not parse prog6 SOC: %s", err)
+        prog6_value, prog6_raw, prog6_error = get_float_state_info(hass, prog6_soc)
+        if prog6_error is None and prog6_value is not None:
+            current_prog6_soc = prog6_value
+        elif prog6_error == "invalid":
+            _LOGGER.warning("Could not parse prog6 SOC: %s", prog6_raw)
 
     if (
         current_prog6_soc is not None

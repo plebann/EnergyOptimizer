@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -145,3 +145,50 @@ def get_active_program_entity(
     
     _LOGGER.debug("No active program found for current time %s", current_time_only)
     return None
+
+
+_UNAVAILABLE_STATE_VALUES = (None, "unknown", "unavailable")
+
+StateReadError = Literal["missing", "unavailable", "invalid"]
+
+
+def get_float_state_info(
+    hass: HomeAssistant,
+    entity_id: str | None,
+) -> tuple[float | None, str | None, StateReadError | None]:
+    """Read a float from an entity state.
+
+    Returns a tuple of:
+    - value: parsed float or None
+    - raw: raw state string (when available)
+    - error: one of "missing", "unavailable", "invalid" or None when ok
+    """
+    if not entity_id:
+        return None, None, "missing"
+
+    state = hass.states.get(entity_id)
+    if not state:
+        return None, None, "missing"
+
+    raw = state.state
+    if raw in _UNAVAILABLE_STATE_VALUES:
+        raw_str = None if raw is None else str(raw)
+        return None, raw_str, "unavailable"
+
+    try:
+        return float(raw), str(raw), None
+    except (ValueError, TypeError):
+        return None, str(raw), "invalid"
+
+
+def get_float_value(
+    hass: HomeAssistant,
+    entity_id: str | None,
+    *,
+    default: float,
+) -> float:
+    """Read a float from an entity state, falling back to a default."""
+    value, _raw, error = get_float_state_info(hass, entity_id)
+    if error is not None or value is None:
+        return default
+    return value
