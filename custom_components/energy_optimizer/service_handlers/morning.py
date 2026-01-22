@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from homeassistant.core import ServiceCall
 
+from custom_components.energy_optimizer.calculations.utils import build_hourly_usage_array
+
 from ..calculations.battery import calculate_battery_reserve, kwh_to_soc
 from ..helpers import get_float_state_info, get_float_value
 from ..const import (
@@ -114,11 +116,9 @@ async def async_handle_morning_grid_charge(hass: HomeAssistant, call: ServiceCal
         entity_id = config.get(conf_key)
         return get_float_value(hass, entity_id, default=0.0)
 
-    lu0408 = _read_usage(CONF_LOAD_USAGE_04_08)
-    lu0812 = _read_usage(CONF_LOAD_USAGE_08_12)
-    lu1216 = _read_usage(CONF_LOAD_USAGE_12_16)
+    hourly_usage = build_hourly_usage_array(config, hass.states.get, daily_load_fallback=None)
 
-    base_usage_kwh = (2 * lu0408) + (4 * lu0812) + (1 * lu1216)
+    base_usage_kwh = sum(hourly_usage[6:13])
     hours_morning = 7
 
     if efficiency:
@@ -153,9 +153,6 @@ async def async_handle_morning_grid_charge(hass: HomeAssistant, call: ServiceCal
             {
                 "reserve_kwh": round(reserve_kwh, 2),
                 "required_kwh": round(required_kwh, 2),
-                "lu_04_08": round(lu0408, 2),
-                "lu_08_12": round(lu0812, 2),
-                "lu_12_16": round(lu1216, 2),
             },
             history_scenario="Morning Grid Charge",
             history_details={
@@ -195,9 +192,6 @@ async def async_handle_morning_grid_charge(hass: HomeAssistant, call: ServiceCal
             "reserve_kwh": round(reserve_kwh, 2),
             "required_kwh": round(required_kwh, 2),
             "deficit_kwh": round(deficit_kwh, 2),
-            "lu_04_08": round(lu0408, 2),
-            "lu_08_12": round(lu0812, 2),
-            "lu_12_16": round(lu1216, 2),
             "losses_kwh": round(losses_kwh, 2),
             "efficiency": round(efficiency, 1),
             "margin": margin,
