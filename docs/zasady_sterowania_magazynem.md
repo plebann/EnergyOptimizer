@@ -168,53 +168,36 @@ szczyt_wieczorny = {
 **Algorytm:**
 
 ```
-# 1. Oblicz potrzeby energetyczne do pokrycia
-godziny_wysokiej_taryfy_rano = 6:00 do 13:00 (zimą) LUB 6:00 do 15:00 (latem)
-zużycie_w_wysokiej = suma(prognoza_zużycia(h) FOR h IN godziny_wysokiej_taryfy_rano)
-produkcja_PV_w_wysokiej = suma(prognoza_PV(h) FOR h IN godziny_wysokiej_taryfy_rano)
-niedobór = max(0, zużycie_w_wysokiej - produkcja_PV_w_wysokiej)
-
-# 2. Oblicz ile energii już jest w magazynie
-dostępna_energia = (aktualny_SoC - 20%) × pojemność_magazynu  # zostaw 20% rezerwy
-
-# 3. SEZONOWA STRATEGIA
+# 1. Określ godziny wysokiej taryfy do pokrycia
 miesiąc = obecny_miesiąc()
+IF miesiąc IN [4, 5, 6, 7, 8, 9]:  # kwiecień-wrzesień (LATO)
+    godziny_wysokiej_taryfy = 6:00 do 15:00 oraz 17:00 do 22:00
+ELSE:  # październik-marzec (ZIMA)
+    godziny_wysokiej_taryfy = 6:00 do 13:00 oraz 15:00 do 22:00
 
-# ZIMA (październik-marzec): Priorytet pokrycia niedoboru
-IF miesiąc IN [10, 11, 12, 1, 2, 3]:
-    potrzeba_energii = niedobór - dostępna_energia
-    
-    IF potrzeba_energii > 0:
-        doładuj = min(potrzeba_energii, wolne_miejsce_w_magazynie)
-        ładuj_z_sieci(doładuj)
-    ELSE:
-        nie_ładuj()
+# 2. Oblicz całkowite zapotrzebowanie w godzinach wysokiej taryfy
+zużycie_dom = suma(prognoza_zużycia_dom(h) FOR h IN godziny_wysokiej_taryfy)
+zużycie_PC = suma(prognoza_zużycia_PC(h) FOR h IN godziny_wysokiej_taryfy)
+zużycie_CWU = suma(prognoza_zużycia_CWU(h) FOR h IN godziny_wysokiej_taryfy)
+całkowite_zużycie = zużycie_dom + zużycie_PC + zużycie_CWU
 
-# LATO (kwiecień-wrzesień): Priorytet arbitraż + budowanie depozytu
+# 3. Oblicz dostępną produkcję PV w godzinach wysokiej taryfy
+produkcja_PV = suma(prognoza_PV(h) FOR h IN godziny_wysokiej_taryfy)
+
+# 4. Oblicz dostępną energię z magazynu
+dostępna_energia_z_magazynu = (aktualny_SoC - 20%) × pojemność_magazynu
+
+# 5. Oblicz deficyt energii
+deficyt = całkowite_zużycie - produkcja_PV - dostępna_energia_z_magazynu
+
+# 6. Decyzja o ładowaniu
+IF deficyt > 0:
+    # Nie wystarczy energii na pokrycie godzin wysokiej taryfy
+    doładuj = min(deficyt × 1,1, wolne_miejsce_w_magazynie)  # 10% margines bezpieczeństwa
+    ładuj_z_sieci(doładuj)
 ELSE:
-    # Sprawdź czy warto robić arbitraż
-    najwyższa_cena_sprzedaży = max(
-        szczyt_wieczorny.max_cena IF szczyt_wieczorny != NULL ELSE 0,
-        szczyt_poranny_jutro.max_cena IF szczyt_poranny_jutro != NULL ELSE 0
-    )
-    
-    # Oblicz ile miejsca zostanie po produkcji PV dzisiaj
-    suma_prognoza_PV_dziś = suma(prognoza_PV(h) FOR h IN cały_dzień)
-    przewidywane_SoC_wieczorem = min(100%, aktualny_SoC + suma_prognoza_PV_dziś - zużycie_całodobowe)
-    
-    wolne_miejsce_po_PV = (100% - przewidywane_SoC_wieczorem) × pojemność_magazynu
-    
-    # Decyzja o ładowaniu
-    IF najwyższa_cena_sprzedaży > 95,1 gr/kWh AND wolne_miejsce_po_PV > 2 kWh:
-        # Arbitraż opłacalny i będzie miejsce na ładowanie
-        doładuj = wolne_miejsce_po_PV
-        ładuj_z_sieci(doładuj)
-    ELIF dostępna_energia < niedobór:
-        # Nie wystarczy energii na pokrycie dnia
-        doładuj = min(niedobór - dostępna_energia, wolne_miejsce_w_magazynie)
-        ładuj_z_sieci(doładuj)
-    ELSE:
-        nie_ładuj()
+    # Wystarczy energii, nie ładuj
+    nie_ładuj()
 ```
 
 **Akcje:**
@@ -237,27 +220,43 @@ ELSE:
 **Algorytm:**
 
 ```
-# 1. Sprawdź czy w ogóle istnieje dołek dzienny
-IF dołek_dzienny == NULL:
+# 1. Sprawdź prognozę PV vs pojemność magazynu i zużycie
+suma_prognoza_PV_dziś = suma(prognoza_PV(h) FOR h IN cały_dzień)
+wolne_miejsce_w_magazynie = (100% - aktualny_SoC) × pojemność_magazynu
+przewidywane_zużycie_dziś = suma(prognoza_zużycia(h) FOR h IN cały_dzień)
+
+IF suma_prognoza_PV_dziś <= (wolne_miejsce_w_magazynie + przewidywane_zużycie_dziś):
+    # PV nie wystarczy żeby napełnić magazyn przy dzisiejszym zużyciu
+    # Nie ma sensu blokować - ładuj normalnie
     nie_blokuj_ładowania()
+    zapisz_flagę("czekam_na_dołek" = FALSE)
     RETURN
 
-# 2. Oblicz średnią cenę w godzinach produkcji przed dołkiem
+# 2. Sprawdź czy szczyt wieczorny ma wystarczająco wyższą cenę niż dołek
+IF szczyt_wieczorny.max_cena < 1,2 × dołek_dzienny.średnia_cena:
+    # Szczyt wieczorny nie jest o 20% wyższy od dołka
+    # Arbitraż niewystarczająco opłacalny
+    nie_blokuj_ładowania()
+    zapisz_flagę("czekam_na_dołek" = FALSE)
+    RETURN
+
+# 3. Oblicz średnią cenę w godzinach produkcji przed dołkiem
 godziny_przed_dołkiem = wschód_słońca DO dołek_dzienny.start
 IF długość(godziny_przed_dołkiem) == 0:
     nie_blokuj_ładowania()
+    zapisz_flagę("czekam_na_dołek" = FALSE)
     RETURN
 
 średnia_cena_przed_dołkiem = średnia(RCE(h) FOR h IN godziny_przed_dołkiem)
-średnia_produkcja_przed_dołkiem = średnia(prognoza_PV(h) FOR h IN godziny_przed_dołkiem)
 
-# 3. Sprawdź podstawowy warunek opłacalności arbitrażu
+# 4. Sprawdź podstawowy warunek opłacalności arbitrażu
 IF dołek_dzienny.średnia_cena >= 0,8 × średnia_cena_przed_dołkiem × 0,9:
-    # Dołek nie jest wystarczająco tani
+    # Dołek nie jest wystarczająco tani w porównaniu do cen przed nim
     nie_blokuj_ładowania()
+    zapisz_flagę("czekam_na_dołek" = FALSE)
     RETURN
 
-# 4. Sprawdź czy będzie opłacalna sprzedaż później
+# 5. Sprawdź czy będzie opłacalna sprzedaż później
 najlepsza_cena_sprzedaży = max(
     szczyt_wieczorny.max_cena IF szczyt_wieczorny != NULL ELSE 0,
     szczyt_poranny_jutro.max_cena IF szczyt_poranny_jutro != NULL ELSE 0
@@ -266,9 +265,9 @@ najlepsza_cena_sprzedaży = max(
 koszt_arbitrażu = dołek_dzienny.średnia_cena × 0,9  # ładowanie w dołku ze stratą sprawności
 potencjalny_zysk = najlepsza_cena_sprzedaży - koszt_arbitrażu
 
-# 5. Decyzja końcowa
+# 6. Decyzja końcowa
 IF najlepsza_cena_sprzedaży > 95,1 gr/kWh AND potencjalny_zysk > 10 gr/kWh:
-    # Arbitraż opłacalny
+    # Arbitraż opłacalny - wszystkie warunki spełnione
     blokuj_ładowanie_z_PV()
     zapisz_flagę("czekam_na_dołek" = TRUE)
 ELSE:
