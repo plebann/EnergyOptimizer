@@ -337,7 +337,15 @@ Zachowanie wieczorne, balansowanie (22:00).
 
 - **Metoda:** `evening_behavior(last_balancing_date, pv_forecast_tomorrow)`
 - **Wyjście:** `balancing_needed`, `running_from_grid`
-- **Opis:** Zarządza balansowaniem magazynu i bezpośrednim zasilaniem z sieci
+- **Opis (krok po kroku):**
+  1. Weryfikuje, czy balansowanie jest wymagane (na podstawie czasu od ostatniego balansowania) oraz sprawdza prognozę PV na jutro względem progu.
+  2. Jeśli balansowanie jest wymagane i PV jest poniżej progu, ustawia docelowy SOC na maksimum (balansowanie) oraz maksymalny prąd ładowania.
+  3. Jeśli balansowanie nie jest wymagane, porównuje prognozę PV (po korekcie sprawności) z wolną pojemnością magazynu.
+  4. Gdy prognoza jest zbyt niska, blokuje rozładowanie ustawiając SOC na aktualnym poziomie.
+  5. W pozostałych przypadkach przywraca normalny tryb pracy, ustawiając SOC na minimum.
+  6. Każdy wariant kończy się zapisem do logów i wysłaniem powiadomienia.
+
+  RUNNING_FROM_GRID oznacza stan, w którym bieżący SOC jest równy SOC z aktywnego programu oraz aktywny jest tryb Zero Export to Load; dom jest wtedy zasilany z sieci, bateria nie ładuje ani nie rozładowuje z sieci, a PV pokrywa Load i ewentualnie ładuje magazyn.
 
 #### 4.2.2. Przetwarzanie danych wejściowych
 
@@ -359,7 +367,7 @@ Automat stanów zarządza trybami pracy systemu i zapewnia spójność działani
 - **CHARGING_FROM_GRID** - wymuszone ładowanie z sieci (force charge)
 - **SELLING_TO_GRID** - wymuszona sprzedaż do sieci (force discharge)
 - **BALANCING** - pełne balansowanie magazynu do 100%
-- **RUNNING_FROM_GRID** - zablokowane rozładowanie magazynu, całe zużycie domu zapokajane z sieci
+- **RUNNING_FROM_GRID** - tryb, w którym bieżący SOC jest równy SOC z aktywnego programu oraz aktywny jest tryb `Zero Export to Load`. W efekcie całe zapotrzebowanie domu jest pokrywane z sieci, a bateria nie jest ani rozładowywana, ani doładowywana z sieci. Gdy występuje produkcja PV, energia trafia na potrzeby Load, a ewentualna nadwyżka ładuje magazyn.
 - **ERROR** - stan błędu, system wstrzymany
 
 #### 4.3.2. Przejścia stanów
