@@ -72,6 +72,7 @@ CONF_COP_CURVE = "cop_curve"
 CONF_BALANCING_INTERVAL_DAYS = "balancing_interval_days"
 CONF_BALANCING_PV_THRESHOLD = "balancing_pv_threshold_kwh"
 CONF_MAX_CHARGE_CURRENT_ENTITY = "max_charge_current_entity"
+CONF_TEST_MODE = "test_mode"
 
 # Default values
 DEFAULT_BATTERY_CAPACITY_AH = 37

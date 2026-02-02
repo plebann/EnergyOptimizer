@@ -61,6 +61,7 @@ from .const import (
     CONF_TOMORROW_PRICE_SENSOR,
     CONF_WEATHER_FORECAST,
     CONF_WORK_MODE_ENTITY,
+    CONF_TEST_MODE,
     DEFAULT_BALANCING_INTERVAL_DAYS,
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_EFFICIENCY,
@@ -255,6 +256,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_MAX_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
+                vol.Optional(CONF_TEST_MODE, default=False): bool,
                 vol.Optional(CONF_GRID_CHARGE_SWITCH): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="switch")
                 ),
@@ -675,7 +677,12 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
             self.hass.config_entries.async_update_entry(
                 self._config_entry, data={**self._config_entry.data, **user_input}
             )
-            return self.async_create_entry(title="", data={})
+            options = {**(self._config_entry.options or {})}
+            options[CONF_TEST_MODE] = user_input.get(
+                CONF_TEST_MODE,
+                self._config_entry.data.get(CONF_TEST_MODE, False),
+            )
+            return self.async_create_entry(title="", data=options)
 
         return self.async_show_form(step_id="init", data_schema=self._get_options_schema())
     
@@ -777,5 +784,12 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
+                vol.Optional(
+                    CONF_TEST_MODE,
+                    default=(self._config_entry.options or {}).get(
+                        CONF_TEST_MODE,
+                        self._config_entry.data.get(CONF_TEST_MODE, False),
+                    ),
+                ): bool,
             }
         )

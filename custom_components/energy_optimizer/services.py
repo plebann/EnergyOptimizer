@@ -11,8 +11,8 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, SERVICE_MORNING_GRID_CHARGE, SERVICE_OVERNIGHT_SCHEDULE
 from .helpers import get_float_state_info
-from .service_handlers.morning import async_handle_morning_grid_charge
-from .service_handlers.overnight import async_handle_overnight_schedule
+from .decision_engine.morning_charge import async_run_morning_charge
+from .decision_engine.evening_behavior import async_run_evening_behavior
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -149,10 +149,17 @@ async def async_register_services(hass: HomeAssistant) -> None:
         hass: Home Assistant instance
     """
     async def _handle_morning_grid_charge(call: ServiceCall) -> None:
-        await async_handle_morning_grid_charge(hass, call)
+        await async_run_morning_charge(
+            hass,
+            entry_id=call.data.get(SERVICE_FIELD_ENTRY_ID),
+            margin=call.data.get("margin"),
+        )
 
     async def _handle_overnight_schedule(call: ServiceCall) -> None:
-        await async_handle_overnight_schedule(hass, call)
+        await async_run_evening_behavior(
+            hass,
+            entry_id=call.data.get(SERVICE_FIELD_ENTRY_ID),
+        )
 
     hass.services.async_register(
         DOMAIN,

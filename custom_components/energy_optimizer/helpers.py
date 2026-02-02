@@ -7,8 +7,25 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
+    from homeassistant.config_entries import ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def is_test_mode(entry: ConfigEntry) -> bool:
+    """Return True when test mode is enabled for the config entry."""
+    from .const import CONF_TEST_MODE
+
+    options = entry.options or {}
+    if not isinstance(options, dict):
+        options = {}
+    if CONF_TEST_MODE in options:
+        return bool(options.get(CONF_TEST_MODE))
+
+    data = entry.data or {}
+    if not isinstance(data, dict):
+        return False
+    return bool(data.get(CONF_TEST_MODE, False))
 
 
 def get_active_program_entity(

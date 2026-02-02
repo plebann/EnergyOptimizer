@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.event import async_track_time_change
 
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, SERVICE_OVERNIGHT_SCHEDULE
+from .const import DOMAIN
+from .coordinator import EnergyOptimizerCoordinator
+from .scheduler.action_scheduler import ActionScheduler
 from .services import async_register_services
 
 if TYPE_CHECKING:
@@ -71,6 +72,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].setdefault(entry.entry_id, {})
 
+    coordinator = EnergyOptimizerCoordinator(hass, entry)
+    await coordinator.async_config_entry_first_refresh()
+    hass.data[DOMAIN][entry.entry_id]["coordinator"] = coordinator
+
     # Forward entry setup to sensor platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -78,28 +83,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.services.has_service(DOMAIN, SERVICE_OVERNIGHT_SCHEDULE):
         await async_register_services(hass)
 
-    # Register automatic daily overnight handling at 22:00
-    async def _trigger_overnight_handling(now):
-        """Trigger battery overnight handling at 22:00."""
-        _LOGGER.info("Auto-triggering battery overnight handling at 22:00")
-        await hass.services.async_call(
-            DOMAIN,
-            SERVICE_OVERNIGHT_SCHEDULE,
-            {"entry_id": entry.entry_id},
-            blocking=False,
-        )
+    # Start scheduler for fixed actions
+    scheduler = ActionScheduler(hass, entry)
+    scheduler.start()
+    hass.data[DOMAIN][entry.entry_id]["scheduler"] = scheduler
 
-    # Track time change: trigger at 22:00 every day
-    remove_listener = async_track_time_change(
-        hass, _trigger_overnight_handling, hour=22, minute=0, second=0
-    )
-
-    # Store removal callback for cleanup
-    if "listeners" not in hass.data[DOMAIN][entry.entry_id]:
-        hass.data[DOMAIN][entry.entry_id]["listeners"] = []
-    hass.data[DOMAIN][entry.entry_id]["listeners"].append(remove_listener)
-
-    _LOGGER.info("Energy Optimizer: Automatic 22:00 overnight handling enabled")
+    _LOGGER.info("Energy Optimizer scheduler enabled")
 
     return True
 
@@ -109,10 +98,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
-        # Remove time-based listeners
+        # Stop scheduler
         entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
-        for remove_listener in entry_data.get("listeners", []):
-            remove_listener()
+        scheduler = entry_data.get("scheduler")
+        if scheduler:
+            scheduler.stop()
+
+        entry_data.pop("coordinator", None)
 
         hass.data[DOMAIN].pop(entry.entry_id)
 

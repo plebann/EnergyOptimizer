@@ -35,8 +35,8 @@
 
 ### Progi decyzyjne:
 - **Próg opłacalności eksportu:** 95,1 gr/kWh netto
-  - Wzór: `(cena_energii + dystrybucja) × 0,9 + dystrybucja × 3,33`
-  - Dla taryfy niskiej: `(0,4635 + 0,1428) × 0,9 + 0,1428 × 3,33 = 1,021 zł/kWh`
+    - Wzór: `(cena_energii + dystrybucja) × 0,9 + dystrybucja × 3,33`
+    - Dla taryfy niskiej: `(0,3718 + 0,005 + 0,1161) * 0,9 + (0,1161 + 0,005) * 3,33 = 0,951 zł/kWh`
 - **Próg blokady ładowania PV:** `średnia(dołek) < 0,8 × średnia(produkcja_PV) × 0,9`
 
 ### Dodatkowe sterowanie:
@@ -329,8 +329,8 @@ ELSE:
 
 **Akcje:**
 - `sprzedaj_z_magazynu(ilość_kWh)` - włącz tryb force discharge do sieci przez określony czas
-  - Czas rozładowania = `ilość_kWh / moc_falownika` (max 12 kW)
-  - Jednocześnie: dom zasilany z sieci (aby energia z magazynu szła do eksportu)
+    - Czas rozładowania = `ilość_kWh / moc_falownika` (max 12 kW)
+    - Jednocześnie: dom zasilany z magazynu
 
 ---
 
@@ -647,8 +647,7 @@ IF (szczyt_wieczorny.max_cena > 95,1 gr/kWh) AND (nadwyżki_PV_w_południe > 3 k
 ### **Podczas sprzedaży (force discharge):**
 ```
 1. Magazyn → sieć (eksport)
-2. Sieć → dom (dom zasilany z sieci, nie z magazynu)
-   (cała energia z magazynu idzie na eksport)
+2. Magazyn → dom (dom zasilany z magazynu)
 ```
 
 ---
@@ -687,6 +686,7 @@ IF (szczyt_wieczorny.max_cena > 95,1 gr/kWh) AND (nadwyżki_PV_w_południe > 3 k
    - NIGDY nie rozładowuj poniżej tych progów
 5. **Strategia konserwatywna:** W razie wątpliwości priorytet ma unikanie poboru z sieci w wysokiej taryfie, nawet kosztem niewykorzystania okazji do arbitrażu
 6. **Balansowanie magazynu:** Co 10 dni wymuszenie pełnego cyklu ładowania do 100% i utrzymania przez noc (dla zdrowia baterii)
+7. **Sterowanie falownikiem (Solarman):** używaj dedykowanego programu (np. Program 1) i ustawiaj `number.inverter_program_<n>_soc`, `select.inverter_work_mode` (Selling First / Zero Export to Load), `select.inverter_program_<n>_charging` (grid/disabled), prądy `inverter_battery_max_charging_current` / `inverter_battery_max_discharging_current` / `inverter_battery_grid_charging_current` oraz `number.inverter_grid_max_export_power`; godzina startu programu `time.inverter_program_<n>_time` może być użyta do aktywacji profilu. Jeśli automatyka korzysta z wielu programów czasowych, przypisz: P2=04:00 (ładowanie z sieci), P3=szczyt poranny, P4=niskotarifowe doładowanie dzienne (start może być korygowany inną automatyzacją), P5=szczyt wieczorny 17-21, P6=22:00 (balansowanie). Przy balansowaniu ustaw SOC w P6 oraz odzwierciedlij cel SOC w P1 (opcjonalnie P2).
 
 ---
 
