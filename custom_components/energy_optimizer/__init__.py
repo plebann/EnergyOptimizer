@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant, callback
 
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN
+from .const import DOMAIN, SERVICE_OVERNIGHT_SCHEDULE
 from .coordinator import EnergyOptimizerCoordinator
 from .scheduler.action_scheduler import ActionScheduler
 from .services import async_register_services
