@@ -36,7 +36,7 @@ def get_pv_forecast_kwh(
         pv_state = hass.states.get(pv_sensor)
         detailed_forecast = None
         if pv_state is not None:
-            detailed_forecast = pv_state.attributes.get("detailedForecast")
+            detailed_forecast = pv_state.attributes.get("detailedHourly")
         else:
             _LOGGER.warning("PV forecast sensor %s unavailable", pv_sensor)
         if isinstance(detailed_forecast, list):
