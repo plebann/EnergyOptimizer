@@ -89,7 +89,6 @@ def test_is_valid_percentage():
 
 from custom_components.energy_optimizer.calculations.utils import (
     build_hourly_usage_array,
-    calculate_dynamic_usage_ratio,
 )
 import pytest
 
@@ -214,91 +213,3 @@ def test_build_hourly_usage_array_invalid_state():
     
     # Should fall back to daily average for invalid window
     assert all(result[i] == 2.0 for i in range(0, 4))
-
-@pytest.mark.unit
-def test_calculate_dynamic_usage_ratio_normal():
-    """Test dynamic usage ratio calculation with normal consumption."""
-    config = {
-        "today_load_sensor": "sensor.today_load",
-        "daily_load_sensor": "sensor.daily_load",
-    }
-    
-    def mock_get_state(entity_id):
-        values = {
-            "sensor.today_load": "24.0",  # 24 kWh so far
-            "sensor.daily_load": "48.0",  # 48 kWh average per day
-        }
-        
-        class MockState:
-            def __init__(self, state_value):
-                self.state = state_value
-        
-        return MockState(values.get(entity_id, "0"))
-    
-    # At 14:00 (2 PM), 24 kWh consumed
-    # Ratio = (24 / 14) / (48 / 24) = 1.714 / 2.0 = 0.857
-    # Should return 1.0 (minimum)
-    result = calculate_dynamic_usage_ratio(config, mock_get_state, 14, 0)
-    assert result == 1.0
-
-
-@pytest.mark.unit
-def test_calculate_dynamic_usage_ratio_high_consumption():
-    """Test dynamic usage ratio with higher than average consumption."""
-    config = {
-        "today_load_sensor": "sensor.today_load",
-        "daily_load_sensor": "sensor.daily_load",
-    }
-    
-    def mock_get_state(entity_id):
-        values = {
-            "sensor.today_load": "36.0",  # 36 kWh so far (high)
-            "sensor.daily_load": "48.0",  # 48 kWh average per day
-        }
-        
-        class MockState:
-            def __init__(self, state_value):
-                self.state = state_value
-        
-        return MockState(values.get(entity_id, "0"))
-    
-    # At 14:00 (2 PM), 36 kWh consumed
-    # Ratio = (36 / 14) / (48 / 24) = 2.571 / 2.0 = 1.286
-    result = calculate_dynamic_usage_ratio(config, mock_get_state, 14, 0)
-    assert result > 1.2  # Approximate check
-
-
-@pytest.mark.unit
-def test_calculate_dynamic_usage_ratio_early_morning():
-    """Test dynamic usage ratio in early morning hours."""
-    config = {
-        "today_load_sensor": "sensor.today_load",
-        "daily_load_sensor": "sensor.daily_load",
-    }
-    
-    def mock_get_state(entity_id):
-        values = {
-            "sensor.today_load": "2.0",
-            "sensor.daily_load": "48.0",
-        }
-        
-        class MockState:
-            def __init__(self, state_value):
-                self.state = state_value
-        
-        return MockState(values.get(entity_id, "0"))
-    
-    # At 02:00 (2 AM), ratio should be 1.0 (too early to judge)
-    result = calculate_dynamic_usage_ratio(config, mock_get_state, 2, 0)
-    assert result == 1.0
-
-
-def test_calculate_dynamic_usage_ratio_missing_sensors():
-    """Test dynamic usage ratio with missing sensors."""
-    config = {}
-    
-    def mock_get_state(entity_id):
-        return None
-
-    result = calculate_dynamic_usage_ratio(config, mock_get_state, 14, 0)
-    assert result == 1.0

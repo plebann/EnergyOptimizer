@@ -67,9 +67,6 @@ CONF_PV_FORECAST_SENSOR = "pv_forecast_sensor"
 CONF_PV_EFFICIENCY = "pv_efficiency"
 
 CONF_ENABLE_HEAT_PUMP = "enable_heat_pump"
-CONF_OUTSIDE_TEMP_SENSOR = "outside_temp_sensor"
-CONF_HEAT_PUMP_POWER_SENSOR = "heat_pump_power_sensor"
-CONF_COP_CURVE = "cop_curve"
 CONF_HEAT_PUMP_FORECAST_DOMAIN = "heat_pump_forecast_domain"
 CONF_HEAT_PUMP_FORECAST_SERVICE = "heat_pump_forecast_service"
 

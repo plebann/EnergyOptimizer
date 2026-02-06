@@ -31,7 +31,6 @@ from .const import (
     CONF_GRID_CHARGE_SWITCH,
     CONF_HEAT_PUMP_FORECAST_DOMAIN,
     CONF_HEAT_PUMP_FORECAST_SERVICE,
-    CONF_HEAT_PUMP_POWER_SENSOR,
     CONF_LOAD_USAGE_00_04,
     CONF_LOAD_USAGE_04_08,
     CONF_LOAD_USAGE_08_12,
@@ -41,7 +40,6 @@ from .const import (
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
-    CONF_OUTSIDE_TEMP_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_PROG1_SOC_ENTITY,
     CONF_PROG1_TIME_START_ENTITY,
@@ -444,18 +442,6 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_HEAT_PUMP_FORECAST_SERVICE,
                     default=DEFAULT_HEAT_PUMP_FORECAST_SERVICE,
                 ): vol.Coerce(str),
-                vol.Optional(CONF_OUTSIDE_TEMP_SENSOR): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain="sensor",
-                        device_class="temperature",
-                    )
-                ),
-                vol.Optional(CONF_HEAT_PUMP_POWER_SENSOR): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain="sensor",
-                        device_class="power",
-                    )
-                ),
             }
         )
 
@@ -685,36 +671,113 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
         self._config_entry = config_entry
+        self._data: dict[str, Any] = {}
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
         """Manage the options."""
-        if user_input is not None:
-            # Validate min/max SOC relationship
-            if user_input[CONF_MIN_SOC] >= user_input[CONF_MAX_SOC]:
-                return self.async_show_form(
-                    step_id="init",
-                    data_schema=self._get_options_schema(),
-                    errors={"base": "min_greater_than_max"},
-                )
-            
-            # Update config entry
-            self.hass.config_entries.async_update_entry(
-                self._config_entry, data={**self._config_entry.data, **user_input}
-            )
-            options = {**(self._config_entry.options or {})}
-            options[CONF_TEST_MODE] = user_input.get(
-                CONF_TEST_MODE,
-                self._config_entry.data.get(CONF_TEST_MODE, True),
-            )
-            return self.async_create_entry(title="", data=options)
+        self._data = {}
+        return await self.async_step_price_entities()
 
-        return self.async_show_form(step_id="init", data_schema=self._get_options_schema())
-    
-    def _get_options_schema(self) -> vol.Schema:
-        """Get options schema with all parameters for calculate_usable_capacity."""
-        return vol.Schema(
+    async def async_step_price_entities(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle price entity options."""
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_battery_sensors()
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_PRICE_SENSOR,
+                    default=self._config_entry.data.get(CONF_PRICE_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_AVERAGE_PRICE_SENSOR,
+                    default=self._config_entry.data.get(CONF_AVERAGE_PRICE_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_CHEAPEST_WINDOW_SENSOR,
+                    default=self._config_entry.data.get(CONF_CHEAPEST_WINDOW_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="binary_sensor")
+                ),
+                vol.Optional(
+                    CONF_EXPENSIVE_WINDOW_SENSOR,
+                    default=self._config_entry.data.get(CONF_EXPENSIVE_WINDOW_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="binary_sensor")
+                ),
+                vol.Optional(
+                    CONF_TOMORROW_PRICE_SENSOR,
+                    default=self._config_entry.data.get(CONF_TOMORROW_PRICE_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+            }
+        )
+
+        return self.async_show_form(step_id="price_entities", data_schema=schema)
+
+    async def async_step_battery_sensors(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle battery sensor options."""
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_battery_params()
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_BATTERY_SOC_SENSOR,
+                    default=self._config_entry.data.get(CONF_BATTERY_SOC_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="battery")
+                ),
+                vol.Optional(
+                    CONF_BATTERY_POWER_SENSOR,
+                    default=self._config_entry.data.get(CONF_BATTERY_POWER_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="power")
+                ),
+                vol.Optional(
+                    CONF_BATTERY_VOLTAGE_SENSOR,
+                    default=self._config_entry.data.get(CONF_BATTERY_VOLTAGE_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="voltage")
+                ),
+                vol.Optional(
+                    CONF_BATTERY_CURRENT_SENSOR,
+                    default=self._config_entry.data.get(CONF_BATTERY_CURRENT_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="current")
+                ),
+            }
+        )
+
+        return self.async_show_form(step_id="battery_sensors", data_schema=schema)
+
+    async def async_step_battery_params(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle battery parameter options."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            if user_input[CONF_MIN_SOC] >= user_input[CONF_MAX_SOC]:
+                errors["base"] = "min_greater_than_max"
+            else:
+                self._data.update(user_input)
+                return await self.async_step_control_entities()
+
+        schema = vol.Schema(
             {
                 vol.Optional(
                     CONF_BATTERY_CAPACITY_AH,
@@ -729,6 +792,12 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     ),
                 ): vol.All(vol.Coerce(float), vol.Range(min=12, max=600)),
                 vol.Optional(
+                    CONF_BATTERY_EFFICIENCY,
+                    default=self._config_entry.data.get(
+                        CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
+                vol.Optional(
                     CONF_MIN_SOC,
                     default=self._config_entry.data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC),
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
@@ -737,11 +806,11 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     default=self._config_entry.data.get(CONF_MAX_SOC, DEFAULT_MAX_SOC),
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
                 vol.Optional(
-                    CONF_BATTERY_EFFICIENCY,
-                    default=self._config_entry.data.get(
-                        CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY
-                    ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
+                    CONF_BATTERY_CAPACITY_ENTITY,
+                    default=self._config_entry.data.get(CONF_BATTERY_CAPACITY_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
                 vol.Optional(
                     CONF_BALANCING_INTERVAL_DAYS,
                     default=self._config_entry.data.get(
@@ -754,68 +823,294 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                         CONF_BALANCING_PV_THRESHOLD, DEFAULT_BALANCING_PV_THRESHOLD
                     ),
                 ): vol.All(vol.Coerce(float), vol.Range(min=0, max=200)),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="battery_params", data_schema=schema, errors=errors
+        )
+
+    async def async_step_control_entities(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle control entity options."""
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_time_programs()
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_WORK_MODE_ENTITY,
+                    default=self._config_entry.data.get(CONF_WORK_MODE_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="select")
+                ),
+                vol.Optional(
+                    CONF_CHARGE_CURRENT_ENTITY,
+                    default=self._config_entry.data.get(CONF_CHARGE_CURRENT_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_DISCHARGE_CURRENT_ENTITY,
+                    default=self._config_entry.data.get(CONF_DISCHARGE_CURRENT_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_MAX_CHARGE_CURRENT_ENTITY,
+                    default=self._config_entry.data.get(CONF_MAX_CHARGE_CURRENT_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_TEST_MODE,
+                    default=(self._config_entry.options or {}).get(
+                        CONF_TEST_MODE,
+                        self._config_entry.data.get(CONF_TEST_MODE, True),
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_GRID_CHARGE_SWITCH,
+                    default=self._config_entry.data.get(CONF_GRID_CHARGE_SWITCH),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="switch")
+                ),
+            }
+        )
+
+        return self.async_show_form(step_id="control_entities", data_schema=schema)
+
+    async def async_step_time_programs(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle time program options."""
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_pv_load_config()
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_PROG1_SOC_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG1_SOC_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_PROG1_TIME_START_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG1_TIME_START_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(
+                    CONF_PROG2_SOC_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG2_SOC_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_PROG2_TIME_START_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG2_TIME_START_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(
+                    CONF_PROG3_SOC_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG3_SOC_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_PROG3_TIME_START_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG3_TIME_START_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(
+                    CONF_PROG4_SOC_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG4_SOC_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_PROG4_TIME_START_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG4_TIME_START_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(
+                    CONF_PROG5_SOC_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG5_SOC_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_PROG5_TIME_START_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG5_TIME_START_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(
+                    CONF_PROG6_SOC_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG6_SOC_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_PROG6_TIME_START_ENTITY,
+                    default=self._config_entry.data.get(CONF_PROG6_TIME_START_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+            }
+        )
+
+        return self.async_show_form(step_id="time_programs", data_schema=schema)
+
+    async def async_step_pv_load_config(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle PV and load options."""
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_load_windows()
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_DAILY_LOAD_SENSOR,
+                    default=self._config_entry.data.get(CONF_DAILY_LOAD_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
                 vol.Optional(
                     CONF_DAILY_LOSSES_SENSOR,
-                    default=self._config_entry.data.get(CONF_DAILY_LOSSES_SENSOR)
+                    default=self._config_entry.data.get(CONF_DAILY_LOSSES_SENSOR),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(
                     CONF_TARIFF_END_HOUR_SENSOR,
-                    default=self._config_entry.data.get(CONF_TARIFF_END_HOUR_SENSOR)
+                    default=self._config_entry.data.get(CONF_TARIFF_END_HOUR_SENSOR),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(
+                    CONF_PV_FORECAST_SENSOR,
+                    default=self._config_entry.data.get(CONF_PV_FORECAST_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_PV_FORECAST_TODAY,
+                    default=self._config_entry.data.get(CONF_PV_FORECAST_TODAY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_PV_FORECAST_TOMORROW,
+                    default=self._config_entry.data.get(CONF_PV_FORECAST_TOMORROW),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_PV_FORECAST_REMAINING,
+                    default=self._config_entry.data.get(CONF_PV_FORECAST_REMAINING),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_PV_PEAK_FORECAST,
+                    default=self._config_entry.data.get(CONF_PV_PEAK_FORECAST),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_PV_EFFICIENCY,
+                    default=self._config_entry.data.get(
+                        CONF_PV_EFFICIENCY, DEFAULT_PV_EFFICIENCY
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
+                vol.Optional(
+                    CONF_WEATHER_FORECAST,
+                    default=self._config_entry.data.get(CONF_WEATHER_FORECAST),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="weather")
+                ),
+            }
+        )
+
+        return self.async_show_form(step_id="pv_load_config", data_schema=schema)
+
+    async def async_step_load_windows(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle load window options."""
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_heat_pump()
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
                     CONF_TODAY_LOAD_SENSOR,
-                    default=self._config_entry.data.get(CONF_TODAY_LOAD_SENSOR)
+                    default=self._config_entry.data.get(CONF_TODAY_LOAD_SENSOR),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(
                     CONF_LOAD_USAGE_00_04,
-                    default=self._config_entry.data.get(CONF_LOAD_USAGE_00_04)
+                    default=self._config_entry.data.get(CONF_LOAD_USAGE_00_04),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(
                     CONF_LOAD_USAGE_04_08,
-                    default=self._config_entry.data.get(CONF_LOAD_USAGE_04_08)
+                    default=self._config_entry.data.get(CONF_LOAD_USAGE_04_08),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(
                     CONF_LOAD_USAGE_08_12,
-                    default=self._config_entry.data.get(CONF_LOAD_USAGE_08_12)
+                    default=self._config_entry.data.get(CONF_LOAD_USAGE_08_12),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(
                     CONF_LOAD_USAGE_12_16,
-                    default=self._config_entry.data.get(CONF_LOAD_USAGE_12_16)
+                    default=self._config_entry.data.get(CONF_LOAD_USAGE_12_16),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(
                     CONF_LOAD_USAGE_16_20,
-                    default=self._config_entry.data.get(CONF_LOAD_USAGE_16_20)
+                    default=self._config_entry.data.get(CONF_LOAD_USAGE_16_20),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(
                     CONF_LOAD_USAGE_20_24,
-                    default=self._config_entry.data.get(CONF_LOAD_USAGE_20_24)
+                    default=self._config_entry.data.get(CONF_LOAD_USAGE_20_24),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
-                vol.Optional(
-                    CONF_MAX_CHARGE_CURRENT_ENTITY,
-                    default=self._config_entry.data.get(
-                        CONF_MAX_CHARGE_CURRENT_ENTITY
-                    ),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="number")
-                ),
+            }
+        )
+
+        return self.async_show_form(step_id="load_windows", data_schema=schema)
+
+    async def async_step_heat_pump(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle heat pump options."""
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_review()
+
+        schema = vol.Schema(
+            {
                 vol.Optional(
                     CONF_ENABLE_HEAT_PUMP,
                     default=self._config_entry.data.get(CONF_ENABLE_HEAT_PUMP, False),
@@ -832,12 +1127,33 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                         CONF_HEAT_PUMP_FORECAST_SERVICE, DEFAULT_HEAT_PUMP_FORECAST_SERVICE
                     ),
                 ): vol.Coerce(str),
-                vol.Optional(
-                    CONF_TEST_MODE,
-                    default=(self._config_entry.options or {}).get(
-                        CONF_TEST_MODE,
-                        self._config_entry.data.get(CONF_TEST_MODE, True),
-                    ),
-                ): bool,
             }
         )
+
+        return self.async_show_form(step_id="heat_pump", data_schema=schema)
+
+    async def async_step_review(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Finalize options."""
+        if user_input is not None:
+            updated_data = {**self._config_entry.data, **self._data}
+
+            test_mode = self._data.get(
+                CONF_TEST_MODE,
+                (self._config_entry.options or {}).get(
+                    CONF_TEST_MODE,
+                    self._config_entry.data.get(CONF_TEST_MODE, True),
+                ),
+            )
+            updated_data.pop(CONF_TEST_MODE, None)
+
+            self.hass.config_entries.async_update_entry(
+                self._config_entry, data=updated_data
+            )
+
+            options = {**(self._config_entry.options or {})}
+            options[CONF_TEST_MODE] = test_mode
+            return self.async_create_entry(title="", data=options)
+
+        return self.async_show_form(step_id="review", data_schema=vol.Schema({}))
