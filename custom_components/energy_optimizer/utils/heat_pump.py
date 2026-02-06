@@ -60,7 +60,7 @@ async def async_fetch_heat_pump_forecast(
     except Exception as exc:  # noqa: BLE001
         _LOGGER.warning("Heat pump forecast failed: %s", exc)
         return 0.0
-
+    _LOGGER.debug("Heat pump forecast response: %s", response)
     if isinstance(response, dict):
         return float(response.get("total_energy_kwh", 0.0) or 0.0)
 
