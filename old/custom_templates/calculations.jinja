@@ -9,11 +9,13 @@
   {% set nominal_voltage = states(sensors.battery_voltage_sensor) | float %}
   {% set target_charge_time_hours = 2 %}
   
-  {% set lvl1_current = 23 %}
-  {% set lvl2_threshold = 70 %}
-  {% set lvl2_current = 9 %}
-  {% set lvl3_treshold = 90 %}
-  {% set lvl3_current = 5 %}
+  {% set lvl1_current = 21 %}
+  {% set lvl2_treshold = 50 %}
+  {% set lvl2_current = 18 %}
+  {% set lvl3_treshold = 70 %}
+  {% set lvl3_current = 9 %}
+  {% set lvl4_treshold = 90 %}
+  {% set lvl4_current = 5 %}
   
   {% set current_soc = states(sensors.battery_soc_sensor) | int %}
   
@@ -24,16 +26,16 @@
     {{ (soc_end - soc_start) / 100 * config.battery_capacity }}
   {%- endmacro %}
   
-  {% if current_soc < lvl2_threshold %}
+  {% if current_soc < lvl2_treshold %}
     {% set phase1_start = current_soc %}
-    {% set phase1_end = [target_soc, lvl2_threshold] | min %}
+    {% set phase1_end = [target_soc, lvl2_treshold] | min %}
     {% set phase1_energy = energy_in_range(phase1_start, phase1_end) | float %}
   {% else %}
     {% set phase1_energy = 0 %}
   {% endif %}
   
-  {% if current_soc < lvl3_treshold and target_soc > lvl2_threshold %}
-    {% set phase2_start = [current_soc, lvl2_threshold] | max %}
+  {% if current_soc < lvl3_treshold and target_soc > lvl2_treshold %}
+    {% set phase2_start = [current_soc, lvl2_treshold] | max %}
     {% set phase2_end = [target_soc, lvl3_treshold] | min %}
     {% set phase2_energy = energy_in_range(phase2_start, phase2_end) | float %}
   {% else %}
@@ -47,29 +49,42 @@
   {% else %}
     {% set phase3_energy = 0 %}
   {% endif %}
+
+  {% if target_soc > lvl4_treshold %}
+    {% set phase4_start = [current_soc, lvl4_treshold] | max %}
+    {% set phase4_end = target_soc %}
+    {% set phase4_energy = energy_in_range(phase4_start, phase4_end) | float %}
+  {% else %}
+    {% set phase4_energy = 0 %}
+  {% endif %}
   
   {% set phase1_time = (phase1_energy * 1000) / (nominal_voltage * lvl1_current) if phase1_energy > 0 else 0 %}
   {% set phase2_time = (phase2_energy * 1000) / (nominal_voltage * lvl2_current) if phase2_energy > 0 else 0 %}
   {% set phase3_time = (phase3_energy * 1000) / (nominal_voltage * lvl3_current) if phase3_energy > 0 else 0 %}
+  {% set phase4_time = (phase4_energy * 1000) / (nominal_voltage * lvl4_current) if phase4_energy > 0 else 0 %}
   
-  {% set total_time_at_max = phase1_time + phase2_time + phase3_time %}
+  {% set total_time_at_max = phase1_time + phase2_time + phase3_time + phase4_time %}
   
   {% if total_time_at_max <= target_charge_time_hours %}
     {% set required_power_w = (energy_to_charge * 1000) / target_charge_time_hours %}
     {% set average_current = required_power_w / nominal_voltage %}
     
-    {% if current_soc < lvl2_threshold %}
+    {% if current_soc < lvl2_treshold %}
       {% set recommended_current = [average_current, lvl1_current] | min %}
-      {% set limiting_phase = "0-" ~ lvl2_threshold ~ "% SOC" %}
+      {% set limiting_phase = "0-" ~ lvl2_treshold ~ "% SOC" %}
       {% set max_current = lvl1_current %}
-    {% elif current_soc < lvl3_threshold %}
+    {% elif current_soc < lvl3_treshold %}
       {% set recommended_current = [average_current, lvl2_current] | min %}
-      {% set limiting_phase = lvl2_threshold ~ "-" ~ lvl3_threshold ~ "% SOC" %}
+      {% set limiting_phase = lvl2_treshold ~ "-" ~ lvl3_treshold ~ "% SOC" %}
       {% set max_current = lvl2_current %}
-    {% else %}
+    {% elif current_soc < lvl4_treshold %}
       {% set recommended_current = [average_current, lvl3_current] | min %}
-      {% set limiting_phase = lvl3_threshold ~ "-100% SOC" %}
+      {% set limiting_phase = lvl3_treshold ~ "-" ~ lvl4_treshold ~ "% SOC" %}
       {% set max_current = lvl3_current %}
+    {% else %}
+      {% set recommended_current = [average_current, lvl4_current] | min %}
+      {% set limiting_phase = lvl4_treshold ~ "-100% SOC" %}
+      {% set max_current = lvl4_current %}
     {% endif %}
   {% else %}
     {% set recommended_current = lvl1_current %}

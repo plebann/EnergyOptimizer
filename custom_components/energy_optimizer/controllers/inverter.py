@@ -103,3 +103,38 @@ async def set_max_charge_current(
         logger.debug("Set %s to %sA", entity_id, value)
     else:
         _LOGGER.debug("Set %s to %sA", entity_id, value)
+
+
+async def set_charge_current(
+    hass: HomeAssistant,
+    entity_id: str | None,
+    value: float,
+    *,
+    entry: ConfigEntry | None = None,
+    logger: logging.Logger | None = None,
+    context: Context | None = None,
+) -> None:
+    """Set charge current entity if provided."""
+    if not entity_id:
+        return
+
+    if entry is not None:
+        if is_test_mode(entry):
+            if logger:
+                logger.info("Test mode enabled - skipping set_value for %s", entity_id)
+            else:
+                _LOGGER.info("Test mode enabled - skipping set_value for %s", entity_id)
+            return
+
+    await _call_service(
+        hass,
+        "number",
+        "set_value",
+        {"entity_id": entity_id, "value": value},
+        context=context,
+    )
+
+    if logger:
+        logger.debug("Set %s to %sA", entity_id, value)
+    else:
+        _LOGGER.debug("Set %s to %sA", entity_id, value)

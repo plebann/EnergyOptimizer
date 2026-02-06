@@ -29,6 +29,8 @@ from .const import (
     CONF_ENABLE_HEAT_PUMP,
     CONF_EXPENSIVE_WINDOW_SENSOR,
     CONF_GRID_CHARGE_SWITCH,
+    CONF_HEAT_PUMP_FORECAST_DOMAIN,
+    CONF_HEAT_PUMP_FORECAST_SERVICE,
     CONF_HEAT_PUMP_POWER_SENSOR,
     CONF_LOAD_USAGE_00_04,
     CONF_LOAD_USAGE_04_08,
@@ -53,10 +55,13 @@ from .const import (
     CONF_PROG5_TIME_START_ENTITY,
     CONF_PROG6_SOC_ENTITY,
     CONF_PROG6_TIME_START_ENTITY,
+    CONF_PV_EFFICIENCY,
+    CONF_PV_FORECAST_SENSOR,
     CONF_PV_FORECAST_REMAINING,
     CONF_PV_FORECAST_TODAY,
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PEAK_FORECAST,
+    CONF_TARIFF_END_HOUR_SENSOR,
     CONF_TODAY_LOAD_SENSOR,
     CONF_TOMORROW_PRICE_SENSOR,
     CONF_WEATHER_FORECAST,
@@ -67,6 +72,9 @@ from .const import (
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
     DEFAULT_BALANCING_PV_THRESHOLD,
+    DEFAULT_HEAT_PUMP_FORECAST_DOMAIN,
+    DEFAULT_HEAT_PUMP_FORECAST_SERVICE,
+    DEFAULT_PV_EFFICIENCY,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_SOC,
     DOMAIN,
@@ -340,6 +348,16 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_DAILY_LOSSES_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
+                vol.Optional(CONF_TARIFF_END_HOUR_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_PV_FORECAST_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_PV_EFFICIENCY,
+                    default=DEFAULT_PV_EFFICIENCY,
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
                 vol.Optional(CONF_PV_FORECAST_TODAY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -418,6 +436,14 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(
             {
                 vol.Optional(CONF_ENABLE_HEAT_PUMP, default=False): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_HEAT_PUMP_FORECAST_DOMAIN,
+                    default=DEFAULT_HEAT_PUMP_FORECAST_DOMAIN,
+                ): vol.Coerce(str),
+                vol.Optional(
+                    CONF_HEAT_PUMP_FORECAST_SERVICE,
+                    default=DEFAULT_HEAT_PUMP_FORECAST_SERVICE,
+                ): vol.Coerce(str),
                 vol.Optional(CONF_OUTSIDE_TEMP_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain="sensor",
@@ -735,6 +761,12 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(
+                    CONF_TARIFF_END_HOUR_SENSOR,
+                    default=self._config_entry.data.get(CONF_TARIFF_END_HOUR_SENSOR)
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
                     CONF_TODAY_LOAD_SENSOR,
                     default=self._config_entry.data.get(CONF_TODAY_LOAD_SENSOR)
                 ): selector.EntitySelector(
@@ -784,6 +816,18 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
+                vol.Optional(
+                    CONF_HEAT_PUMP_FORECAST_DOMAIN,
+                    default=self._config_entry.data.get(
+                        CONF_HEAT_PUMP_FORECAST_DOMAIN, DEFAULT_HEAT_PUMP_FORECAST_DOMAIN
+                    ),
+                ): vol.Coerce(str),
+                vol.Optional(
+                    CONF_HEAT_PUMP_FORECAST_SERVICE,
+                    default=self._config_entry.data.get(
+                        CONF_HEAT_PUMP_FORECAST_SERVICE, DEFAULT_HEAT_PUMP_FORECAST_SERVICE
+                    ),
+                ): vol.Coerce(str),
                 vol.Optional(
                     CONF_TEST_MODE,
                     default=(self._config_entry.options or {}).get(

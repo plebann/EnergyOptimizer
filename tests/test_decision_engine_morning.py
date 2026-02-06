@@ -10,10 +10,20 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_EFFICIENCY,
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
+    CONF_CHARGE_CURRENT_ENTITY,
     CONF_DAILY_LOAD_SENSOR,
+    CONF_ENABLE_HEAT_PUMP,
+    CONF_HEAT_PUMP_FORECAST_DOMAIN,
+    CONF_HEAT_PUMP_FORECAST_SERVICE,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
     CONF_PROG2_SOC_ENTITY,
+    CONF_PV_EFFICIENCY,
+    CONF_PV_FORECAST_SENSOR,
+    CONF_TARIFF_END_HOUR_SENSOR,
+    DEFAULT_HEAT_PUMP_FORECAST_DOMAIN,
+    DEFAULT_HEAT_PUMP_FORECAST_SERVICE,
+    DEFAULT_PV_EFFICIENCY,
     DOMAIN,
 )
 from custom_components.energy_optimizer.decision_engine.morning_charge import (
@@ -23,9 +33,14 @@ from custom_components.energy_optimizer.decision_engine.morning_charge import (
 pytestmark = pytest.mark.enable_socket
 
 
-def _state(value: str) -> MagicMock:
+def _state(value: str | tuple[str, dict[str, object]]) -> MagicMock:
     state = MagicMock()
-    state.state = value
+    if isinstance(value, tuple):
+        state.state = value[0]
+        state.attributes = value[1]
+    else:
+        state.state = value
+        state.attributes = {}
     return state
 
 
@@ -41,6 +56,7 @@ def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
         _state(states[entity_id]) if entity_id in states else None
     )
     hass.services.async_call = AsyncMock()
+    hass.services.has_service = MagicMock(return_value=False)
     
     # Mock sensors for unified logging
     mock_opt_sensor = MagicMock()
@@ -100,6 +116,7 @@ async def test_morning_charge_sets_program_when_deficit() -> None:
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
+        CONF_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",
         CONF_BATTERY_CAPACITY_AH: 100,
         CONF_BATTERY_VOLTAGE: 50,
         CONF_MIN_SOC: 10,
@@ -111,6 +128,7 @@ async def test_morning_charge_sets_program_when_deficit() -> None:
         "number.prog2_soc": "50",
         "sensor.battery_soc": "90",
         "sensor.daily_load": "48",
+        "sensor.tariff_end_hour": "13",
     }
     hass = _setup_hass(config, states)
 
@@ -124,4 +142,68 @@ async def test_morning_charge_sets_program_when_deficit() -> None:
     assert number_calls
     assert any(
         call.args[2]["entity_id"] == "number.prog2_soc" for call in number_calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_morning_charge_includes_pv_and_heat_pump_and_sets_current() -> None:
+    from custom_components.energy_optimizer.const import CONF_TEST_MODE
+
+    config = {
+        CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+        CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
+        CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
+        CONF_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",
+        CONF_PV_FORECAST_SENSOR: "sensor.pv_forecast",
+        CONF_PV_EFFICIENCY: DEFAULT_PV_EFFICIENCY,
+        CONF_ENABLE_HEAT_PUMP: True,
+        CONF_HEAT_PUMP_FORECAST_DOMAIN: DEFAULT_HEAT_PUMP_FORECAST_DOMAIN,
+        CONF_HEAT_PUMP_FORECAST_SERVICE: DEFAULT_HEAT_PUMP_FORECAST_SERVICE,
+        CONF_BATTERY_CAPACITY_AH: 100,
+        CONF_BATTERY_VOLTAGE: 50,
+        CONF_MIN_SOC: 10,
+        CONF_MAX_SOC: 100,
+        CONF_BATTERY_EFFICIENCY: 100,
+        CONF_TEST_MODE: False,
+    }
+    pv_forecast = (
+        "0",
+        {
+            "detailedForecast": [
+                {"period_start": "2026-02-06T06:00:00+01:00", "pv_estimate": 0.5},
+                {"period_start": "2026-02-06T06:30:00+01:00", "pv_estimate": 0.5},
+                {"period_start": "2026-02-06T07:00:00+01:00", "pv_estimate": 1.0},
+            ]
+        },
+    )
+    states = {
+        "number.prog2_soc": "50",
+        "number.charge_current": "0",
+        "sensor.battery_soc": "20",
+        "sensor.daily_load": "48",
+        "sensor.tariff_end_hour": "8",
+        "sensor.pv_forecast": pv_forecast,
+    }
+    hass = _setup_hass(config, states)
+
+    hass.services.has_service.return_value = True
+
+    async def _service_call(domain: str, service: str, data: dict, **kwargs):
+        if domain == DEFAULT_HEAT_PUMP_FORECAST_DOMAIN and service == DEFAULT_HEAT_PUMP_FORECAST_SERVICE:
+            return {"total_energy_kwh": 6.0}
+        return None
+
+    hass.services.async_call = AsyncMock(side_effect=_service_call)
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    number_calls = [
+        call
+        for call in hass.services.async_call.call_args_list
+        if call.args[0] == "number" and call.args[1] == "set_value"
+    ]
+    assert any(call.args[2]["entity_id"] == "number.prog2_soc" for call in number_calls)
+    assert any(
+        call.args[2]["entity_id"] == "number.charge_current" for call in number_calls
     )

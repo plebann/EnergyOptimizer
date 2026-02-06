@@ -45,6 +45,7 @@ CONF_PROG6_TIME_START_ENTITY = "prog6_time_start_entity"
 
 CONF_DAILY_LOAD_SENSOR = "daily_load_sensor"
 CONF_DAILY_LOSSES_SENSOR = "daily_losses_sensor"
+CONF_TARIFF_END_HOUR_SENSOR = "tariff_end_hour_sensor"
 
 # Time-windowed load sensors (4-hour average consumption in kWh/h)
 CONF_LOAD_USAGE_00_04 = "load_usage_00_04"
@@ -62,11 +63,15 @@ CONF_PV_FORECAST_TOMORROW = "pv_forecast_tomorrow"
 CONF_PV_FORECAST_REMAINING = "pv_forecast_remaining"
 CONF_PV_PEAK_FORECAST = "pv_peak_forecast"
 CONF_WEATHER_FORECAST = "weather_forecast"
+CONF_PV_FORECAST_SENSOR = "pv_forecast_sensor"
+CONF_PV_EFFICIENCY = "pv_efficiency"
 
 CONF_ENABLE_HEAT_PUMP = "enable_heat_pump"
 CONF_OUTSIDE_TEMP_SENSOR = "outside_temp_sensor"
 CONF_HEAT_PUMP_POWER_SENSOR = "heat_pump_power_sensor"
 CONF_COP_CURVE = "cop_curve"
+CONF_HEAT_PUMP_FORECAST_DOMAIN = "heat_pump_forecast_domain"
+CONF_HEAT_PUMP_FORECAST_SERVICE = "heat_pump_forecast_service"
 
 # Battery balancing configuration
 CONF_BALANCING_INTERVAL_DAYS = "balancing_interval_days"
@@ -83,6 +88,9 @@ DEFAULT_MAX_SOC = 100
 DEFAULT_BALANCING_INTERVAL_DAYS = 14
 DEFAULT_BALANCING_PV_THRESHOLD = 20.5
 DEFAULT_MAX_CHARGE_CURRENT = 23
+DEFAULT_PV_EFFICIENCY = 0.9
+DEFAULT_HEAT_PUMP_FORECAST_DOMAIN = "heat_pump_predictor"
+DEFAULT_HEAT_PUMP_FORECAST_SERVICE = "calculate_forecast_energy"
 
 # Default COP curve (temperature °C, COP)
 DEFAULT_COP_CURVE = [
