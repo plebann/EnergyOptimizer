@@ -31,8 +31,8 @@ from ..decision_engine.common import resolve_entry
 from ..helpers import get_float_state_info, get_float_value
 from ..controllers.inverter import set_charge_current, set_program_soc
 from ..utils.logging import DecisionOutcome, log_decision_unified
-from ..utils.heat_pump import async_fetch_heat_pump_forecast
-from ..utils.pv_forecast import get_pv_forecast_kwh
+from ..utils.heat_pump import async_fetch_heat_pump_forecast_details
+from ..utils.pv_forecast import get_pv_forecast_hourly_kwh, get_pv_forecast_kwh
 from homeassistant.util import dt as dt_util
 
 if TYPE_CHECKING:
@@ -104,6 +104,28 @@ def _resolve_tariff_end_hour(
     return tariff_end_hour
 
 
+def _get_required_float_state(
+    hass: HomeAssistant,
+    entity_id: str | None,
+    *,
+    entity_name: str,
+) -> float | None:
+    """Fetch a required float state with logging and validation."""
+    if not entity_id:
+        _LOGGER.error("%s not configured", entity_name)
+        return None
+
+    value, raw, error = get_float_state_info(hass, entity_id)
+    if error is not None or value is None:
+        if error in ("missing", "unavailable"):
+            _LOGGER.warning("%s %s unavailable", entity_name, entity_id)
+        else:
+            _LOGGER.warning("%s %s has invalid value: %s", entity_name, entity_id, raw)
+        return None
+
+    return value
+
+
 async def async_run_morning_charge(
     hass: HomeAssistant, *, entry_id: str | None = None, margin: float | None = None
 ) -> None:
@@ -121,22 +143,12 @@ async def async_run_morning_charge(
     config = entry.data
 
     prog2_soc_entity = config.get(CONF_PROG2_SOC_ENTITY)
-    if not prog2_soc_entity:
-        _LOGGER.error("Program 2 SOC entity not configured")
-        return
-
-    prog2_soc_value, prog2_raw, prog2_error = get_float_state_info(
-        hass, prog2_soc_entity
+    prog2_soc_value = _get_required_float_state(
+        hass,
+        prog2_soc_entity,
+        entity_name="Program 2 SOC entity",
     )
-    if prog2_error is not None or prog2_soc_value is None:
-        if prog2_error in ("missing", "unavailable"):
-            _LOGGER.warning("Program 2 SOC entity %s unavailable", prog2_soc_entity)
-        else:
-            _LOGGER.warning(
-                "Program 2 SOC entity %s has invalid value: %s",
-                prog2_soc_entity,
-                prog2_raw,
-            )
+    if prog2_soc_value is None:
         return
 
     if prog2_soc_value >= 100.0:
@@ -144,20 +156,12 @@ async def async_run_morning_charge(
         return
 
     battery_soc_entity = config.get(CONF_BATTERY_SOC_SENSOR)
-    if not battery_soc_entity:
-        _LOGGER.error("Battery SOC sensor not configured")
-        return
-
-    current_soc, soc_raw, soc_error = get_float_state_info(hass, battery_soc_entity)
-    if soc_error is not None or current_soc is None:
-        if soc_error in ("missing", "unavailable"):
-            _LOGGER.warning("Battery SOC sensor %s unavailable", battery_soc_entity)
-        else:
-            _LOGGER.warning(
-                "Battery SOC sensor %s has invalid value: %s",
-                battery_soc_entity,
-                soc_raw,
-            )
+    current_soc = _get_required_float_state(
+        hass,
+        battery_soc_entity,
+        entity_name="Battery SOC sensor",
+    )
+    if current_soc is None:
         return
 
     capacity_ah = config.get(CONF_BATTERY_CAPACITY_AH, DEFAULT_BATTERY_CAPACITY_AH)
@@ -175,56 +179,110 @@ async def async_run_morning_charge(
 
     tariff_end_hour = _resolve_tariff_end_hour(hass, config)
 
-    hours_morning = max(tariff_end_hour - 6, 1)
-    base_usage_kwh = sum(hourly_usage[6:tariff_end_hour])
-    heat_pump_kwh = await async_fetch_heat_pump_forecast(
-        hass, config, starting_hour=6, hours_ahead=hours_morning
+    start_hour = 6
+    hours_morning = max(tariff_end_hour - start_hour, 1)
+    heat_pump_kwh, heat_pump_hourly = await async_fetch_heat_pump_forecast_details(
+        hass, config, starting_hour=start_hour, hours_ahead=hours_morning
     )
+    if not heat_pump_hourly and heat_pump_kwh and hours_morning > 0:
+        per_hour = heat_pump_kwh / hours_morning
+        heat_pump_hourly = {
+            hour: per_hour for hour in range(start_hour, tariff_end_hour)
+        }
 
     pv_forecast_kwh = get_pv_forecast_kwh(
         hass,
         config,
-        start_hour=6,
+        start_hour=start_hour,
+        end_hour=tariff_end_hour,
+    )
+    pv_forecast_hourly = get_pv_forecast_hourly_kwh(
+        hass,
+        config,
+        start_hour=start_hour,
         end_hour=tariff_end_hour,
     )
 
-    base_consumption_kwh = base_usage_kwh + heat_pump_kwh
-    consumption_adjusted_kwh = base_consumption_kwh * margin
-
-    losses_kwh = 0.0
+    losses_hourly = 0.0
     losses_entity = config.get(CONF_DAILY_LOSSES_SENSOR)
     if losses_entity:
         daily_losses = get_float_value(hass, losses_entity, default=0.0)
         if daily_losses:
-            losses_kwh = (daily_losses / 24.0) * hours_morning * margin
+            losses_hourly = (daily_losses / 24.0) * margin
 
-    required_kwh = consumption_adjusted_kwh + losses_kwh
+    losses_kwh = losses_hourly * hours_morning
+
+    def _hourly_demand(hour: int) -> float:
+        return (
+            (hourly_usage[hour] + heat_pump_hourly.get(hour, 0.0)) * margin
+            + losses_hourly
+        )
+
+    required_kwh = sum(
+        _hourly_demand(hour) for hour in range(start_hour, tariff_end_hour)
+    )
 
     if required_kwh <= 0.0:
         _LOGGER.info("Required morning energy is zero or negative, skipping")
         return
 
-    deficit_kwh = required_kwh - reserve_kwh - pv_forecast_kwh
+    sufficiency_hour: int | None = None
+    for hour in range(start_hour, tariff_end_hour):
+        if pv_forecast_hourly.get(hour, 0.0) >= _hourly_demand(hour):
+            sufficiency_hour = hour
+            break
+
+    sufficiency_reached = sufficiency_hour is not None
+    if sufficiency_hour is None:
+        sufficiency_hour = tariff_end_hour
+
+    required_sufficiency_kwh = sum(
+        _hourly_demand(hour) for hour in range(start_hour, sufficiency_hour)
+    )
+    pv_sufficiency_kwh = sum(
+        pv_forecast_hourly.get(hour, 0.0)
+        for hour in range(start_hour, sufficiency_hour)
+    )
+
+    deficit_full_kwh = required_kwh - reserve_kwh - pv_forecast_kwh
+    deficit_sufficiency_kwh = (
+        required_sufficiency_kwh - reserve_kwh - pv_sufficiency_kwh
+    )
+    deficit_kwh = max(deficit_full_kwh, deficit_sufficiency_kwh)
+
     if deficit_kwh <= 0.0:
+        sufficiency_label = (
+            f"{sufficiency_hour:02d}:00" if sufficiency_reached else "not reached"
+        )
         outcome = DecisionOutcome(
             scenario="Morning Grid Charge",
             action_type="no_action",
             summary=f"No action needed",
             reason=(
-                f"Reserve + PV covers requirement ({reserve_kwh + pv_forecast_kwh:.1f} >= {required_kwh:.1f})"
+                f"Deficit full {deficit_full_kwh:.1f} kWh, "
+                f"deficit sufficiency {deficit_sufficiency_kwh:.1f} kWh"
             ),
             key_metrics={
                 "result": "No action",
                 "reserve": f"{reserve_kwh:.1f} kWh",
                 "required": f"{required_kwh:.1f} kWh",
+                "required_sufficiency": f"{required_sufficiency_kwh:.1f} kWh",
                 "pv": f"{pv_forecast_kwh:.1f} kWh",
+                "pv_sufficiency": f"{pv_sufficiency_kwh:.1f} kWh",
                 "heat_pump": f"{heat_pump_kwh:.1f} kWh",
+                "sufficiency_hour": sufficiency_label,
             },
             full_details={
                 "reserve_kwh": round(reserve_kwh, 2),
                 "required_kwh": round(required_kwh, 2),
+                "required_sufficiency_kwh": round(required_sufficiency_kwh, 2),
+                "pv_sufficiency_kwh": round(pv_sufficiency_kwh, 2),
                 "pv_forecast_kwh": round(pv_forecast_kwh, 2),
                 "heat_pump_kwh": round(heat_pump_kwh, 2),
+                "deficit_full_kwh": round(deficit_full_kwh, 2),
+                "deficit_sufficiency_kwh": round(deficit_sufficiency_kwh, 2),
+                "sufficiency_hour": sufficiency_hour,
+                "sufficiency_reached": sufficiency_reached,
             },
         )
         await log_decision_unified(
@@ -275,25 +333,38 @@ async def async_run_morning_charge(
         key_metrics={
             "target": f"{target_soc:.0f}%",
             "required": f"{required_kwh:.1f} kWh",
+            "required_sufficiency": f"{required_sufficiency_kwh:.1f} kWh",
             "reserve": f"{reserve_kwh:.1f} kWh",
             "deficit": f"{deficit_to_charge_kwh:.1f} kWh",
+            "deficit_full": f"{deficit_full_kwh:.1f} kWh",
+            "deficit_sufficiency": f"{deficit_sufficiency_kwh:.1f} kWh",
             "pv": f"{pv_forecast_kwh:.1f} kWh",
+            "pv_sufficiency": f"{pv_sufficiency_kwh:.1f} kWh",
             "heat_pump": f"{heat_pump_kwh:.1f} kWh",
             "current": f"{charge_current:.0f} A",
+            "sufficiency_hour": (
+                f"{sufficiency_hour:02d}:00" if sufficiency_reached else "not reached"
+            ),
         },
         full_details={
             "target_soc": round(target_soc, 1),
             "current_soc": round(current_soc, 1),
             "reserve_kwh": round(reserve_kwh, 2),
             "required_kwh": round(required_kwh, 2),
+            "required_sufficiency_kwh": round(required_sufficiency_kwh, 2),
+            "pv_sufficiency_kwh": round(pv_sufficiency_kwh, 2),
             "deficit_kwh": round(deficit_to_charge_kwh, 2),
             "deficit_raw_kwh": round(deficit_kwh, 2),
+            "deficit_full_kwh": round(deficit_full_kwh, 2),
+            "deficit_sufficiency_kwh": round(deficit_sufficiency_kwh, 2),
             "losses_kwh": round(losses_kwh, 2),
             "pv_forecast_kwh": round(pv_forecast_kwh, 2),
             "heat_pump_kwh": round(heat_pump_kwh, 2),
             "charge_current_a": round(charge_current, 1),
             "efficiency": round(efficiency, 1),
             "margin": margin,
+            "sufficiency_hour": sufficiency_hour,
+            "sufficiency_reached": sufficiency_reached,
         },
         entities_changed=[
             {"entity_id": prog2_soc_entity, "value": target_soc},

@@ -54,6 +54,15 @@ Zapewnienie wystarczającej ilości energii w magazynie na pokrycie zapotrzebowa
 
 **Prognoza PV**: Suma prognozy z `detailedForecast` jest liczona dla okna 6:00–koniec taryfy i następnie mnożona przez współczynnik wydajności PV.
 
+**Godzina wystarczalności PV (nowe)**:
+1. Dla każdej godziny okna 6:00–koniec taryfy wyznacz godzinowe zapotrzebowanie: zużycie_domowe + zużycie_PC + straty (z marginesem).
+2. Wyznacz godzinową produkcję PV z prognozy (z uwzględnieniem współczynnika wydajności).
+3. Znajdź pierwszą godzinę, w której produkcja PV w tej godzinie pokrywa zapotrzebowanie (godzina wystarczalności).
+4. Oblicz deficyt dla okna 6:00–koniec taryfy **oraz** 6:00–godzina wystarczalności.
+5. Jeżeli deficyt do godziny wystarczalności jest większy — **to on** jest używany do planowania ładowania.
+
+Ta poprawka zapobiega sytuacji, w której późny wzrost PV maskuje deficyt wczesnych godzin.
+
 **Obliczanie prądu ładowania** (algorytm zaawansowany z ograniczeniami prądu):
 
 Magazyn ma różne limity prądu ładowania w zależności od zakresu SOC:
