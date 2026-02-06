@@ -126,13 +126,13 @@ async def async_run_morning_charge(
         outcome = DecisionOutcome(
             scenario="Morning Grid Charge",
             action_type="no_action",
-            summary=f"No action needed - Reserve {reserve_kwh:.1f} kWh sufficient",
+            summary=f"No action needed",
+            reason=f"Reserve covers requirement ({reserve_kwh:.1f} >= {required_kwh:.1f})",
             key_metrics={
                 "result": "No action",
                 "reserve": f"{reserve_kwh:.1f} kWh",
                 "required": f"{required_kwh:.1f} kWh",
             },
-            reason=f"Reserve covers requirement ({reserve_kwh:.1f} >= {required_kwh:.1f})",
             full_details={
                 "reserve_kwh": round(reserve_kwh, 2),
                 "required_kwh": round(required_kwh, 2),
@@ -154,14 +154,14 @@ async def async_run_morning_charge(
     outcome = DecisionOutcome(
         scenario="Morning Grid Charge",
         action_type="charge_scheduled",
-        summary=f"Set Program 2 SOC to {target_soc:.0f}%",
+        summary=f"Battery scheduled to charge to {target_soc:.0f}%",
+        reason=f"Deficit {deficit_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, required {required_kwh:.1f} kWh",
         key_metrics={
             "set_to": f"{target_soc:.0f}%",
             "required": f"{required_kwh:.1f} kWh",
             "reserve": f"{reserve_kwh:.1f} kWh",
             "deficit": f"{deficit_kwh:.1f} kWh",
         },
-        reason=f"Battery deficit {deficit_kwh:.1f} kWh",
         full_details={
             "target_soc": round(target_soc, 1),
             "current_soc": round(current_soc, 1),

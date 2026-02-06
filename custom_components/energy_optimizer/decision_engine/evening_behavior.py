@@ -138,13 +138,13 @@ async def async_run_evening_behavior(
         outcome = DecisionOutcome(
             scenario="Battery Balancing",
             action_type="balancing_enabled",
-            summary="Night battery balancing enabled - Up to 100%",
+            summary="Night battery balancing enabled",
+            reason=f"Balancing treshold exceeded ({days_since_balancing} days)",
             key_metrics={
                 "pv_forecast": f"{pv_forecast:.1f} kWh",
                 "target": "100%",
                 "days_since": f"{days_since_balancing} days" if days_since_balancing else "first time",
             },
-            reason=f"Low PV forecast ({pv_forecast:.1f} < {balancing_pv_threshold:.1f})",
             full_details={
                 "pv_forecast_kwh": round(pv_forecast, 2),
                 "threshold_kwh": balancing_pv_threshold,
@@ -217,13 +217,13 @@ async def async_run_evening_behavior(
         outcome = DecisionOutcome(
             scenario="Battery Preservation",
             action_type="preservation_enabled",
-            summary=f"Battery preservation mode - SOC locked at {current_soc:.0f}%",
+            summary=f"Battery preservation mode",
+            reason=f"SOC locked at {current_soc:.0f}%, PV: {pv_with_efficiency:.1f}, battery space: {battery_space:.1f}",
             key_metrics={
                 "pv_forecast": f"{pv_forecast:.1f} kWh",
                 "battery_space": f"{battery_space:.1f} kWh",
                 "locked_at": f"{current_soc:.0f}%",
             },
-            reason=f"PV too low for battery space ({pv_with_efficiency:.1f} < {battery_space:.1f})",
             full_details={
                 "pv_forecast_kwh": round(pv_forecast, 2),
                 "pv_with_efficiency_kwh": round(pv_with_efficiency, 2),
@@ -274,13 +274,13 @@ async def async_run_evening_behavior(
         outcome = DecisionOutcome(
             scenario="Normal Operation Restored",
             action_type="normal_restored",
-            summary=f"Normal battery operation restored - SOC minimum {min_soc:.0f}%",
+            summary=f"Normal battery operation restored",
+            reason=f"PV within normal range, SOC minimum {min_soc:.0f}%",
             key_metrics={
                 "previous": f"{current_prog6_soc:.0f}%",
                 "restored_to": f"{min_soc:.0f}%",
                 "pv_forecast": f"{pv_forecast:.1f} kWh",
             },
-            reason="PV within normal range",
             full_details={
                 "previous_soc": round(current_prog6_soc, 1),
                 "restored_to_soc": min_soc,
@@ -303,10 +303,10 @@ async def async_run_evening_behavior(
         scenario="No Action",
         action_type="no_action",
         summary="No battery schedule changes needed",
+        reason="Battery state within acceptable parameters",
         key_metrics={
             "result": "No changes",
         },
-        reason="Battery state within acceptable parameters",
         full_details={
             "pv_forecast_kwh": round(pv_forecast, 2),
             "battery_space_kwh": round(battery_space, 2) if battery_space else 0,
