@@ -198,6 +198,28 @@ def get_float_state_info(
         return None, str(raw), "invalid"
 
 
+def get_required_float_state(
+    hass: HomeAssistant,
+    entity_id: str | None,
+    *,
+    entity_name: str,
+) -> float | None:
+    """Fetch a required float state with logging and validation."""
+    if not entity_id:
+        _LOGGER.error("%s not configured", entity_name)
+        return None
+
+    value, raw, error = get_float_state_info(hass, entity_id)
+    if error is not None or value is None:
+        if error in ("missing", "unavailable"):
+            _LOGGER.warning("%s %s unavailable", entity_name, entity_id)
+        else:
+            _LOGGER.warning("%s %s has invalid value: %s", entity_name, entity_id, raw)
+        return None
+
+    return value
+
+
 def get_float_value(
     hass: HomeAssistant,
     entity_id: str | None,
