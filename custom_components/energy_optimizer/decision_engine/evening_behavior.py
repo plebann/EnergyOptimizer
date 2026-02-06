@@ -26,11 +26,11 @@ from ..const import (
 )
 from ..decision_engine.common import resolve_entry
 from ..helpers import get_float_state_info
-from ..controllers.inverter import set_program_soc
-from ..utils.logging import get_logging_sensors, log_decision, notify_user
+from ..controllers.inverter import set_program_soc, set_max_charge_current
+from ..utils.logging import DecisionOutcome, log_decision_unified
 
 if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant
+    from homeassistant.core import HomeAssistant, Context
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,12 +42,16 @@ async def async_run_evening_behavior(
 
     _LOGGER.info("=== Battery Overnight Handling Started ===")
 
+    # Import Context here to avoid circular import
+    from homeassistant.core import Context
+
+    # Create integration context for this decision engine run
+    integration_context = Context()
+
     entry = resolve_entry(hass, entry_id)
     if entry is None:
         return
     config = entry.data
-
-    opt_sensor, hist_sensor = get_logging_sensors(hass, entry.entry_id)
 
     # Program SOC entity IDs reused across scenarios
     prog1_soc = config.get(CONF_PROG1_SOC_ENTITY)
@@ -124,50 +128,39 @@ async def async_run_evening_behavior(
         max_charge_current_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
         max_charge_current = DEFAULT_MAX_CHARGE_CURRENT
 
-        await set_program_soc(hass, prog1_soc, max_soc, entry=entry, logger=_LOGGER)
-        await set_program_soc(hass, prog2_soc, max_soc, entry=entry, logger=_LOGGER)
-        await set_program_soc(hass, prog6_soc, max_soc, entry=entry, logger=_LOGGER)
-
-        if max_charge_current_entity:
-            from ..helpers import is_test_mode
-
-            if is_test_mode(entry):
-                _LOGGER.info(
-                    "Test mode enabled - skipping set_value for %s",
-                    max_charge_current_entity,
-                )
-            else:
-                await hass.services.async_call(
-                    "number",
-                    "set_value",
-                    {
-                        "entity_id": max_charge_current_entity,
-                        "value": max_charge_current,
-                    },
-                    blocking=True,
-                )
-                _LOGGER.debug(
-                    "Set %s to %sA", max_charge_current_entity, max_charge_current
-                )
-
-        log_decision(
-            opt_sensor,
-            hist_sensor,
-            "Battery Balancing",
-            {
-                "pv_forecast_kwh": round(pv_forecast, 2),
-                "threshold_kwh": balancing_pv_threshold,
-                "target_soc": 100,
-                "days_since_last": days_since_balancing,
-            },
-            history_details={
-                "pv_forecast": f"{pv_forecast:.1f} kWh",
-                "target": "100%",
-                "reason": f"Low PV forecast ({pv_forecast:.1f} < {balancing_pv_threshold:.1f})",
-            },
+        await set_program_soc(hass, prog1_soc, max_soc, entry=entry, logger=_LOGGER, context=integration_context)
+        await set_program_soc(hass, prog2_soc, max_soc, entry=entry, logger=_LOGGER, context=integration_context)
+        await set_program_soc(hass, prog6_soc, max_soc, entry=entry, logger=_LOGGER, context=integration_context)
+        await set_max_charge_current(
+            hass, max_charge_current_entity, max_charge_current, entry=entry, logger=_LOGGER, context=integration_context
         )
 
-        await notify_user(hass, "Night battery balancing enabled - Up to 100%")
+        outcome = DecisionOutcome(
+            scenario="Battery Balancing",
+            action_type="balancing_enabled",
+            summary="Night battery balancing enabled - Up to 100%",
+            key_metrics={
+                "pv_forecast": f"{pv_forecast:.1f} kWh",
+                "target": "100%",
+                "days_since": f"{days_since_balancing} days" if days_since_balancing else "first time",
+            },
+            reason=f"Low PV forecast ({pv_forecast:.1f} < {balancing_pv_threshold:.1f})",
+            full_details={
+                "pv_forecast_kwh": round(pv_forecast, 2),
+                "threshold_kwh": balancing_pv_threshold,
+                "target_soc": max_soc,
+                "days_since_last": days_since_balancing,
+            },
+            entities_changed=[
+                {"entity_id": prog1_soc, "value": max_soc},
+                {"entity_id": prog2_soc, "value": max_soc},
+                {"entity_id": prog6_soc, "value": max_soc},
+                {"entity_id": max_charge_current_entity, "value": max_charge_current},
+            ],
+        )
+        await log_decision_unified(
+            hass, entry, outcome, context=integration_context, logger=_LOGGER
+        )
 
         _LOGGER.info("Battery balancing mode activated")
         return
@@ -218,29 +211,33 @@ async def async_run_evening_behavior(
             battery_space,
         )
 
-        await set_program_soc(hass, prog1_soc, current_soc, entry=entry, logger=_LOGGER)
-        await set_program_soc(hass, prog6_soc, current_soc, entry=entry, logger=_LOGGER)
+        await set_program_soc(hass, prog1_soc, current_soc, entry=entry, logger=_LOGGER, context=integration_context)
+        await set_program_soc(hass, prog6_soc, current_soc, entry=entry, logger=_LOGGER, context=integration_context)
 
-        log_decision(
-            opt_sensor,
-            hist_sensor,
-            "Battery Preservation",
-            {
-                "pv_forecast_kwh": round(pv_forecast, 2),
-                "pv_with_efficiency_kwh": round(pv_with_efficiency, 2),
-                "battery_space_kwh": round(battery_space, 2),
-                "locked_soc": round(current_soc, 1),
-            },
-            history_details={
+        outcome = DecisionOutcome(
+            scenario="Battery Preservation",
+            action_type="preservation_enabled",
+            summary=f"Battery preservation mode - SOC locked at {current_soc:.0f}%",
+            key_metrics={
                 "pv_forecast": f"{pv_forecast:.1f} kWh",
                 "battery_space": f"{battery_space:.1f} kWh",
                 "locked_at": f"{current_soc:.0f}%",
-                "reason": f"PV too low for battery space ({pv_with_efficiency:.1f} < {battery_space:.1f})",
             },
+            reason=f"PV too low for battery space ({pv_with_efficiency:.1f} < {battery_space:.1f})",
+            full_details={
+                "pv_forecast_kwh": round(pv_forecast, 2),
+                "pv_with_efficiency_kwh": round(pv_with_efficiency, 2),
+                "battery_space_kwh": round(battery_space, 2),
+                "current_soc": round(current_soc, 1),
+                "locked_soc": round(current_soc, 1),
+            },
+            entities_changed=[
+                {"entity_id": prog1_soc, "value": current_soc},
+                {"entity_id": prog6_soc, "value": current_soc},
+            ],
         )
-
-        await notify_user(
-            hass, f"Battery preservation mode - SOC locked at {current_soc:.0f}%"
+        await log_decision_unified(
+            hass, entry, outcome, context=integration_context, logger=_LOGGER
         )
 
         _LOGGER.info("Battery preservation mode activated")
@@ -270,45 +267,54 @@ async def async_run_evening_behavior(
             min_soc,
         )
 
-        await set_program_soc(hass, prog1_soc, min_soc, entry=entry, logger=_LOGGER)
-        await set_program_soc(hass, prog2_soc, min_soc, entry=entry, logger=_LOGGER)
-        await set_program_soc(hass, prog6_soc, min_soc, entry=entry, logger=_LOGGER)
+        await set_program_soc(hass, prog1_soc, min_soc, entry=entry, logger=_LOGGER, context=integration_context)
+        await set_program_soc(hass, prog2_soc, min_soc, entry=entry, logger=_LOGGER, context=integration_context)
+        await set_program_soc(hass, prog6_soc, min_soc, entry=entry, logger=_LOGGER, context=integration_context)
 
-        log_decision(
-            opt_sensor,
-            hist_sensor,
-            "Normal Operation Restored",
-            {
+        outcome = DecisionOutcome(
+            scenario="Normal Operation Restored",
+            action_type="normal_restored",
+            summary=f"Normal battery operation restored - SOC minimum {min_soc:.0f}%",
+            key_metrics={
+                "previous": f"{current_prog6_soc:.0f}%",
+                "restored_to": f"{min_soc:.0f}%",
+                "pv_forecast": f"{pv_forecast:.1f} kWh",
+            },
+            reason="PV within normal range",
+            full_details={
                 "previous_soc": round(current_prog6_soc, 1),
                 "restored_to_soc": min_soc,
                 "pv_forecast_kwh": round(pv_forecast, 2),
             },
-            history_scenario="Normal Operation",
-            history_details={
-                "previous": f"{current_prog6_soc:.0f}%",
-                "restored_to": f"{min_soc:.0f}%",
-                "reason": "PV within normal range",
-            },
+            entities_changed=[
+                {"entity_id": prog1_soc, "value": min_soc},
+                {"entity_id": prog2_soc, "value": min_soc},
+                {"entity_id": prog6_soc, "value": min_soc},
+            ],
         )
-
-        await notify_user(
-            hass,
-            f"Normal battery operation restored - SOC minimum {min_soc:.0f}%",
+        await log_decision_unified(
+            hass, entry, outcome, context=integration_context, logger=_LOGGER
         )
 
         _LOGGER.info("Normal operation restored")
         return
 
-    log_decision(
-        opt_sensor,
-        hist_sensor,
-        "No Action",
-        {
+    outcome = DecisionOutcome(
+        scenario="No Action",
+        action_type="no_action",
+        summary="No battery schedule changes needed",
+        key_metrics={
+            "result": "No changes",
+        },
+        reason="Battery state within acceptable parameters",
+        full_details={
             "pv_forecast_kwh": round(pv_forecast, 2),
             "battery_space_kwh": round(battery_space, 2) if battery_space else 0,
             "current_soc": round(current_soc, 1) if current_soc else 0,
         },
-        history_details={"reason": "No changes needed"},
+    )
+    await log_decision_unified(
+        hass, entry, outcome, context=integration_context, logger=_LOGGER
     )
 
     _LOGGER.debug("No battery schedule changes needed")

@@ -24,8 +24,8 @@ def is_test_mode(entry: ConfigEntry) -> bool:
 
     data = entry.data or {}
     if not isinstance(data, dict):
-        return False
-    return bool(data.get(CONF_TEST_MODE, False))
+        return True
+    return bool(data.get(CONF_TEST_MODE, True))
 
 
 def get_active_program_entity(

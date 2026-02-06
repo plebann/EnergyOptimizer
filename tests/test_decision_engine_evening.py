@@ -41,12 +41,32 @@ def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
         _state(states[entity_id]) if entity_id in states else None
     )
     hass.services.async_call = AsyncMock()
-    hass.data = {DOMAIN: {entry.entry_id: {}}}
+    
+    # Mock sensors for unified logging
+    mock_opt_sensor = MagicMock()
+    mock_opt_sensor.log_optimization = MagicMock()
+    mock_hist_sensor = MagicMock()
+    mock_hist_sensor.add_entry = MagicMock()
+    
+    # Mock bus for custom events
+    hass.bus = MagicMock()
+    hass.bus.async_fire = MagicMock()
+    
+    hass.data = {
+        DOMAIN: {
+            entry.entry_id: {
+                "last_optimization_sensor": mock_opt_sensor,
+                "optimization_history_sensor": mock_hist_sensor,
+            }
+        }
+    }
     return hass
 
 
 @pytest.mark.asyncio
 async def test_evening_behavior_balancing_triggers_program_updates() -> None:
+    from custom_components.energy_optimizer.const import CONF_TEST_MODE
+    
     config = {
         CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
@@ -56,6 +76,7 @@ async def test_evening_behavior_balancing_triggers_program_updates() -> None:
         CONF_BALANCING_INTERVAL_DAYS: 10,
         CONF_BALANCING_PV_THRESHOLD: 20.5,
         CONF_MAX_SOC: 100,
+        CONF_TEST_MODE: False,  # Disable test mode for this test
     }
     states = {
         "sensor.pv_forecast": "0",

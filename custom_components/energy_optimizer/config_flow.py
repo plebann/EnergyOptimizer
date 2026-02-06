@@ -256,7 +256,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_MAX_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(CONF_TEST_MODE, default=False): bool,
+                vol.Optional(CONF_TEST_MODE, default=True): bool,
                 vol.Optional(CONF_GRID_CHARGE_SWITCH): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="switch")
                 ),
@@ -680,7 +680,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
             options = {**(self._config_entry.options or {})}
             options[CONF_TEST_MODE] = user_input.get(
                 CONF_TEST_MODE,
-                self._config_entry.data.get(CONF_TEST_MODE, False),
+                self._config_entry.data.get(CONF_TEST_MODE, True),
             )
             return self.async_create_entry(title="", data=options)
 
@@ -788,7 +788,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     CONF_TEST_MODE,
                     default=(self._config_entry.options or {}).get(
                         CONF_TEST_MODE,
-                        self._config_entry.data.get(CONF_TEST_MODE, False),
+                        self._config_entry.data.get(CONF_TEST_MODE, True),
                     ),
                 ): bool,
             }

@@ -19,15 +19,15 @@ from ..const import (
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
     DEFAULT_MAX_SOC,
-    DEFAULT_MIN_SOC,
+    DEFAULT_MIN_SOC
 )
 from ..decision_engine.common import resolve_entry
 from ..helpers import get_float_state_info, get_float_value
 from ..controllers.inverter import set_program_soc
-from ..utils.logging import get_logging_sensors, log_decision, notify_user
+from ..utils.logging import DecisionOutcome, log_decision_unified
 
 if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant
+    from homeassistant.core import HomeAssistant, Context
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,12 +37,16 @@ async def async_run_morning_charge(
 ) -> None:
     """Run morning grid charge routine."""
 
+    # Import Context here to avoid circular import
+    from homeassistant.core import Context
+
+    # Create integration context for this decision engine run
+    integration_context = Context()
+
     entry = resolve_entry(hass, entry_id)
     if entry is None:
         return
     config = entry.data
-
-    opt_sensor, hist_sensor = get_logging_sensors(hass, entry.entry_id)
 
     prog2_soc_entity = config.get(CONF_PROG2_SOC_ENTITY)
     if not prog2_soc_entity:
@@ -119,31 +123,23 @@ async def async_run_morning_charge(
         return
 
     if reserve_kwh >= required_kwh:
-        _LOGGER.info(
-            "Battery reserve covers morning need (reserve %.2f kWh >= required %.2f kWh)",
-            reserve_kwh,
-            required_kwh,
-        )
-
-        log_decision(
-            opt_sensor,
-            hist_sensor,
-            "Morning Grid Charge - No Action",
-            {
-                "reserve_kwh": round(reserve_kwh, 2),
-                "required_kwh": round(required_kwh, 2),
-            },
-            history_scenario="Morning Grid Charge",
-            history_details={
+        outcome = DecisionOutcome(
+            scenario="Morning Grid Charge",
+            action_type="no_action",
+            summary=f"No action needed - Reserve {reserve_kwh:.1f} kWh sufficient",
+            key_metrics={
                 "result": "No action",
                 "reserve": f"{reserve_kwh:.1f} kWh",
                 "required": f"{required_kwh:.1f} kWh",
             },
+            reason=f"Reserve covers requirement ({reserve_kwh:.1f} >= {required_kwh:.1f})",
+            full_details={
+                "reserve_kwh": round(reserve_kwh, 2),
+                "required_kwh": round(required_kwh, 2),
+            },
         )
-
-        await notify_user(
-            hass,
-            f"Morning grid charge: no action (reserve {reserve_kwh:.1f} kWh >= required {required_kwh:.1f} kWh)",
+        await log_decision_unified(
+            hass, entry, outcome, context=integration_context, logger=_LOGGER
         )
         return
 
@@ -151,21 +147,22 @@ async def async_run_morning_charge(
     soc_delta = kwh_to_soc(deficit_kwh, capacity_ah, voltage)
     target_soc = min(current_soc + soc_delta, max_soc)
 
-    await set_program_soc(hass, prog2_soc_entity, target_soc, entry=entry, logger=_LOGGER)
-
-    _LOGGER.info(
-        "Morning grid charge set Program 2 SOC to %.1f%% (current SOC %.1f%%, reserve %.2f kWh, required %.2f kWh)",
-        target_soc,
-        current_soc,
-        reserve_kwh,
-        required_kwh,
+    await set_program_soc(
+        hass, prog2_soc_entity, target_soc, entry=entry, logger=_LOGGER, context=integration_context
     )
 
-    log_decision(
-        opt_sensor,
-        hist_sensor,
-        "Morning Grid Charge",
-        {
+    outcome = DecisionOutcome(
+        scenario="Morning Grid Charge",
+        action_type="charge_scheduled",
+        summary=f"Set Program 2 SOC to {target_soc:.0f}%",
+        key_metrics={
+            "set_to": f"{target_soc:.0f}%",
+            "required": f"{required_kwh:.1f} kWh",
+            "reserve": f"{reserve_kwh:.1f} kWh",
+            "deficit": f"{deficit_kwh:.1f} kWh",
+        },
+        reason=f"Battery deficit {deficit_kwh:.1f} kWh",
+        full_details={
             "target_soc": round(target_soc, 1),
             "current_soc": round(current_soc, 1),
             "reserve_kwh": round(reserve_kwh, 2),
@@ -175,15 +172,10 @@ async def async_run_morning_charge(
             "efficiency": round(efficiency, 1),
             "margin": margin,
         },
-        history_details={
-            "set_to": f"{target_soc:.0f}%",
-            "required": f"{required_kwh:.1f} kWh",
-            "reserve": f"{reserve_kwh:.1f} kWh",
-            "deficit": f"{deficit_kwh:.1f} kWh",
-        },
+        entities_changed=[
+            {"entity_id": prog2_soc_entity, "value": target_soc},
+        ],
     )
-
-    await notify_user(
-        hass,
-        f"Morning grid charge set Program 2 SOC to {target_soc:.0f}%",
+    await log_decision_unified(
+        hass, entry, outcome, context=integration_context, logger=_LOGGER
     )
