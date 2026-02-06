@@ -4,9 +4,6 @@ DOMAIN = "energy_optimizer"
 
 # Config flow steps
 CONF_PRICE_SENSOR = "price_sensor"
-CONF_AVERAGE_PRICE_SENSOR = "average_price_sensor"
-CONF_CHEAPEST_WINDOW_SENSOR = "cheapest_window_sensor"
-CONF_EXPENSIVE_WINDOW_SENSOR = "expensive_window_sensor"
 CONF_TOMORROW_PRICE_SENSOR = "tomorrow_price_sensor"
 
 CONF_BATTERY_SOC_SENSOR = "battery_soc_sensor"

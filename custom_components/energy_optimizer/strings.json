@@ -10,16 +10,10 @@
         "description": "Select entities that provide electricity price data",
         "data": {
           "price_sensor": "Current Price Sensor",
-          "average_price_sensor": "Average Price Sensor",
-          "cheapest_window_sensor": "Cheapest Window Sensor (Optional)",
-          "expensive_window_sensor": "Expensive Window Sensor (Optional)",
           "tomorrow_price_sensor": "Tomorrow Price Sensor (Optional)"
         },
         "data_description": {
           "price_sensor": "Sensor providing current electricity price",
-          "average_price_sensor": "Sensor providing average price for comparison",
-          "cheapest_window_sensor": "Binary sensor indicating cheapest price window",
-          "expensive_window_sensor": "Binary sensor indicating expensive price window",
           "tomorrow_price_sensor": "Sensor providing tomorrow's price data"
         }
       },
