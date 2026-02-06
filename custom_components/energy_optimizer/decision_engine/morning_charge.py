@@ -33,6 +33,7 @@ from ..controllers.inverter import set_charge_current, set_program_soc
 from ..utils.logging import DecisionOutcome, log_decision_unified
 from ..utils.heat_pump import async_fetch_heat_pump_forecast
 from ..utils.pv_forecast import get_pv_forecast_kwh
+from homeassistant.util import dt as dt_util
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant, Context
@@ -50,17 +51,42 @@ def _resolve_tariff_end_hour(
     tariff_end_hour = default_hour
     tariff_end_entity = config.get(CONF_TARIFF_END_HOUR_SENSOR)
     if tariff_end_entity:
-        tariff_end_value = get_float_value(
-            hass, tariff_end_entity, default=tariff_end_hour
-        )
-        if tariff_end_value is not None:
-            tariff_end_hour = int(tariff_end_value)
+        if str(tariff_end_entity).startswith("input_datetime."):
+            tariff_end_state = hass.states.get(str(tariff_end_entity))
+            if tariff_end_state is None:
+                _LOGGER.warning(
+                    "Tariff end hour input_datetime %s unavailable, using default %s",
+                    tariff_end_entity,
+                    default_hour,
+                )
+            else:
+                state_value = tariff_end_state.state
+                dt_value = dt_util.parse_datetime(state_value)
+                if dt_value is not None:
+                    tariff_end_hour = dt_util.as_local(dt_value).hour
+                else:
+                    time_value = dt_util.parse_time(state_value)
+                    if time_value is not None:
+                        tariff_end_hour = time_value.hour
+                    else:
+                        _LOGGER.warning(
+                            "Tariff end hour input_datetime %s has invalid value %s, using default %s",
+                            tariff_end_entity,
+                            state_value,
+                            default_hour,
+                        )
         else:
-            _LOGGER.warning(
-                "Tariff end hour sensor %s unavailable, using default %s",
-                tariff_end_entity,
-                default_hour,
+            tariff_end_value = get_float_value(
+                hass, tariff_end_entity, default=tariff_end_hour
             )
+            if tariff_end_value is not None:
+                tariff_end_hour = int(tariff_end_value)
+            else:
+                _LOGGER.warning(
+                    "Tariff end hour sensor %s unavailable, using default %s",
+                    tariff_end_entity,
+                    default_hour,
+                )
     else:
         _LOGGER.warning(
             "Tariff end hour sensor not configured, using default %s",

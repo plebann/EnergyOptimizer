@@ -349,7 +349,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(CONF_TARIFF_END_HOUR_SENSOR): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor")
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_PV_FORECAST_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
@@ -764,7 +764,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     CONF_TARIFF_END_HOUR_SENSOR,
                     default=self._config_entry.data.get(CONF_TARIFF_END_HOUR_SENSOR)
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor")
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(
                     CONF_TODAY_LOAD_SENSOR,
