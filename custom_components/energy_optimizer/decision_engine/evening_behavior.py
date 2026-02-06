@@ -222,14 +222,14 @@ async def async_run_evening_behavior(
             key_metrics={
                 "pv_forecast": f"{pv_forecast:.1f} kWh",
                 "battery_space": f"{battery_space:.1f} kWh",
-                "locked_at": f"{current_soc:.0f}%",
+                "target": f"{current_soc:.0f}%",
             },
             full_details={
                 "pv_forecast_kwh": round(pv_forecast, 2),
                 "pv_with_efficiency_kwh": round(pv_with_efficiency, 2),
                 "battery_space_kwh": round(battery_space, 2),
                 "current_soc": round(current_soc, 1),
-                "locked_soc": round(current_soc, 1),
+                "target_soc": round(current_soc, 1),
             },
             entities_changed=[
                 {"entity_id": prog1_soc, "value": current_soc},
@@ -278,12 +278,12 @@ async def async_run_evening_behavior(
             reason=f"PV within normal range, SOC minimum {min_soc:.0f}%",
             key_metrics={
                 "previous": f"{current_prog6_soc:.0f}%",
-                "restored_to": f"{min_soc:.0f}%",
+                "target": f"{min_soc:.0f}%",
                 "pv_forecast": f"{pv_forecast:.1f} kWh",
             },
             full_details={
                 "previous_soc": round(current_prog6_soc, 1),
-                "restored_to_soc": min_soc,
+                "target_soc": min_soc,
                 "pv_forecast_kwh": round(pv_forecast, 2),
             },
             entities_changed=[
@@ -310,7 +310,7 @@ async def async_run_evening_behavior(
         full_details={
             "pv_forecast_kwh": round(pv_forecast, 2),
             "battery_space_kwh": round(battery_space, 2) if battery_space else 0,
-            "current_soc": round(current_soc, 1) if current_soc else 0,
+            "target_soc": round(current_soc, 1) if current_soc else 0,
         },
     )
     await log_decision_unified(

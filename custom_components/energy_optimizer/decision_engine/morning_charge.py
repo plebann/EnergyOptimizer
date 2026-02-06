@@ -157,7 +157,7 @@ async def async_run_morning_charge(
         summary=f"Battery scheduled to charge to {target_soc:.0f}%",
         reason=f"Deficit {deficit_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, required {required_kwh:.1f} kWh",
         key_metrics={
-            "set_to": f"{target_soc:.0f}%",
+            "target": f"{target_soc:.0f}%",
             "required": f"{required_kwh:.1f} kWh",
             "reserve": f"{reserve_kwh:.1f} kWh",
             "deficit": f"{deficit_kwh:.1f} kWh",
