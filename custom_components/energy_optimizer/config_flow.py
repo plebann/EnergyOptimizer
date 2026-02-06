@@ -817,6 +817,10 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(
+                    CONF_ENABLE_HEAT_PUMP,
+                    default=self._config_entry.data.get(CONF_ENABLE_HEAT_PUMP, False),
+                ): selector.BooleanSelector(),
+                vol.Optional(
                     CONF_HEAT_PUMP_FORECAST_DOMAIN,
                     default=self._config_entry.data.get(
                         CONF_HEAT_PUMP_FORECAST_DOMAIN, DEFAULT_HEAT_PUMP_FORECAST_DOMAIN
