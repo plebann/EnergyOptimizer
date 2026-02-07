@@ -25,6 +25,8 @@ async def async_get_forecasts(
     *,
     start_hour: int,
     end_hour: int,
+    apply_pv_efficiency: bool = True,
+    pv_compensate: bool = False,
 ) -> tuple[float, dict[int, float], float, dict[int, float]]:
     """Fetch heat pump + PV forecasts for the given window."""
     hours_morning = max(end_hour - start_hour, 1)
@@ -41,12 +43,16 @@ async def async_get_forecasts(
         config,
         start_hour=start_hour,
         end_hour=end_hour,
+        apply_efficiency=apply_pv_efficiency,
+        compensate=pv_compensate,
     )
     pv_forecast_hourly = get_pv_forecast_hourly_kwh(
         hass,
         config,
         start_hour=start_hour,
         end_hour=end_hour,
+        apply_efficiency=apply_pv_efficiency,
+        compensate=pv_compensate,
     )
 
     return heat_pump_kwh, heat_pump_hourly, pv_forecast_kwh, pv_forecast_hourly

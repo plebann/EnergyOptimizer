@@ -42,6 +42,7 @@ CONF_PROG6_TIME_START_ENTITY = "prog6_time_start_entity"
 
 CONF_DAILY_LOAD_SENSOR = "daily_load_sensor"
 CONF_DAILY_LOSSES_SENSOR = "daily_losses_sensor"
+CONF_TARIFF_START_HOUR_SENSOR = "tariff_start_hour_sensor"
 CONF_TARIFF_END_HOUR_SENSOR = "tariff_end_hour_sensor"
 
 # Time-windowed load sensors (4-hour average consumption in kWh/h)
@@ -58,6 +59,7 @@ CONF_TODAY_LOAD_SENSOR = "today_load_sensor"
 CONF_PV_FORECAST_TODAY = "pv_forecast_today"
 CONF_PV_FORECAST_TOMORROW = "pv_forecast_tomorrow"
 CONF_PV_FORECAST_REMAINING = "pv_forecast_remaining"
+CONF_PV_PRODUCTION_SENSOR = "pv_production_sensor"
 CONF_PV_PEAK_FORECAST = "pv_peak_forecast"
 CONF_WEATHER_FORECAST = "weather_forecast"
 CONF_PV_FORECAST_SENSOR = "pv_forecast_sensor"
@@ -86,38 +88,11 @@ DEFAULT_PV_EFFICIENCY = 0.9
 DEFAULT_HEAT_PUMP_FORECAST_DOMAIN = "heat_pump_predictor"
 DEFAULT_HEAT_PUMP_FORECAST_SERVICE = "calculate_forecast_energy"
 
-# Default COP curve (temperature °C, COP)
-DEFAULT_COP_CURVE = [
-    (-20, 2.0),
-    (-10, 2.3),
-    (-5, 2.6),
-    (0, 3.0),
-    (5, 3.5),
-    (10, 4.0),
-    (15, 4.5),
-    (20, 5.0),
-]
-
 # Services
 SERVICE_OVERNIGHT_SCHEDULE = "overnight_schedule"
 SERVICE_MORNING_GRID_CHARGE = "morning_grid_charge"
-
-# Sensor types
-SENSOR_BATTERY_RESERVE = "battery_reserve"
-SENSOR_BATTERY_SPACE = "battery_space"
-SENSOR_BATTERY_CAPACITY = "battery_capacity"
-SENSOR_USABLE_CAPACITY = "usable_capacity"
-SENSOR_REQUIRED_ENERGY_MORNING = "required_energy_morning"
-SENSOR_REQUIRED_ENERGY_AFTERNOON = "required_energy_afternoon"
-SENSOR_REQUIRED_ENERGY_EVENING = "required_energy_evening"
-SENSOR_SURPLUS_ENERGY = "surplus_energy"
-SENSOR_ENERGY_DEFICIT = "energy_deficit"
-SENSOR_HEAT_PUMP_ESTIMATION = "heat_pump_estimation"
-SENSOR_LAST_BALANCING_TIMESTAMP = "last_balancing_timestamp"
-SENSOR_LAST_OPTIMIZATION = "last_optimization"
-SENSOR_OPTIMIZATION_HISTORY = "optimization_history"
+SERVICE_AFTERNOON_GRID_CHARGE = "afternoon_grid_charge"
 
 # Update intervals (seconds)
 UPDATE_INTERVAL_FAST = 60  # For battery-related sensors
-UPDATE_INTERVAL_MEDIUM = 300  # For energy balance sensors
 UPDATE_INTERVAL_SLOW = 3600  # For daily forecasts

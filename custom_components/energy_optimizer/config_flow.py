@@ -10,16 +10,16 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_BALANCING_INTERVAL_DAYS,
+    CONF_BALANCING_PV_THRESHOLD,
     CONF_BATTERY_CAPACITY_AH,
     CONF_BATTERY_CAPACITY_ENTITY,
     CONF_BATTERY_CURRENT_SENSOR,
     CONF_BATTERY_EFFICIENCY,
     CONF_BATTERY_POWER_SENSOR,
     CONF_BATTERY_SOC_SENSOR,
-    CONF_BATTERY_VOLTAGE,
     CONF_BATTERY_VOLTAGE_SENSOR,
-    CONF_BALANCING_PV_THRESHOLD,
-    CONF_BALANCING_INTERVAL_DAYS,
+    CONF_BATTERY_VOLTAGE,
     CONF_CHARGE_CURRENT_ENTITY,
     CONF_DAILY_LOAD_SENSOR,
     CONF_DAILY_LOSSES_SENSOR,
@@ -51,27 +51,29 @@ from .const import (
     CONF_PROG6_SOC_ENTITY,
     CONF_PROG6_TIME_START_ENTITY,
     CONF_PV_EFFICIENCY,
-    CONF_PV_FORECAST_SENSOR,
     CONF_PV_FORECAST_REMAINING,
+    CONF_PV_FORECAST_SENSOR,
     CONF_PV_FORECAST_TODAY,
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PEAK_FORECAST,
+    CONF_PV_PRODUCTION_SENSOR,
+    CONF_TARIFF_START_HOUR_SENSOR,
     CONF_TARIFF_END_HOUR_SENSOR,
+    CONF_TEST_MODE,
     CONF_TODAY_LOAD_SENSOR,
     CONF_TOMORROW_PRICE_SENSOR,
     CONF_WEATHER_FORECAST,
     CONF_WORK_MODE_ENTITY,
-    CONF_TEST_MODE,
     DEFAULT_BALANCING_INTERVAL_DAYS,
+    DEFAULT_BALANCING_PV_THRESHOLD,
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
-    DEFAULT_BALANCING_PV_THRESHOLD,
     DEFAULT_HEAT_PUMP_FORECAST_DOMAIN,
     DEFAULT_HEAT_PUMP_FORECAST_SERVICE,
-    DEFAULT_PV_EFFICIENCY,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_SOC,
+    DEFAULT_PV_EFFICIENCY,
     DOMAIN,
 )
 
@@ -337,6 +339,9 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_TARIFF_END_HOUR_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
+                vol.Optional(CONF_TARIFF_START_HOUR_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
                 vol.Optional(CONF_PV_FORECAST_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -351,6 +356,9 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(CONF_PV_FORECAST_REMAINING): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_PV_PRODUCTION_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(CONF_PV_PEAK_FORECAST): selector.EntitySelector(
@@ -958,6 +966,12 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(
+                    CONF_TARIFF_START_HOUR_SENSOR,
+                    default=self._config_entry.data.get(CONF_TARIFF_START_HOUR_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(
                     CONF_PV_FORECAST_SENSOR,
                     default=self._config_entry.data.get(CONF_PV_FORECAST_SENSOR),
                 ): selector.EntitySelector(
@@ -978,6 +992,12 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_PV_FORECAST_REMAINING,
                     default=self._config_entry.data.get(CONF_PV_FORECAST_REMAINING),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_PV_PRODUCTION_SENSOR,
+                    default=self._config_entry.data.get(CONF_PV_PRODUCTION_SENSOR),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),

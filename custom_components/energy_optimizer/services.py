@@ -9,9 +9,15 @@ import voluptuous as vol
 from homeassistant.core import ServiceCall
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, SERVICE_MORNING_GRID_CHARGE, SERVICE_OVERNIGHT_SCHEDULE
+from .const import (
+    DOMAIN,
+    SERVICE_AFTERNOON_GRID_CHARGE,
+    SERVICE_MORNING_GRID_CHARGE,
+    SERVICE_OVERNIGHT_SCHEDULE,
+)
 from .helpers import get_float_state_info
 from .decision_engine.morning_charge import async_run_morning_charge
+from .decision_engine.afternoon_charge import async_run_afternoon_charge
 from .decision_engine.evening_behavior import async_run_evening_behavior
 
 if TYPE_CHECKING:
@@ -29,6 +35,15 @@ SERVICE_SCHEMA_OVERNIGHT_SCHEDULE = vol.Schema(
 )
 
 SERVICE_SCHEMA_MORNING_GRID_CHARGE = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_ENTRY_ID): vol.Coerce(str),
+        vol.Optional("margin", default=1.1): vol.All(
+            vol.Coerce(float), vol.Range(min=1.0, max=1.5)
+        ),
+    }
+)
+
+SERVICE_SCHEMA_AFTERNOON_CHARGE = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_ENTRY_ID): vol.Coerce(str),
         vol.Optional("margin", default=1.1): vol.All(
@@ -161,6 +176,13 @@ async def async_register_services(hass: HomeAssistant) -> None:
             entry_id=call.data.get(SERVICE_FIELD_ENTRY_ID),
         )
 
+    async def _handle_afternoon_charge(call: ServiceCall) -> None:
+        await async_run_afternoon_charge(
+            hass,
+            entry_id=call.data.get(SERVICE_FIELD_ENTRY_ID),
+            margin=call.data.get("margin"),
+        )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_MORNING_GRID_CHARGE,
@@ -172,6 +194,12 @@ async def async_register_services(hass: HomeAssistant) -> None:
         SERVICE_OVERNIGHT_SCHEDULE,
         _handle_overnight_schedule,
         schema=SERVICE_SCHEMA_OVERNIGHT_SCHEDULE,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_AFTERNOON_GRID_CHARGE,
+        _handle_afternoon_charge,
+        schema=SERVICE_SCHEMA_AFTERNOON_CHARGE,
     )
 
     _LOGGER.info("Energy Optimizer services registered")

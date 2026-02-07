@@ -316,3 +316,68 @@ def resolve_tariff_end_hour(
         tariff_end_hour = default_hour
 
     return tariff_end_hour
+
+
+def resolve_tariff_start_hour(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    default_hour: int = 6,
+) -> int:
+    """Resolve tariff start hour from configured sensor with fallback."""
+    from .const import CONF_TARIFF_START_HOUR_SENSOR
+
+    tariff_start_hour = default_hour
+    tariff_start_entity = config.get(CONF_TARIFF_START_HOUR_SENSOR)
+    if tariff_start_entity:
+        if str(tariff_start_entity).startswith("input_datetime."):
+            tariff_start_state = hass.states.get(str(tariff_start_entity))
+            if tariff_start_state is None:
+                _LOGGER.warning(
+                    "Tariff start hour input_datetime %s unavailable, using default %s",
+                    tariff_start_entity,
+                    default_hour,
+                )
+            else:
+                state_value = tariff_start_state.state
+                dt_value = dt_util.parse_datetime(state_value)
+                if dt_value is not None:
+                    tariff_start_hour = dt_util.as_local(dt_value).hour
+                else:
+                    time_value = dt_util.parse_time(state_value)
+                    if time_value is not None:
+                        tariff_start_hour = time_value.hour
+                    else:
+                        _LOGGER.warning(
+                            "Tariff start hour input_datetime %s has invalid value %s, using default %s",
+                            tariff_start_entity,
+                            state_value,
+                            default_hour,
+                        )
+        else:
+            tariff_start_value = get_float_value(
+                hass, tariff_start_entity, default=tariff_start_hour
+            )
+            if tariff_start_value is not None:
+                tariff_start_hour = int(tariff_start_value)
+            else:
+                _LOGGER.warning(
+                    "Tariff start hour sensor %s unavailable, using default %s",
+                    tariff_start_entity,
+                    default_hour,
+                )
+    else:
+        _LOGGER.warning(
+            "Tariff start hour sensor not configured, using default %s",
+            default_hour,
+        )
+
+    if tariff_start_hour < 0 or tariff_start_hour > 23:
+        _LOGGER.warning(
+            "Tariff start hour %s out of range, using default %s",
+            tariff_start_hour,
+            default_hour,
+        )
+        tariff_start_hour = default_hour
+
+    return tariff_start_hour

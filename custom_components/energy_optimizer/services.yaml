@@ -29,3 +29,24 @@ morning_grid_charge:
           min: 1.0
           max: 1.5
           step: 0.01
+
+afternoon_grid_charge:
+  name: Afternoon Grid Charge
+  description: Charge battery between tariff start hour and 22:00 if reserve is insufficient
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: Target a specific Energy Optimizer config entry (required if you have more than one)
+      required: false
+      selector:
+        text:
+    margin:
+      name: Safety Margin
+      description: Multiplier applied after efficiency and losses (default 1.1)
+      required: false
+      default: 1.1
+      selector:
+        number:
+          min: 1.0
+          max: 1.5
+          step: 0.01
