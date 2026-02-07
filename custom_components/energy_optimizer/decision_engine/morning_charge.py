@@ -6,273 +6,39 @@ from typing import TYPE_CHECKING
 
 from ..calculations.battery import (
     calculate_battery_reserve,
-    calculate_expected_charge_current,
-    kwh_to_soc,
+    calculate_charge_current,
+    calculate_soc_delta,
+    calculate_target_soc,
 )
+from ..calculations.energy import calculate_losses, calculate_sufficiency_window
 from ..calculations.utils import build_hourly_usage_array
 from ..const import (
     CONF_BATTERY_CAPACITY_AH,
     CONF_BATTERY_EFFICIENCY,
-    CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
     CONF_CHARGE_CURRENT_ENTITY,
-    CONF_DAILY_LOSSES_SENSOR,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
-    CONF_PROG2_SOC_ENTITY,
-    CONF_TARIFF_END_HOUR_SENSOR,
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_SOC,
 )
-from ..decision_engine.common import resolve_entry
-from ..helpers import get_float_value, get_required_float_state
+from ..decision_engine.common import (
+    get_required_current_soc_state,
+    get_required_prog2_soc_state,
+    resolve_entry,
+)
+from ..helpers import resolve_tariff_end_hour
 from ..controllers.inverter import set_charge_current, set_program_soc
-from ..utils.logging import DecisionOutcome, log_decision_unified
-from ..utils.heat_pump import async_fetch_heat_pump_forecast_details
-from ..utils.pv_forecast import get_pv_forecast_hourly_kwh, get_pv_forecast_kwh
-from homeassistant.util import dt as dt_util
+from ..utils.forecast import async_get_forecasts
+from ..utils.logging import DecisionOutcome, format_sufficiency_hour, log_decision_unified
 
 if TYPE_CHECKING:
-    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant, Context
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _resolve_tariff_end_hour(
-    hass: HomeAssistant,
-    config: dict[str, object],
-    *,
-    default_hour: int = 13,
-) -> int:
-    """Resolve tariff end hour from configured sensor with fallback."""
-    tariff_end_hour = default_hour
-    tariff_end_entity = config.get(CONF_TARIFF_END_HOUR_SENSOR)
-    if tariff_end_entity:
-        if str(tariff_end_entity).startswith("input_datetime."):
-            tariff_end_state = hass.states.get(str(tariff_end_entity))
-            if tariff_end_state is None:
-                _LOGGER.warning(
-                    "Tariff end hour input_datetime %s unavailable, using default %s",
-                    tariff_end_entity,
-                    default_hour,
-                )
-            else:
-                state_value = tariff_end_state.state
-                dt_value = dt_util.parse_datetime(state_value)
-                if dt_value is not None:
-                    tariff_end_hour = dt_util.as_local(dt_value).hour
-                else:
-                    time_value = dt_util.parse_time(state_value)
-                    if time_value is not None:
-                        tariff_end_hour = time_value.hour
-                    else:
-                        _LOGGER.warning(
-                            "Tariff end hour input_datetime %s has invalid value %s, using default %s",
-                            tariff_end_entity,
-                            state_value,
-                            default_hour,
-                        )
-        else:
-            tariff_end_value = get_float_value(
-                hass, tariff_end_entity, default=tariff_end_hour
-            )
-            if tariff_end_value is not None:
-                tariff_end_hour = int(tariff_end_value)
-            else:
-                _LOGGER.warning(
-                    "Tariff end hour sensor %s unavailable, using default %s",
-                    tariff_end_entity,
-                    default_hour,
-                )
-    else:
-        _LOGGER.warning(
-            "Tariff end hour sensor not configured, using default %s",
-            default_hour,
-        )
-
-    if tariff_end_hour < 7 or tariff_end_hour > 24:
-        _LOGGER.warning(
-            "Tariff end hour %s out of range, using default %s",
-            tariff_end_hour,
-            default_hour,
-        )
-        tariff_end_hour = default_hour
-
-    return tariff_end_hour
-
-
-def _format_sufficiency_hour(
-    sufficiency_hour: int, *, sufficiency_reached: bool
-) -> str:
-    if not sufficiency_reached:
-        return "not reached"
-    return f"{sufficiency_hour:02d}:00"
-
-
-def _get_entry_and_required_states(
-    hass: HomeAssistant, entry_id: str | None
-) -> (
-    tuple[
-        ConfigEntry,
-        dict[str, object],
-        str,
-        float,
-        float,
-    ]
-    | None
-):
-    entry = resolve_entry(hass, entry_id)
-    if entry is None:
-        return None
-    config = entry.data
-
-    prog2_soc_entity = config.get(CONF_PROG2_SOC_ENTITY)
-    prog2_soc_value = get_required_float_state(
-        hass,
-        prog2_soc_entity,
-        entity_name="Program 2 SOC entity",
-    )
-    if prog2_soc_value is None:
-        return None
-
-    battery_soc_entity = config.get(CONF_BATTERY_SOC_SENSOR)
-    current_soc = get_required_float_state(
-        hass,
-        battery_soc_entity,
-        entity_name="Battery SOC sensor",
-    )
-    if current_soc is None:
-        return None
-
-    return entry, config, str(prog2_soc_entity), prog2_soc_value, current_soc
-
-
-async def _get_forecasts(
-    hass: HomeAssistant,
-    config: dict[str, object],
-    *,
-    start_hour: int,
-    end_hour: int,
-) -> tuple[float, dict[int, float], float, dict[int, float]]:
-    hours_morning = max(end_hour - start_hour, 1)
-    heat_pump_kwh, heat_pump_hourly = await async_fetch_heat_pump_forecast_details(
-        hass, config, starting_hour=start_hour, hours_ahead=hours_morning
-    )
-    if not heat_pump_hourly and heat_pump_kwh and hours_morning > 0:
-        per_hour = heat_pump_kwh / hours_morning
-        heat_pump_hourly = {hour: per_hour for hour in range(start_hour, end_hour)}
-
-    pv_forecast_kwh = get_pv_forecast_kwh(
-        hass,
-        config,
-        start_hour=start_hour,
-        end_hour=end_hour,
-    )
-    pv_forecast_hourly = get_pv_forecast_hourly_kwh(
-        hass,
-        config,
-        start_hour=start_hour,
-        end_hour=end_hour,
-    )
-
-    return heat_pump_kwh, heat_pump_hourly, pv_forecast_kwh, pv_forecast_hourly
-
-
-def _calculate_losses(
-    hass: HomeAssistant,
-    config: dict[str, object],
-    *,
-    hours_morning: int,
-    margin: float,
-) -> tuple[float, float]:
-    losses_hourly = 0.0
-    losses_entity = config.get(CONF_DAILY_LOSSES_SENSOR)
-    if losses_entity:
-        daily_losses = get_float_value(hass, losses_entity, default=0.0)
-        if daily_losses:
-            losses_hourly = (daily_losses / 24.0) * margin
-
-    return losses_hourly, losses_hourly * hours_morning
-
-
-def _hourly_demand(
-    hour: int,
-    *,
-    hourly_usage: list[float],
-    heat_pump_hourly: dict[int, float],
-    losses_hourly: float,
-    margin: float,
-) -> float:
-    return (
-        (hourly_usage[hour] + heat_pump_hourly.get(hour, 0.0)) * margin
-        + losses_hourly
-    )
-
-
-def _calculate_sufficiency_window(
-    *,
-    start_hour: int,
-    end_hour: int,
-    hourly_usage: list[float],
-    heat_pump_hourly: dict[int, float],
-    losses_hourly: float,
-    margin: float,
-    pv_forecast_hourly: dict[int, float],
-) -> tuple[float, float, float, int, bool]:
-    required_kwh = sum(
-        _hourly_demand(
-            hour,
-            hourly_usage=hourly_usage,
-            heat_pump_hourly=heat_pump_hourly,
-            losses_hourly=losses_hourly,
-            margin=margin,
-        )
-        for hour in range(start_hour, end_hour)
-    )
-
-    sufficiency_hour: int | None = None
-    for hour in range(start_hour, end_hour):
-        if pv_forecast_hourly.get(hour, 0.0) >= _hourly_demand(
-            hour,
-            hourly_usage=hourly_usage,
-            heat_pump_hourly=heat_pump_hourly,
-            losses_hourly=losses_hourly,
-            margin=margin,
-        ):
-            sufficiency_hour = hour
-            break
-
-    sufficiency_reached = sufficiency_hour is not None
-    if sufficiency_hour is None:
-        sufficiency_hour = end_hour
-
-    required_sufficiency_kwh = sum(
-        _hourly_demand(
-            hour,
-            hourly_usage=hourly_usage,
-            heat_pump_hourly=heat_pump_hourly,
-            losses_hourly=losses_hourly,
-            margin=margin,
-        )
-        for hour in range(start_hour, sufficiency_hour)
-    )
-    pv_sufficiency_kwh = sum(
-        pv_forecast_hourly.get(hour, 0.0)
-        for hour in range(start_hour, sufficiency_hour)
-    )
-
-    return (
-        required_kwh,
-        required_sufficiency_kwh,
-        pv_sufficiency_kwh,
-        sufficiency_hour,
-        sufficiency_reached,
-    )
-
 
 def _build_no_action_outcome(
     *,
@@ -287,7 +53,7 @@ def _build_no_action_outcome(
     sufficiency_hour: int,
     sufficiency_reached: bool,
 ) -> DecisionOutcome:
-    sufficiency_label = _format_sufficiency_hour(
+    sufficiency_label = format_sufficiency_hour(
         sufficiency_hour, sufficiency_reached=sufficiency_reached
     )
     return DecisionOutcome(
@@ -321,7 +87,6 @@ def _build_no_action_outcome(
             "sufficiency_reached": sufficiency_reached,
         },
     )
-
 
 def _build_charge_outcome(
     *,
@@ -365,7 +130,7 @@ def _build_charge_outcome(
             "pv_sufficiency": f"{pv_sufficiency_kwh:.1f} kWh",
             "heat_pump": f"{heat_pump_kwh:.1f} kWh",
             "current": f"{charge_current:.0f} A",
-            "sufficiency_hour": _format_sufficiency_hour(
+            "sufficiency_hour": format_sufficiency_hour(
                 sufficiency_hour, sufficiency_reached=sufficiency_reached
             ),
         },
@@ -391,7 +156,6 @@ def _build_charge_outcome(
         },
     )
 
-
 async def async_run_morning_charge(
     hass: HomeAssistant, *, entry_id: str | None = None, margin: float | None = None
 ) -> None:
@@ -403,10 +167,20 @@ async def async_run_morning_charge(
     # Create integration context for this decision engine run
     integration_context = Context()
 
-    resolved = _get_entry_and_required_states(hass, entry_id)
-    if resolved is None:
+    entry = resolve_entry(hass, entry_id)
+    if entry is None:
         return
-    entry, config, prog2_soc_entity, prog2_soc_value, current_soc = resolved
+    config = entry.data
+
+    prog2_soc_state = get_required_prog2_soc_state(hass, config)
+    if prog2_soc_state is None:
+        return
+    prog2_soc_entity, prog2_soc_value = prog2_soc_state
+
+    current_soc_state = get_required_current_soc_state(hass, config)
+    if current_soc_state is None:
+        return
+    _battery_soc_entity, current_soc = current_soc_state
 
     if prog2_soc_value >= 100.0:
         _LOGGER.info("Program 2 SOC already at 100%%, skipping morning grid charge")
@@ -419,25 +193,31 @@ async def async_run_morning_charge(
     efficiency = config.get(CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY)
     margin = margin if margin is not None else 1.1
 
-    reserve_kwh = calculate_battery_reserve(current_soc, min_soc, capacity_ah, voltage)
+    reserve_kwh = calculate_battery_reserve(
+        current_soc,
+        min_soc,
+        capacity_ah,
+        voltage,
+        efficiency=efficiency,
+    )
 
     hourly_usage = build_hourly_usage_array(
         config, hass.states.get, daily_load_fallback=None
     )
 
-    tariff_end_hour = _resolve_tariff_end_hour(hass, config)
+    tariff_end_hour = resolve_tariff_end_hour(hass, config)
 
     start_hour = 6
     hours_morning = max(tariff_end_hour - start_hour, 1)
     heat_pump_kwh, heat_pump_hourly, pv_forecast_kwh, pv_forecast_hourly = (
-        await _get_forecasts(
+        await async_get_forecasts(
             hass,
             config,
             start_hour=start_hour,
             end_hour=tariff_end_hour,
         )
     )
-    losses_hourly, losses_kwh = _calculate_losses(
+    losses_hourly, losses_kwh = calculate_losses(
         hass, config, hours_morning=hours_morning, margin=margin
     )
     (
@@ -446,7 +226,7 @@ async def async_run_morning_charge(
         pv_sufficiency_kwh,
         sufficiency_hour,
         sufficiency_reached,
-    ) = _calculate_sufficiency_window(
+    ) = calculate_sufficiency_window(
         start_hour=start_hour,
         end_hour=tariff_end_hour,
         hourly_usage=hourly_usage,
@@ -485,17 +265,21 @@ async def async_run_morning_charge(
         return
 
     deficit_to_charge_kwh = (
-        deficit_kwh / (efficiency / 100.0) if efficiency else deficit_kwh
+        deficit_kwh / ((efficiency / 100.0) ** 2) if efficiency else deficit_kwh
     )
-    soc_delta = kwh_to_soc(deficit_to_charge_kwh, capacity_ah, voltage)
-    target_soc = min(current_soc + soc_delta, max_soc)
+    soc_delta = calculate_soc_delta(
+        deficit_to_charge_kwh, capacity_ah=capacity_ah, voltage=voltage
+    )
+    target_soc = calculate_target_soc(
+        current_soc, soc_delta, max_soc=max_soc
+    )
 
     charge_current_entity = config.get(CONF_CHARGE_CURRENT_ENTITY)
-    charge_current = calculate_expected_charge_current(
+    charge_current = calculate_charge_current(
         deficit_to_charge_kwh,
-        current_soc,
-        capacity_ah,
-        voltage,
+        current_soc=current_soc,
+        capacity_ah=capacity_ah,
+        voltage=voltage,
     )
 
     await set_program_soc(

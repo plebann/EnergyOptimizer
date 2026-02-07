@@ -36,6 +36,15 @@ class DecisionOutcome:
     entities_changed: list[dict[str, Any]] = field(default_factory=list)
 
 
+def format_sufficiency_hour(
+    sufficiency_hour: int, *, sufficiency_reached: bool
+) -> str:
+    """Format sufficiency hour for user-facing logs."""
+    if not sufficiency_reached:
+        return "not reached"
+    return f"{sufficiency_hour:02d}:00"
+
+
 def get_logging_sensors(
     hass: HomeAssistant, entry_id: str
 ) -> tuple[Any | None, Any | None]:

@@ -212,8 +212,10 @@ class BatteryReserveSensor(EnergyOptimizerSensor):
             self.config.get(CONF_MIN_SOC, 10),
             self.config.get(CONF_BATTERY_CAPACITY_AH, 200),
             self.config.get(CONF_BATTERY_VOLTAGE, 48),
+            efficiency=self.config.get(
+                CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY
+            ),
         )
-
 
 class BatterySpaceSensor(EnergyOptimizerSensor):
     """Sensor for battery space available for charging."""

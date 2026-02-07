@@ -42,14 +42,18 @@ def test_calculate_battery_reserve():
     """Test battery reserve calculation."""
     # Current 70%, min 10%, 200Ah 48V
     # Reserve = (70-10)% * 200 * 48 / 1000 = 5.76 kWh
-    reserve = calculate_battery_reserve(70, 10, 200, 48)
+    reserve = calculate_battery_reserve(70, 10, 200, 48, efficiency=100)
     assert reserve == pytest.approx(5.76, rel=0.01)
+
+    # Apply discharge efficiency
+    reserve = calculate_battery_reserve(70, 10, 200, 48, efficiency=90)
+    assert reserve == pytest.approx(5.184, rel=0.01)
     
     # At minimum SOC, reserve should be 0
-    assert calculate_battery_reserve(10, 10, 200, 48) == 0.0
+    assert calculate_battery_reserve(10, 10, 200, 48, efficiency=90) == 0.0
     
     # Below minimum, reserve should be 0
-    assert calculate_battery_reserve(5, 10, 200, 48) == 0.0
+    assert calculate_battery_reserve(5, 10, 200, 48, efficiency=90) == 0.0
 
 
 def test_calculate_battery_space():

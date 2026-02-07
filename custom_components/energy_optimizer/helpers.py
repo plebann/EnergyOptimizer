@@ -5,6 +5,8 @@ from datetime import datetime
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
+from homeassistant.util import dt as dt_util
+
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.config_entries import ConfigEntry
@@ -25,7 +27,7 @@ def is_test_mode(entry: ConfigEntry) -> bool:
     data = entry.data or {}
     if not isinstance(data, dict):
         data = {}
-    return bool(data.get(CONF_TEST_MODE, False))
+    return bool(data.get(CONF_TEST_MODE, True))
 
 
 def get_active_program_entity(
@@ -231,3 +233,68 @@ def get_float_value(
     if error is not None or value is None:
         return default
     return value
+
+
+def resolve_tariff_end_hour(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    default_hour: int = 13,
+) -> int:
+    """Resolve tariff end hour from configured sensor with fallback."""
+    from .const import CONF_TARIFF_END_HOUR_SENSOR
+
+    tariff_end_hour = default_hour
+    tariff_end_entity = config.get(CONF_TARIFF_END_HOUR_SENSOR)
+    if tariff_end_entity:
+        if str(tariff_end_entity).startswith("input_datetime."):
+            tariff_end_state = hass.states.get(str(tariff_end_entity))
+            if tariff_end_state is None:
+                _LOGGER.warning(
+                    "Tariff end hour input_datetime %s unavailable, using default %s",
+                    tariff_end_entity,
+                    default_hour,
+                )
+            else:
+                state_value = tariff_end_state.state
+                dt_value = dt_util.parse_datetime(state_value)
+                if dt_value is not None:
+                    tariff_end_hour = dt_util.as_local(dt_value).hour
+                else:
+                    time_value = dt_util.parse_time(state_value)
+                    if time_value is not None:
+                        tariff_end_hour = time_value.hour
+                    else:
+                        _LOGGER.warning(
+                            "Tariff end hour input_datetime %s has invalid value %s, using default %s",
+                            tariff_end_entity,
+                            state_value,
+                            default_hour,
+                        )
+        else:
+            tariff_end_value = get_float_value(
+                hass, tariff_end_entity, default=tariff_end_hour
+            )
+            if tariff_end_value is not None:
+                tariff_end_hour = int(tariff_end_value)
+            else:
+                _LOGGER.warning(
+                    "Tariff end hour sensor %s unavailable, using default %s",
+                    tariff_end_entity,
+                    default_hour,
+                )
+    else:
+        _LOGGER.warning(
+            "Tariff end hour sensor not configured, using default %s",
+            default_hour,
+        )
+
+    if tariff_end_hour < 7 or tariff_end_hour > 24:
+        _LOGGER.warning(
+            "Tariff end hour %s out of range, using default %s",
+            tariff_end_hour,
+            default_hour,
+        )
+        tariff_end_hour = default_hour
+
+    return tariff_end_hour

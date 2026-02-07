@@ -1,7 +1,7 @@
 """Battery calculations for Energy Optimizer."""
 from __future__ import annotations
 
-from math import floor
+from math import ceil
 
 
 def soc_to_kwh(soc: float, capacity_ah: float, voltage: float) -> float:
@@ -35,24 +35,33 @@ def kwh_to_soc(kwh: float, capacity_ah: float, voltage: float) -> float:
 
 
 def calculate_battery_reserve(
-    current_soc: float, min_soc: float, capacity_ah: float, voltage: float
+    current_soc: float,
+    min_soc: float,
+    capacity_ah: float,
+    voltage: float,
+    efficiency: float = 100.0,
 ) -> float:
     """Calculate available battery reserve above minimum SOC.
-    
+
     Args:
-        current_soc: Current state of charge (%)
-        min_soc: Minimum allowed SOC (%)
-        capacity_ah: Battery capacity (Ah)
-        voltage: Battery voltage (V)
-        
+        current_soc: Current state of charge (%).
+        min_soc: Minimum allowed SOC (%).
+        capacity_ah: Battery capacity (Ah).
+        voltage: Battery voltage (V).
+        efficiency: Discharge efficiency (%).
+
     Returns:
-        Available reserve energy (kWh)
+        Available reserve energy (kWh).
     """
     if current_soc <= min_soc:
         return 0.0
-    
+
+    if efficiency <= 0:
+        return 0.0
+
     reserve_soc = current_soc - min_soc
-    return soc_to_kwh(reserve_soc, capacity_ah, voltage)
+    reserve_kwh = soc_to_kwh(reserve_soc, capacity_ah, voltage)
+    return reserve_kwh * (efficiency / 100.0)
 
 
 def calculate_battery_space(
@@ -190,7 +199,44 @@ def calculate_expected_charge_current(
     else:
         recommended_current = lvl1_current
 
-    return int(floor(recommended_current + 0.5))
+    return int(ceil(recommended_current))
+
+
+def calculate_soc_delta(
+    energy_to_charge_kwh: float,
+    *,
+    capacity_ah: float,
+    voltage: float,
+) -> float:
+    """Calculate SOC delta for a given energy amount."""
+    return kwh_to_soc(energy_to_charge_kwh, capacity_ah, voltage)
+
+
+def calculate_target_soc(
+    current_soc: float,
+    soc_delta: float,
+    *,
+    max_soc: float,
+) -> float:
+    """Calculate target SOC rounded up to full percent."""
+    target_soc = min(current_soc + soc_delta, max_soc)
+    return float(ceil(target_soc))
+
+
+def calculate_charge_current(
+    energy_to_charge_kwh: float,
+    *,
+    current_soc: float,
+    capacity_ah: float,
+    voltage: float,
+) -> int:
+    """Calculate charge current for a given energy amount."""
+    return calculate_expected_charge_current(
+        energy_to_charge_kwh,
+        current_soc,
+        capacity_ah,
+        voltage,
+    )
 
 
 def calculate_total_capacity(capacity_ah: float, voltage: float) -> float:
