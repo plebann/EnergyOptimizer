@@ -77,13 +77,15 @@ def log_decision(
         hist_sensor.add_entry(history_scenario or scenario, history_details or details)
 
 
-async def notify_user(hass: HomeAssistant, message: str) -> None:
+async def notify_user(
+    hass: HomeAssistant, message: str, title: str
+) -> None:
     """Send a notification via the default notify service."""
 
     await hass.services.async_call(
         "notify",
         "notify",
-        {"message": message},
+        {"message": message, "title": title},
         blocking=False,
     )
 
@@ -110,26 +112,21 @@ async def log_decision_unified(
         logger: Optional logger for technical logs (e.g., _LOGGER)
     """
 
-    # 1. Technical log
     if logger:
         logger.info("%s: %s", outcome.scenario, outcome.summary)
 
-    # 2. User notification
-    await notify_user(hass, outcome.summary)
+    await notify_user(hass, outcome.summary, outcome.scenario)
 
-    # 3. Last Optimization sensor (full details)
     opt_sensor, hist_sensor = get_logging_sensors(hass, entry.entry_id)
     if opt_sensor:
         opt_sensor.log_optimization(outcome.scenario, outcome.full_details)
 
-    # 4. Optimization History sensor (structured details)
     if hist_sensor:
         history_entry = {**outcome.key_metrics}
         if outcome.reason:
             history_entry["reason"] = outcome.reason
         hist_sensor.add_entry(outcome.scenario, history_entry)
 
-    # 5. Custom event (complete data + entity changes)
     if context:
         event_data = {
             "action": outcome.action_type,
