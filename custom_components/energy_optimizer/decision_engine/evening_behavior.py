@@ -143,13 +143,14 @@ async def async_run_evening_behavior(
         await set_max_charge_current(
             hass, max_charge_current_entity, max_charge_current, entry=entry, logger=_LOGGER, context=integration_context
         )
-
+        summary = "Balancing enabled"
         outcome = DecisionOutcome(
-            scenario="Battery Balancing",
+            scenario="Evening behavior",
             action_type="balancing_enabled",
-            summary="Night battery balancing enabled",
+            summary=summary,
             reason=f"Balancing treshold exceeded ({days_since_balancing} days)",
             key_metrics={
+                "result": summary,
                 "pv_forecast": f"{pv_forecast:.1f} kWh",
                 "target": "100%",
                 "days_since": f"{days_since_balancing} days" if days_since_balancing else "first time",
@@ -222,13 +223,14 @@ async def async_run_evening_behavior(
 
         await set_program_soc(hass, prog1_soc, current_soc, entry=entry, logger=_LOGGER, context=integration_context)
         await set_program_soc(hass, prog6_soc, current_soc, entry=entry, logger=_LOGGER, context=integration_context)
-
+        summary = "Battery preservation mode"
         outcome = DecisionOutcome(
-            scenario="Battery Preservation",
+            scenario="Evening behavior",
             action_type="preservation_enabled",
-            summary=f"Battery preservation mode",
+            summary=summary,
             reason=f"SOC locked at {current_soc:.0f}%, PV: {pv_with_efficiency:.1f}, battery space: {battery_space:.1f}",
             key_metrics={
+                "result": summary,
                 "pv_forecast": f"{pv_forecast:.1f} kWh",
                 "battery_space": f"{battery_space:.1f} kWh",
                 "target": f"{current_soc:.0f}%",
@@ -280,12 +282,14 @@ async def async_run_evening_behavior(
         await set_program_soc(hass, prog2_soc, min_soc, entry=entry, logger=_LOGGER, context=integration_context)
         await set_program_soc(hass, prog6_soc, min_soc, entry=entry, logger=_LOGGER, context=integration_context)
 
+        summary = "Normal operation restored"
         outcome = DecisionOutcome(
-            scenario="Normal Operation Restored",
+            scenario="Evening behavior",
             action_type="normal_restored",
-            summary=f"Normal battery operation restored",
+            summary=summary,
             reason=f"PV within normal range, SOC minimum {min_soc:.0f}%",
             key_metrics={
+                "result": summary,
                 "previous": f"{current_prog6_soc:.0f}%",
                 "target": f"{min_soc:.0f}%",
                 "pv_forecast": f"{pv_forecast:.1f} kWh",
@@ -308,13 +312,14 @@ async def async_run_evening_behavior(
         _LOGGER.info("Normal operation restored")
         return
 
+    summary = "No action"
     outcome = DecisionOutcome(
-        scenario="No Action",
+        scenario="Evening behavior",
         action_type="no_action",
-        summary="No battery schedule changes needed",
+        summary=summary,
         reason="Battery state within acceptable parameters",
         key_metrics={
-            "result": "No changes",
+            "result": summary,
         },
         full_details={
             "pv_forecast_kwh": round(pv_forecast, 2),

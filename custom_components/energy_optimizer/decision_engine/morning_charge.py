@@ -236,16 +236,17 @@ def _build_no_action_outcome(
     sufficiency_label = format_sufficiency_hour(
         sufficiency_hour, sufficiency_reached=sufficiency_reached
     )
+    summary = "No action needed"
     return DecisionOutcome(
         scenario="Morning Grid Charge",
         action_type="no_action",
-        summary="No action needed",
+        summary=summary,
         reason=(
             f"Deficit full {deficit_full_kwh:.1f} kWh, "
             f"deficit sufficiency {deficit_sufficiency_kwh:.1f} kWh"
         ),
         key_metrics={
-            "result": "No action",
+            "result": summary,
             "reserve": f"{reserve_kwh:.1f} kWh",
             "required": f"{required_kwh:.1f} kWh",
             "required_sufficiency": f"{required_sufficiency_kwh:.1f} kWh",
@@ -271,13 +272,14 @@ def _build_no_action_outcome(
 
 def _build_balancing_ongoing_outcome() -> DecisionOutcome:
     """Build outcome for balancing ongoing skip."""
+    summary = "Battery balancing ongoing"
     return DecisionOutcome(
         scenario="Morning Grid Charge",
         action_type="no_action",
-        summary="Balancing ongoing",
+        summary=summary,
         reason="Battery balancing in progress",
         key_metrics={
-            "result": "No action",
+            "result": summary,
             "balancing": "ongoing",
         },
         full_details={
@@ -373,16 +375,18 @@ def _build_charge_outcome(
     sufficiency_hour: int,
     sufficiency_reached: bool,
 ) -> DecisionOutcome:
+    summary = f"Battery scheduled to charge to {target_soc:.0f}%"
     return DecisionOutcome(
         scenario="Morning Grid Charge",
         action_type="charge_scheduled",
-        summary=f"Battery scheduled to charge to {target_soc:.0f}%",
+        summary=summary,
         reason=(
             f"Deficit {deficit_to_charge_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
             f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh, "
             f"current {charge_current:.0f} A"
         ),
         key_metrics={
+            "result": summary,
             "target": f"{target_soc:.0f}%",
             "required": f"{required_kwh:.1f} kWh",
             "required_sufficiency": f"{required_sufficiency_kwh:.1f} kWh",

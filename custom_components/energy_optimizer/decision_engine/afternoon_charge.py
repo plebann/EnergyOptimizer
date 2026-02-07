@@ -208,16 +208,17 @@ def _build_no_action_outcome(
     start_hour: int,
     end_hour: int,
 ) -> DecisionOutcome:
+    summary = "No action needed"
     return DecisionOutcome(
         scenario="Afternoon Grid Charge",
         action_type="no_action",
-        summary="No action needed",
+        summary=summary,
         reason=(
             f"Deficit <= 0 kWh, reserve {reserve_kwh:.1f} kWh, "
             f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh"
         ),
         key_metrics={
-            "result": "No action",
+            "result": summary,
             "reserve": f"{reserve_kwh:.1f} kWh",
             "required": f"{required_kwh:.1f} kWh",
             "pv": f"{pv_forecast_kwh:.1f} kWh",
@@ -296,10 +297,11 @@ def _build_charge_outcome(
     start_hour: int,
     end_hour: int,
 ) -> DecisionOutcome:
+    summary = f"Battery scheduled to charge to {target_soc:.0f}%"
     return DecisionOutcome(
         scenario="Afternoon Grid Charge",
         action_type="charge_scheduled",
-        summary=f"Battery scheduled to charge to {target_soc:.0f}%",
+        summary=summary,
         reason=(
             f"Deficit {deficit_to_charge_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
             f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh, "
@@ -307,6 +309,7 @@ def _build_charge_outcome(
         ),
         key_metrics={
             "target": f"{target_soc:.0f}%",
+            "result": summary,
             "required": f"{required_kwh:.1f} kWh",
             "reserve": f"{reserve_kwh:.1f} kWh",
             "deficit": f"{deficit_to_charge_kwh:.1f} kWh",
