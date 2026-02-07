@@ -1109,7 +1109,6 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     self._config_entry.data.get(CONF_TEST_MODE, True),
                 ),
             )
-            updated_data.pop(CONF_TEST_MODE, None)
 
             self.hass.config_entries.async_update_entry(
                 self._config_entry, data=updated_data
