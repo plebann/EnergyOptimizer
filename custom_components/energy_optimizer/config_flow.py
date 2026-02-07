@@ -1067,7 +1067,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
         """Handle heat pump options."""
         if user_input is not None:
             self._data.update(user_input)
-            return self.async_show_form(step_id="review", data_schema=vol.Schema({}))
+            return await self.async_step_review()
 
         schema = vol.Schema(
             {
@@ -1091,3 +1091,20 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
         )
 
         return self.async_show_form(step_id="heat_pump", data_schema=schema)
+
+    async def async_step_review(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Finalize options."""
+        if user_input is not None:
+            updated_data = {**self._config_entry.data, **self._data}
+
+            self.hass.config_entries.async_update_entry(
+                self._config_entry, data=updated_data
+            )
+
+            return self.async_create_entry(
+                title="", data=(self._config_entry.options or {})
+            )
+
+        return self.async_show_form(step_id="review", data_schema=vol.Schema({}))
