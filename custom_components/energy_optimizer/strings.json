@@ -194,5 +194,12 @@
     "error": {
       "min_greater_than_max": "Minimum SOC must be less than maximum SOC."
     }
+  },
+  "entity": {
+    "sensor": {
+      "test_mode": {
+        "name": "Test mode"
+      }
+    }
   }
 }

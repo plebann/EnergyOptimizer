@@ -12,7 +12,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy
+from homeassistant.const import EntityCategory, UnitOfEnergy
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
@@ -42,6 +42,7 @@ from .const import (
     DOMAIN,
     UPDATE_INTERVAL_FAST,
 )
+from .helpers import is_test_mode
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ async def async_setup_entry(
         BatteryEfficiencySensor(coordinator, config_entry, config),
         MinSocSensor(coordinator, config_entry, config),
         MaxSocSensor(coordinator, config_entry, config),
+        TestModeSensor(coordinator, config_entry, config),
     ]
 
     # Add last balancing timestamp sensor
@@ -117,6 +119,18 @@ async def async_setup_entry(
         hass.data[DOMAIN][config_entry.entry_id]["listeners"] = []
 
     async_add_entities(sensors)
+
+    async def _async_update_entry(
+        hass: HomeAssistant, entry: ConfigEntry
+    ) -> None:
+        """Handle config entry updates."""
+        for sensor in sensors:
+            sensor.config = entry.data
+        coordinator.async_set_updated_data(None)
+
+    config_entry.async_on_unload(
+        config_entry.add_update_listener(_async_update_entry)
+    )
 
     # Track state changes for battery sensors
     soc_sensor = config.get(CONF_BATTERY_SOC_SENSOR)
@@ -532,6 +546,21 @@ class MaxSocSensor(EnergyOptimizerSensor):
     def native_value(self) -> int:
         """Return the configured maximum SOC."""
         return self.config.get(CONF_MAX_SOC, DEFAULT_MAX_SOC)
+
+
+class TestModeSensor(EnergyOptimizerSensor):
+    """Sensor showing whether test mode is enabled."""
+
+    _attr_name = None
+    _attr_translation_key = "test_mode"
+    _attr_unique_id = "test_mode"
+    _attr_icon = "mdi:test-tube"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def native_value(self) -> bool:
+        """Return whether test mode is enabled."""
+        return is_test_mode(self.config_entry)
 
 
 class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
