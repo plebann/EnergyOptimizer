@@ -196,6 +196,11 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "balancing_ongoing": {
+        "name": "Balancing ongoing"
+      }
+    },
     "sensor": {
       "test_mode": {
         "name": "Test mode"

@@ -60,6 +60,7 @@ async def async_run_evening_behavior(
 
     # Get sensor reference from hass.data
     last_balancing_sensor = None
+    balancing_ongoing_sensor = None
     if (
         DOMAIN in hass.data
         and entry.entry_id in hass.data[DOMAIN]
@@ -67,6 +68,9 @@ async def async_run_evening_behavior(
         and "last_balancing_sensor" in hass.data[DOMAIN][entry.entry_id]
     ):
         last_balancing_sensor = hass.data[DOMAIN][entry.entry_id]["last_balancing_sensor"]
+        balancing_ongoing_sensor = hass.data[DOMAIN][entry.entry_id].get(
+            "balancing_ongoing_sensor"
+        )
     else:
         _LOGGER.warning(
             "Last balancing sensor not yet initialized. "
@@ -115,8 +119,13 @@ async def async_run_evening_behavior(
         balancing_pv_threshold,
     )
 
+    if balancing_ongoing_sensor is not None:
+        balancing_ongoing_sensor.set_ongoing(False)
+
     # SCENARIO 1: Battery Balancing Mode
     if balancing_due and pv_forecast < balancing_pv_threshold:
+        if balancing_ongoing_sensor is not None:
+            balancing_ongoing_sensor.set_ongoing(True)
         _LOGGER.info(
             "Activating battery balancing mode (PV forecast: %.2f kWh < %.2f kWh)",
             pv_forecast,

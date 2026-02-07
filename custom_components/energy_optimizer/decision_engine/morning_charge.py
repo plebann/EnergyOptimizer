@@ -30,7 +30,11 @@ from ..decision_engine.common import (
     get_required_prog2_soc_state,
     resolve_entry,
 )
-from ..helpers import resolve_tariff_end_hour
+from ..helpers import (
+    is_balancing_ongoing,
+    resolve_tariff_end_hour,
+    set_balancing_ongoing,
+)
 from ..controllers.inverter import set_charge_current, set_program_soc
 from ..utils.forecast import async_get_forecasts
 from ..utils.logging import DecisionOutcome, format_sufficiency_hour, log_decision_unified
@@ -39,6 +43,182 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant, Context
 
 _LOGGER = logging.getLogger(__name__)
+
+async def async_run_morning_charge(
+    hass: HomeAssistant, *, entry_id: str | None = None, margin: float | None = None
+) -> None:
+    """Run morning grid charge routine."""
+
+    # Import Context here to avoid circular import
+    from homeassistant.core import Context
+
+    # Create integration context for this decision engine run
+    integration_context = Context()
+
+    entry = resolve_entry(hass, entry_id)
+    if entry is None:
+        return
+    config = entry.data
+
+    prog2_soc_state = get_required_prog2_soc_state(hass, config)
+    if prog2_soc_state is None:
+        return
+    prog2_soc_entity, prog2_soc_value = prog2_soc_state
+
+    current_soc_state = get_required_current_soc_state(hass, config)
+    if current_soc_state is None:
+        return
+    _battery_soc_entity, current_soc = current_soc_state
+
+    if await _handle_balancing_ongoing(
+        hass, entry, integration_context=integration_context
+    ):
+        return
+
+    capacity_ah = config.get(CONF_BATTERY_CAPACITY_AH, DEFAULT_BATTERY_CAPACITY_AH)
+    voltage = config.get(CONF_BATTERY_VOLTAGE, DEFAULT_BATTERY_VOLTAGE)
+    min_soc = config.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
+    max_soc = config.get(CONF_MAX_SOC, DEFAULT_MAX_SOC)
+    efficiency = config.get(CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY)
+    margin = margin if margin is not None else 1.1
+
+    reserve_kwh = calculate_battery_reserve(
+        current_soc,
+        min_soc,
+        capacity_ah,
+        voltage,
+        efficiency=efficiency,
+    )
+
+    hourly_usage = build_hourly_usage_array(
+        config, hass.states.get, daily_load_fallback=None
+    )
+
+    tariff_end_hour = resolve_tariff_end_hour(hass, config)
+
+    start_hour = 6
+    hours_morning = max(tariff_end_hour - start_hour, 1)
+    heat_pump_kwh, heat_pump_hourly, pv_forecast_kwh, pv_forecast_hourly = (
+        await async_get_forecasts(
+            hass,
+            config,
+            start_hour=start_hour,
+            end_hour=tariff_end_hour,
+        )
+    )
+    losses_hourly, losses_kwh = calculate_losses(
+        hass, config, hours_morning=hours_morning, margin=margin
+    )
+    (
+        required_kwh,
+        required_sufficiency_kwh,
+        pv_sufficiency_kwh,
+        sufficiency_hour,
+        sufficiency_reached,
+    ) = calculate_sufficiency_window(
+        start_hour=start_hour,
+        end_hour=tariff_end_hour,
+        hourly_usage=hourly_usage,
+        heat_pump_hourly=heat_pump_hourly,
+        losses_hourly=losses_hourly,
+        margin=margin,
+        pv_forecast_hourly=pv_forecast_hourly,
+    )
+
+    if required_kwh <= 0.0:
+        _LOGGER.info("Required morning energy is zero or negative, skipping")
+        return
+
+    deficit_full_kwh = required_kwh - reserve_kwh - pv_forecast_kwh
+    deficit_sufficiency_kwh = (
+        required_sufficiency_kwh - reserve_kwh - pv_sufficiency_kwh
+    )
+    deficit_kwh = max(deficit_full_kwh, deficit_sufficiency_kwh)
+
+    if deficit_kwh <= 0.0:
+        await _handle_no_action(
+            hass,
+            entry,
+            integration_context=integration_context,
+            prog2_soc_entity=prog2_soc_entity,
+            prog2_soc_value=prog2_soc_value,
+            min_soc=min_soc,
+            reserve_kwh=reserve_kwh,
+            required_kwh=required_kwh,
+            required_sufficiency_kwh=required_sufficiency_kwh,
+            pv_forecast_kwh=pv_forecast_kwh,
+            pv_sufficiency_kwh=pv_sufficiency_kwh,
+            heat_pump_kwh=heat_pump_kwh,
+            deficit_full_kwh=deficit_full_kwh,
+            deficit_sufficiency_kwh=deficit_sufficiency_kwh,
+            sufficiency_hour=sufficiency_hour,
+            sufficiency_reached=sufficiency_reached,
+        )
+        return
+
+    deficit_to_charge_kwh = (
+        deficit_kwh / ((efficiency / 100.0) ** 2) if efficiency else deficit_kwh
+    )
+    soc_delta = calculate_soc_delta(
+        deficit_to_charge_kwh, capacity_ah=capacity_ah, voltage=voltage
+    )
+    target_soc = calculate_target_soc(
+        current_soc, soc_delta, max_soc=max_soc
+    )
+
+    charge_current_entity = config.get(CONF_CHARGE_CURRENT_ENTITY)
+    charge_current = calculate_charge_current(
+        deficit_to_charge_kwh,
+        current_soc=current_soc,
+        capacity_ah=capacity_ah,
+        voltage=voltage,
+    )
+
+    await set_program_soc(
+        hass,
+        prog2_soc_entity,
+        target_soc,
+        entry=entry,
+        logger=_LOGGER,
+        context=integration_context,
+    )
+    await set_charge_current(
+        hass,
+        charge_current_entity,
+        charge_current,
+        entry=entry,
+        logger=_LOGGER,
+        context=integration_context,
+    )
+
+    outcome = _build_charge_outcome(
+        target_soc=target_soc,
+        required_kwh=required_kwh,
+        required_sufficiency_kwh=required_sufficiency_kwh,
+        reserve_kwh=reserve_kwh,
+        deficit_to_charge_kwh=deficit_to_charge_kwh,
+        deficit_raw_kwh=deficit_kwh,
+        deficit_full_kwh=deficit_full_kwh,
+        deficit_sufficiency_kwh=deficit_sufficiency_kwh,
+        pv_forecast_kwh=pv_forecast_kwh,
+        pv_sufficiency_kwh=pv_sufficiency_kwh,
+        heat_pump_kwh=heat_pump_kwh,
+        charge_current=charge_current,
+        current_soc=current_soc,
+        losses_kwh=losses_kwh,
+        efficiency=efficiency,
+        margin=margin,
+        sufficiency_hour=sufficiency_hour,
+        sufficiency_reached=sufficiency_reached,
+    )
+    outcome.entities_changed = [
+        {"entity_id": prog2_soc_entity, "value": target_soc},
+        {"entity_id": charge_current_entity, "value": charge_current},
+    ]
+    await log_decision_unified(
+        hass, entry, outcome, context=integration_context, logger=_LOGGER
+    )
+
 
 def _build_no_action_outcome(
     *,
@@ -86,6 +266,90 @@ def _build_no_action_outcome(
             "sufficiency_hour": sufficiency_hour,
             "sufficiency_reached": sufficiency_reached,
         },
+    )
+
+
+def _build_balancing_ongoing_outcome() -> DecisionOutcome:
+    """Build outcome for balancing ongoing skip."""
+    return DecisionOutcome(
+        scenario="Morning Grid Charge",
+        action_type="no_action",
+        summary="Balancing ongoing",
+        reason="Battery balancing in progress",
+        key_metrics={
+            "result": "No action",
+            "balancing": "ongoing",
+        },
+        full_details={
+            "balancing_ongoing": True,
+        },
+    )
+
+
+async def _handle_balancing_ongoing(
+    hass: HomeAssistant,
+    entry,
+    *,
+    integration_context: Context,
+) -> bool:
+    """Handle early exit when balancing is ongoing."""
+    if not is_balancing_ongoing(hass, entry.entry_id):
+        return False
+
+    set_balancing_ongoing(hass, entry.entry_id, ongoing=False)
+    outcome = _build_balancing_ongoing_outcome()
+    await log_decision_unified(
+        hass, entry, outcome, context=integration_context, logger=_LOGGER
+    )
+    return True
+
+
+async def _handle_no_action(
+    hass: HomeAssistant,
+    entry,
+    *,
+    integration_context: Context,
+    prog2_soc_entity: str,
+    prog2_soc_value: float,
+    min_soc: float,
+    reserve_kwh: float,
+    required_kwh: float,
+    required_sufficiency_kwh: float,
+    pv_forecast_kwh: float,
+    pv_sufficiency_kwh: float,
+    heat_pump_kwh: float,
+    deficit_full_kwh: float,
+    deficit_sufficiency_kwh: float,
+    sufficiency_hour: int,
+    sufficiency_reached: bool,
+) -> None:
+    """Handle no-action path and ensure program SOC reset."""
+    await set_program_soc(
+        hass,
+        prog2_soc_entity,
+        min_soc,
+        entry=entry,
+        logger=_LOGGER,
+        context=integration_context,
+    )
+    outcome = _build_no_action_outcome(
+        reserve_kwh=reserve_kwh,
+        required_kwh=required_kwh,
+        required_sufficiency_kwh=required_sufficiency_kwh,
+        pv_forecast_kwh=pv_forecast_kwh,
+        pv_sufficiency_kwh=pv_sufficiency_kwh,
+        heat_pump_kwh=heat_pump_kwh,
+        deficit_full_kwh=deficit_full_kwh,
+        deficit_sufficiency_kwh=deficit_sufficiency_kwh,
+        sufficiency_hour=sufficiency_hour,
+        sufficiency_reached=sufficiency_reached,
+    )
+    if prog2_soc_value > min_soc:
+        outcome.entities_changed = [
+            {"entity_id": prog2_soc_entity, "value": min_soc}
+        ]
+    await log_decision_unified(
+        hass, entry, outcome, context=integration_context, logger=_LOGGER
     )
 
 def _build_charge_outcome(
@@ -154,175 +418,4 @@ def _build_charge_outcome(
             "sufficiency_hour": sufficiency_hour,
             "sufficiency_reached": sufficiency_reached,
         },
-    )
-
-async def async_run_morning_charge(
-    hass: HomeAssistant, *, entry_id: str | None = None, margin: float | None = None
-) -> None:
-    """Run morning grid charge routine."""
-
-    # Import Context here to avoid circular import
-    from homeassistant.core import Context
-
-    # Create integration context for this decision engine run
-    integration_context = Context()
-
-    entry = resolve_entry(hass, entry_id)
-    if entry is None:
-        return
-    config = entry.data
-
-    prog2_soc_state = get_required_prog2_soc_state(hass, config)
-    if prog2_soc_state is None:
-        return
-    prog2_soc_entity, prog2_soc_value = prog2_soc_state
-
-    current_soc_state = get_required_current_soc_state(hass, config)
-    if current_soc_state is None:
-        return
-    _battery_soc_entity, current_soc = current_soc_state
-
-    if prog2_soc_value >= 100.0:
-        _LOGGER.info("Program 2 SOC already at 100%%, skipping morning grid charge")
-        return
-
-    capacity_ah = config.get(CONF_BATTERY_CAPACITY_AH, DEFAULT_BATTERY_CAPACITY_AH)
-    voltage = config.get(CONF_BATTERY_VOLTAGE, DEFAULT_BATTERY_VOLTAGE)
-    min_soc = config.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
-    max_soc = config.get(CONF_MAX_SOC, DEFAULT_MAX_SOC)
-    efficiency = config.get(CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY)
-    margin = margin if margin is not None else 1.1
-
-    reserve_kwh = calculate_battery_reserve(
-        current_soc,
-        min_soc,
-        capacity_ah,
-        voltage,
-        efficiency=efficiency,
-    )
-
-    hourly_usage = build_hourly_usage_array(
-        config, hass.states.get, daily_load_fallback=None
-    )
-
-    tariff_end_hour = resolve_tariff_end_hour(hass, config)
-
-    start_hour = 6
-    hours_morning = max(tariff_end_hour - start_hour, 1)
-    heat_pump_kwh, heat_pump_hourly, pv_forecast_kwh, pv_forecast_hourly = (
-        await async_get_forecasts(
-            hass,
-            config,
-            start_hour=start_hour,
-            end_hour=tariff_end_hour,
-        )
-    )
-    losses_hourly, losses_kwh = calculate_losses(
-        hass, config, hours_morning=hours_morning, margin=margin
-    )
-    (
-        required_kwh,
-        required_sufficiency_kwh,
-        pv_sufficiency_kwh,
-        sufficiency_hour,
-        sufficiency_reached,
-    ) = calculate_sufficiency_window(
-        start_hour=start_hour,
-        end_hour=tariff_end_hour,
-        hourly_usage=hourly_usage,
-        heat_pump_hourly=heat_pump_hourly,
-        losses_hourly=losses_hourly,
-        margin=margin,
-        pv_forecast_hourly=pv_forecast_hourly,
-    )
-
-    if required_kwh <= 0.0:
-        _LOGGER.info("Required morning energy is zero or negative, skipping")
-        return
-
-    deficit_full_kwh = required_kwh - reserve_kwh - pv_forecast_kwh
-    deficit_sufficiency_kwh = (
-        required_sufficiency_kwh - reserve_kwh - pv_sufficiency_kwh
-    )
-    deficit_kwh = max(deficit_full_kwh, deficit_sufficiency_kwh)
-
-    if deficit_kwh <= 0.0:
-        outcome = _build_no_action_outcome(
-            reserve_kwh=reserve_kwh,
-            required_kwh=required_kwh,
-            required_sufficiency_kwh=required_sufficiency_kwh,
-            pv_forecast_kwh=pv_forecast_kwh,
-            pv_sufficiency_kwh=pv_sufficiency_kwh,
-            heat_pump_kwh=heat_pump_kwh,
-            deficit_full_kwh=deficit_full_kwh,
-            deficit_sufficiency_kwh=deficit_sufficiency_kwh,
-            sufficiency_hour=sufficiency_hour,
-            sufficiency_reached=sufficiency_reached,
-        )
-        await log_decision_unified(
-            hass, entry, outcome, context=integration_context, logger=_LOGGER
-        )
-        return
-
-    deficit_to_charge_kwh = (
-        deficit_kwh / ((efficiency / 100.0) ** 2) if efficiency else deficit_kwh
-    )
-    soc_delta = calculate_soc_delta(
-        deficit_to_charge_kwh, capacity_ah=capacity_ah, voltage=voltage
-    )
-    target_soc = calculate_target_soc(
-        current_soc, soc_delta, max_soc=max_soc
-    )
-
-    charge_current_entity = config.get(CONF_CHARGE_CURRENT_ENTITY)
-    charge_current = calculate_charge_current(
-        deficit_to_charge_kwh,
-        current_soc=current_soc,
-        capacity_ah=capacity_ah,
-        voltage=voltage,
-    )
-
-    await set_program_soc(
-        hass,
-        prog2_soc_entity,
-        target_soc,
-        entry=entry,
-        logger=_LOGGER,
-        context=integration_context,
-    )
-    await set_charge_current(
-        hass,
-        charge_current_entity,
-        charge_current,
-        entry=entry,
-        logger=_LOGGER,
-        context=integration_context,
-    )
-
-    outcome = _build_charge_outcome(
-        target_soc=target_soc,
-        required_kwh=required_kwh,
-        required_sufficiency_kwh=required_sufficiency_kwh,
-        reserve_kwh=reserve_kwh,
-        deficit_to_charge_kwh=deficit_to_charge_kwh,
-        deficit_raw_kwh=deficit_kwh,
-        deficit_full_kwh=deficit_full_kwh,
-        deficit_sufficiency_kwh=deficit_sufficiency_kwh,
-        pv_forecast_kwh=pv_forecast_kwh,
-        pv_sufficiency_kwh=pv_sufficiency_kwh,
-        heat_pump_kwh=heat_pump_kwh,
-        charge_current=charge_current,
-        current_soc=current_soc,
-        losses_kwh=losses_kwh,
-        efficiency=efficiency,
-        margin=margin,
-        sufficiency_hour=sufficiency_hour,
-        sufficiency_reached=sufficiency_reached,
-    )
-    outcome.entities_changed = [
-        {"entity_id": prog2_soc_entity, "value": target_soc},
-        {"entity_id": charge_current_entity, "value": charge_current},
-    ]
-    await log_decision_unified(
-        hass, entry, outcome, context=integration_context, logger=_LOGGER
     )

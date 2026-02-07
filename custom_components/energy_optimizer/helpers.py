@@ -21,6 +21,33 @@ def is_test_mode(entry: ConfigEntry) -> bool:
     config = entry.data
     return config.get(CONF_TEST_MODE, True)
 
+
+def is_balancing_ongoing(hass: HomeAssistant, entry_id: str) -> bool:
+    """Return True when balancing ongoing binary sensor is on."""
+    from .const import DOMAIN
+
+    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
+    if not isinstance(entry_data, dict):
+        return False
+
+    sensor = entry_data.get("balancing_ongoing_sensor")
+    return bool(sensor and sensor.is_on)
+
+
+def set_balancing_ongoing(
+    hass: HomeAssistant, entry_id: str, *, ongoing: bool
+) -> None:
+    """Set balancing ongoing flag when sensor is available."""
+    from .const import DOMAIN
+
+    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
+    if not isinstance(entry_data, dict):
+        return
+
+    sensor = entry_data.get("balancing_ongoing_sensor")
+    if sensor is not None:
+        sensor.set_ongoing(ongoing)
+
 def get_active_program_entity(
     hass: HomeAssistant, config: dict[str, Any], current_time: datetime
 ) -> str | None:
