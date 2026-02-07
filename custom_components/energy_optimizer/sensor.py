@@ -125,6 +125,7 @@ async def async_setup_entry(
     ) -> None:
         """Handle config entry updates."""
         for sensor in sensors:
+            sensor.config_entry = entry
             sensor.config = entry.data
         coordinator.async_set_updated_data(None)
 
@@ -551,6 +552,7 @@ class MaxSocSensor(EnergyOptimizerSensor):
 class TestModeSensor(EnergyOptimizerSensor):
     """Sensor showing whether test mode is enabled."""
 
+    _attr_has_entity_name = False
     _attr_name = None
     _attr_translation_key = "test_mode"
     _attr_unique_id = "test_mode"
