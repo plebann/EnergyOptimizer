@@ -250,7 +250,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_MAX_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(CONF_TEST_MODE, default=True): bool,
+                vol.Optional(CONF_TEST_MODE, default=True): selector.BooleanSelector(),
                 vol.Optional(CONF_GRID_CHARGE_SWITCH): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="switch")
                 ),
@@ -829,11 +829,8 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_TEST_MODE,
-                    default=(self._config_entry.options or {}).get(
-                        CONF_TEST_MODE,
-                        self._config_entry.data.get(CONF_TEST_MODE, True),
-                    ),
-                ): bool,
+                    default=self._config_entry.data.get(CONF_TEST_MODE, False),
+                ): selector.BooleanSelector(),
                 vol.Optional(
                     CONF_GRID_CHARGE_SWITCH,
                     default=self._config_entry.data.get(CONF_GRID_CHARGE_SWITCH),
@@ -1070,7 +1067,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
         """Handle heat pump options."""
         if user_input is not None:
             self._data.update(user_input)
-            return await self.async_step_review()
+            return self.async_show_form(step_id="review", data_schema=vol.Schema({}))
 
         schema = vol.Schema(
             {
@@ -1094,29 +1091,3 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
         )
 
         return self.async_show_form(step_id="heat_pump", data_schema=schema)
-
-    async def async_step_review(
-        self, user_input: dict[str, Any] | None = None
-    ) -> config_entries.FlowResult:
-        """Finalize options."""
-        if user_input is not None:
-            updated_data = {**self._config_entry.data, **self._data}
-
-            test_mode = self._data.get(
-                CONF_TEST_MODE,
-                (self._config_entry.options or {}).get(
-                    CONF_TEST_MODE,
-                    self._config_entry.data.get(CONF_TEST_MODE, True),
-                ),
-            )
-            updated_data[CONF_TEST_MODE] = test_mode
-
-            self.hass.config_entries.async_update_entry(
-                self._config_entry, data=updated_data
-            )
-
-            return self.async_create_entry(
-                title="", data=(self._config_entry.options or {})
-            )
-
-        return self.async_show_form(step_id="review", data_schema=vol.Schema({}))
