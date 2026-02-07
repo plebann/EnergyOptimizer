@@ -18,16 +18,19 @@ def is_test_mode(entry: ConfigEntry) -> bool:
     """Return True when test mode is enabled for the config entry."""
     from .const import CONF_TEST_MODE
 
+    data = entry.data or {}
+    if not isinstance(data, dict):
+        data = {}
+    if CONF_TEST_MODE in data:
+        return bool(data.get(CONF_TEST_MODE))
+
     options = entry.options or {}
     if not isinstance(options, dict):
         options = {}
     if CONF_TEST_MODE in options:
         return bool(options.get(CONF_TEST_MODE))
 
-    data = entry.data or {}
-    if not isinstance(data, dict):
-        data = {}
-    return bool(data.get(CONF_TEST_MODE, True))
+    return False
 
 
 def get_active_program_entity(

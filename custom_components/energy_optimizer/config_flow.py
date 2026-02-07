@@ -1109,13 +1109,14 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     self._config_entry.data.get(CONF_TEST_MODE, True),
                 ),
             )
+            updated_data[CONF_TEST_MODE] = test_mode
 
             self.hass.config_entries.async_update_entry(
                 self._config_entry, data=updated_data
             )
 
-            options = {**(self._config_entry.options or {})}
-            options[CONF_TEST_MODE] = test_mode
-            return self.async_create_entry(title="", data=options)
+            return self.async_create_entry(
+                title="", data=(self._config_entry.options or {})
+            )
 
         return self.async_show_form(step_id="review", data_schema=vol.Schema({}))
