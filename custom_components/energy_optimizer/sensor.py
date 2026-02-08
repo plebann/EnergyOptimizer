@@ -478,7 +478,7 @@ class BatteryCapacityAhSensor(EnergyOptimizerSensor):
 
     _attr_name = "Battery Capacity (Ah)"
     _attr_unique_id = "battery_capacity_ah"
-    _attr_icon = "mdi:battery-settings"
+    _attr_icon = "mdi:battery-check"
     _attr_native_unit_of_measurement = "Ah"
     _attr_state_class = SensorStateClass.MEASUREMENT
 

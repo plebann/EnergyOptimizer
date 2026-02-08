@@ -35,14 +35,13 @@ class BalancingOngoingBinarySensor(BinarySensorEntity, RestoreEntity):
     """Binary sensor indicating battery balancing mode."""
 
     _attr_has_entity_name = True
-    _attr_name = None
     _attr_translation_key = "balancing_ongoing"
-    _attr_unique_id = "balancing_ongoing"
     _attr_icon = "mdi:battery-sync"
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize the binary sensor."""
         self._attr_is_on = False
+        self._attr_unique_id = f"{config_entry.entry_id}_balancing_ongoing"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, config_entry.entry_id)},
             "name": "Energy Optimizer",
