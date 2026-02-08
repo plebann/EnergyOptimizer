@@ -18,9 +18,9 @@ def is_test_mode(entry: ConfigEntry) -> bool:
     """Return True when test mode is enabled for the config entry."""
     from .const import CONF_TEST_MODE
 
-    if CONF_TEST_MODE in entry.options:
-        return bool(entry.options.get(CONF_TEST_MODE))
-    return bool(entry.data.get(CONF_TEST_MODE, False))
+    if CONF_TEST_MODE in entry.data:
+        return bool(entry.data.get(CONF_TEST_MODE))
+    return bool(entry.options.get(CONF_TEST_MODE, False))
 
 
 def is_balancing_ongoing(hass: HomeAssistant, entry_id: str) -> bool:
