@@ -18,8 +18,9 @@ def is_test_mode(entry: ConfigEntry) -> bool:
     """Return True when test mode is enabled for the config entry."""
     from .const import CONF_TEST_MODE
 
-    config = entry.data
-    return config.get(CONF_TEST_MODE, True)
+    if CONF_TEST_MODE in entry.options:
+        return bool(entry.options.get(CONF_TEST_MODE))
+    return bool(entry.data.get(CONF_TEST_MODE, False))
 
 
 def is_balancing_ongoing(hass: HomeAssistant, entry_id: str) -> bool:
@@ -381,3 +382,68 @@ def resolve_tariff_start_hour(
         tariff_start_hour = default_hour
 
     return tariff_start_hour
+
+
+def resolve_sell_window_start_hour(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    default_hour: int = 17,
+) -> int:
+    """Resolve sell window start hour from configured sensor with fallback."""
+    from .const import CONF_SELL_WINDOW_START_SENSOR
+
+    sell_start_hour = default_hour
+    sell_start_entity = config.get(CONF_SELL_WINDOW_START_SENSOR)
+    if sell_start_entity:
+        if str(sell_start_entity).startswith("input_datetime."):
+            sell_start_state = hass.states.get(str(sell_start_entity))
+            if sell_start_state is None:
+                _LOGGER.warning(
+                    "Sell window start input_datetime %s unavailable, using default %s",
+                    sell_start_entity,
+                    default_hour,
+                )
+            else:
+                state_value = sell_start_state.state
+                dt_value = dt_util.parse_datetime(state_value)
+                if dt_value is not None:
+                    sell_start_hour = dt_util.as_local(dt_value).hour
+                else:
+                    time_value = dt_util.parse_time(state_value)
+                    if time_value is not None:
+                        sell_start_hour = time_value.hour
+                    else:
+                        _LOGGER.warning(
+                            "Sell window start input_datetime %s has invalid value %s, using default %s",
+                            sell_start_entity,
+                            state_value,
+                            default_hour,
+                        )
+        else:
+            sell_start_value = get_float_value(
+                hass, sell_start_entity, default=sell_start_hour
+            )
+            if sell_start_value is not None:
+                sell_start_hour = int(sell_start_value)
+            else:
+                _LOGGER.warning(
+                    "Sell window start sensor %s unavailable, using default %s",
+                    sell_start_entity,
+                    default_hour,
+                )
+    else:
+        _LOGGER.warning(
+            "Sell window start sensor not configured, using default %s",
+            default_hour,
+        )
+
+    if sell_start_hour < 0 or sell_start_hour > 23:
+        _LOGGER.warning(
+            "Sell window start hour %s out of range, using default %s",
+            sell_start_hour,
+            default_hour,
+        )
+        sell_start_hour = default_hour
+
+    return sell_start_hour

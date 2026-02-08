@@ -4,6 +4,8 @@
 
 Zapewnienie odpowiedniego poziomu energii w magazynie na wieczór i noc (do 22:00) poprzez planowanie ładowania z sieci po zakończeniu taryfy dziennej.
 
+Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w szczycie cenowym. Arbitraż jest aktywowany tylko, gdy cena sprzedaży przekracza `min_arbitrage_price`.
+
 ## Wyzwalacz
 
 - Godzina z sensora końca taryfy: `tariff_end_hour`
@@ -19,6 +21,9 @@ Zapewnienie odpowiedniego poziomu energii w magazynie na wieczór i noc (do 22:0
   - Zużycie Pompy Ciepła (integracja zewnętrzna)
   - Zużycie CWU (integracja zewnętrzna) - tymczasowo niedostępne
 - Przewidywana produkcja fotowoltaiczna (z integracją Solcast), z uwzględnieniem kompensacji prognozy na podstawie bieżącej produkcji (bez użycia współczynnika `pv_efficiency`)
+- `min_arbitrage_price` (PLN/kWh) – próg opłacalności arbitrażu
+- `pv_production_sensor` – rzeczywista produkcja PV do tej pory (kWh)
+- `pv_forecast_today` i `pv_forecast_remaining` – do urealnienia prognozy (na potrzeby arbitrażu)
 - Straty dzienne falownika
 - Sprawność magazynu (domyślnie 90%):
    - przy wyznaczaniu rezerwy uwzględnia straty **tylko na rozładowaniu**
@@ -41,6 +46,19 @@ Zapewnienie odpowiedniego poziomu energii w magazynie na wieczór i noc (do 22:0
 5. **Porównanie zapotrzebowanie vs dostępne źródła**:
    - Jeśli **rezerwa + prognoza PV >= zapotrzebowanie**: Brak akcji, energia wystarczy
    - Jeśli **deficyt > 0**: Oblicz ile energii załadować uwzględniając sprawność magazynu i zaplanuj doładowanie
+6. **Arbitraż (po wyznaczeniu deficytu)**:
+    - Jeśli `sell_price <= min_arbitrage_price` → brak arbitrażu
+    - Urealnij prognozę PV:
+       - `forecast_adjusted = pv_forecast_today * pv_production / (pv_forecast_today - pv_forecast_remaining)`
+       - Jeśli mianownik <= 0 lub brak danych → brak arbitrażu
+    - Wylicz bufor nadwyżek PV do okna sprzedaży:
+       - `surplus_kwh = sum(max(pv_forecast[h] - load_forecast[h], 0))` dla godzin od teraz do startu okna sprzedaży
+    - Oblicz wolne miejsce po ładowaniu podstawowym:
+       - `free_after = capacity_kwh - (current_energy_kwh + required_kwh)`
+    - Limit arbitrażu:
+       - `arb_limit = max(free_after - surplus_kwh, 0)`
+       - `arb_kwh = min(arb_limit, forecast_adjusted)`
+    - Jeśli `arb_kwh > 0` → dodaj do planu ładowania
 
 ### Szczegóły decyzyjne
 
@@ -57,6 +75,19 @@ Zapewnienie odpowiedniego poziomu energii w magazynie na wieczór i noc (do 22:0
 
 **Prognoza PV**: Suma prognozy z `detailedForecast` liczona dla okna `tariff_start_hour` → 22:00, z kompensacją prognozy (bez użycia `pv_efficiency`).
 
+### Arbitraż – wzory i ograniczenia
+
+- **Warunek aktywacji**: `sell_price > min_arbitrage_price`.
+- **Urealniona prognoza PV**:
+   - `forecast_adjusted = pv_forecast_today * pv_production / (pv_forecast_today - pv_forecast_remaining)`
+- **Bufor** (nadwyżka PV do okna sprzedaży):
+   - `surplus_kwh = sum(max(pv_forecast[h] - load_forecast[h], 0))`
+- **Wolne miejsce po ładowaniu podstawowym**:
+   - `free_after = capacity_kwh - (current_energy_kwh + required_kwh)`
+- **Limit arbitrażu**:
+   - `arb_limit = max(free_after - surplus_kwh, 0)`
+   - `arb_kwh = min(arb_limit, forecast_adjusted)`
+
 **Obliczanie prądu ładowania**: jak w porannym scenariuszu (algorytm wielofazowy z limitami prądu).
 
 ## Wpływ na maszynę stanów
@@ -67,6 +98,7 @@ Zapewnienie odpowiedniego poziomu energii w magazynie na wieczór i noc (do 22:0
 
 - Ustaw docelowy SOC programu 2 (ładowanie z sieci) na obliczoną wartość
 - Ustaw prąd ładowania z sieci na obliczoną wartość (okno do 22:00)
+- Uwzględnij arbitraż: docelowy SOC i prąd ładowania bazują na `required_kwh + arb_kwh`
 - Falownik automatycznie rozpocznie ładowanie do osiągnięcia docelowego SOC
 
 ## Obsługa błędów
@@ -77,6 +109,7 @@ Należy określić zachowanie systemu w przypadku:
 - Sensor `tariff_start_hour` jest niedostępny lub ma nieprawidłową wartość
 - Serwis `heat_pump_predictor.calculate_forecast_energy` nie odpowiada lub zwraca błąd
 - Sensor PV forecast jest niedostępny lub brak atrybutu prognozy
+- Brak/nieprawidłowe dane `pv_production_sensor`, `pv_forecast_today`, `pv_forecast_remaining` (arbitraż pominięty)
 
 Możliwe strategie:
 - Użycie wartości domyślnych/historycznych
@@ -87,5 +120,6 @@ Możliwe strategie:
 
 - Zaloguj typ decyzji: brak akcji / ładowanie zaplanowane
 - Zapisz kluczowe wejścia (rezerwa, zapotrzebowanie, deficyt, prognoza PV, docelowy SOC, prąd ładowania)
+- Zapisz parametry arbitrażu: `arb_kwh`, `forecast_adjusted`, `surplus_kwh`, powód braku arbitrażu (np. cena poniżej progu, brak danych, `arb_limit <= 0`)
 - Podaj krótkie uzasadnienie widoczne dla użytkownika
 - Użyj ujednoliconego systemu logowania `log_decision_unified` z pełnym kontekstem

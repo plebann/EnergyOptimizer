@@ -325,15 +325,7 @@ async def _handle_no_action(
     sufficiency_hour: int,
     sufficiency_reached: bool,
 ) -> None:
-    """Handle no-action path and ensure program SOC reset."""
-    await set_program_soc(
-        hass,
-        prog2_soc_entity,
-        min_soc,
-        entry=entry,
-        logger=_LOGGER,
-        context=integration_context,
-    )
+    """Handle no-action path."""
     outcome = _build_no_action_outcome(
         reserve_kwh=reserve_kwh,
         required_kwh=required_kwh,
@@ -346,10 +338,6 @@ async def _handle_no_action(
         sufficiency_hour=sufficiency_hour,
         sufficiency_reached=sufficiency_reached,
     )
-    if prog2_soc_value > min_soc:
-        outcome.entities_changed = [
-            {"entity_id": prog2_soc_entity, "value": min_soc}
-        ]
     await log_decision_unified(
         hass, entry, outcome, context=integration_context, logger=_LOGGER
     )

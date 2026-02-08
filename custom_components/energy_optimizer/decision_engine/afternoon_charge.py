@@ -4,11 +4,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from homeassistant.util import dt as dt_util
+
 from ..calculations.battery import (
     calculate_battery_reserve,
     calculate_charge_current,
     calculate_soc_delta,
     calculate_target_soc,
+    soc_to_kwh,
 )
 from ..calculations.energy import calculate_losses, hourly_demand
 from ..calculations.utils import build_hourly_usage_array
@@ -19,6 +22,11 @@ from ..const import (
     CONF_CHARGE_CURRENT_ENTITY,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
+    CONF_MIN_ARBITRAGE_PRICE,
+    CONF_PV_FORECAST_REMAINING,
+    CONF_PV_FORECAST_TODAY,
+    CONF_PV_PRODUCTION_SENSOR,
+    CONF_SELL_WINDOW_PRICE_SENSOR,
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
@@ -30,9 +38,14 @@ from ..decision_engine.common import (
     get_required_prog2_soc_state,
     resolve_entry,
 )
-from ..helpers import resolve_tariff_start_hour
+from ..helpers import (
+    get_required_float_state,
+    resolve_sell_window_start_hour,
+    resolve_tariff_start_hour,
+)
 from ..controllers.inverter import set_charge_current, set_program_soc
 from ..utils.forecast import async_get_forecasts
+from ..utils.pv_forecast import get_forecast_adjusted_kwh
 from ..utils.logging import DecisionOutcome, log_decision_unified
 
 if TYPE_CHECKING:
@@ -122,7 +135,32 @@ async def async_run_afternoon_charge(
 
     deficit_kwh = required_kwh - reserve_kwh - pv_forecast_kwh
 
-    if deficit_kwh <= 0.0:
+    arbitrage_kwh, arbitrage_details = _calculate_arbitrage_kwh(
+        hass,
+        config,
+        start_hour=start_hour,
+        end_hour=end_hour,
+        sell_start_hour=resolve_sell_window_start_hour(hass, config),
+        current_soc=current_soc,
+        capacity_ah=capacity_ah,
+        voltage=voltage,
+        required_kwh=required_kwh,
+        pv_forecast_hourly=pv_forecast_hourly,
+        heat_pump_hourly=heat_pump_hourly,
+        losses_hourly=losses_hourly,
+        hourly_usage=hourly_usage,
+        margin=margin,
+        min_arbitrage_price=config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0),
+        sell_price_entity=config.get(CONF_SELL_WINDOW_PRICE_SENSOR),
+        pv_forecast_today_entity=config.get(CONF_PV_FORECAST_TODAY),
+        pv_forecast_remaining_entity=config.get(CONF_PV_FORECAST_REMAINING),
+        pv_production_entity=config.get(CONF_PV_PRODUCTION_SENSOR),
+    )
+
+    base_deficit_kwh = max(deficit_kwh, 0.0)
+    total_deficit_kwh = base_deficit_kwh + arbitrage_kwh
+
+    if total_deficit_kwh <= 0.0:
         await _handle_no_action(
             hass,
             entry,
@@ -137,11 +175,14 @@ async def async_run_afternoon_charge(
             losses_kwh=losses_kwh,
             start_hour=start_hour,
             end_hour=end_hour,
+            arbitrage_details=arbitrage_details,
         )
         return
 
     deficit_to_charge_kwh = (
-        deficit_kwh / ((efficiency / 100.0) ** 2) if efficiency else deficit_kwh
+        total_deficit_kwh / ((efficiency / 100.0) ** 2)
+        if efficiency
+        else total_deficit_kwh
     )
     soc_delta = calculate_soc_delta(
         deficit_to_charge_kwh, capacity_ah=capacity_ah, voltage=voltage
@@ -179,6 +220,8 @@ async def async_run_afternoon_charge(
         reserve_kwh=reserve_kwh,
         deficit_to_charge_kwh=deficit_to_charge_kwh,
         deficit_raw_kwh=deficit_kwh,
+        arbitrage_kwh=arbitrage_kwh,
+        arbitrage_details=arbitrage_details,
         pv_forecast_kwh=pv_forecast_kwh,
         heat_pump_kwh=heat_pump_kwh,
         charge_current=charge_current,
@@ -207,6 +250,7 @@ def _build_no_action_outcome(
     losses_kwh: float,
     start_hour: int,
     end_hour: int,
+    arbitrage_details: dict[str, float | str] | None = None,
 ) -> DecisionOutcome:
     summary = "No action needed"
     return DecisionOutcome(
@@ -233,6 +277,7 @@ def _build_no_action_outcome(
             "losses_kwh": round(losses_kwh, 2),
             "start_hour": start_hour,
             "end_hour": end_hour,
+            **(arbitrage_details or {}),
         },
     )
 
@@ -252,6 +297,7 @@ async def _handle_no_action(
     losses_kwh: float,
     start_hour: int,
     end_hour: int,
+    arbitrage_details: dict[str, float | str] | None = None,
 ) -> None:
     """Handle no-action path and ensure program SOC reset."""
     await set_program_soc(
@@ -270,6 +316,7 @@ async def _handle_no_action(
         losses_kwh=losses_kwh,
         start_hour=start_hour,
         end_hour=end_hour,
+        arbitrage_details=arbitrage_details,
     )
     if prog2_soc_value > min_soc:
         outcome.entities_changed = [
@@ -287,6 +334,8 @@ def _build_charge_outcome(
     reserve_kwh: float,
     deficit_to_charge_kwh: float,
     deficit_raw_kwh: float,
+    arbitrage_kwh: float,
+    arbitrage_details: dict[str, float | str] | None,
     pv_forecast_kwh: float,
     heat_pump_kwh: float,
     charge_current: float,
@@ -305,7 +354,7 @@ def _build_charge_outcome(
         reason=(
             f"Deficit {deficit_to_charge_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
             f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh, "
-            f"current {charge_current:.0f} A"
+            f"arbitrage {arbitrage_kwh:.1f} kWh, current {charge_current:.0f} A"
         ),
         key_metrics={
             "target": f"{target_soc:.0f}%",
@@ -313,6 +362,7 @@ def _build_charge_outcome(
             "required": f"{required_kwh:.1f} kWh",
             "reserve": f"{reserve_kwh:.1f} kWh",
             "deficit": f"{deficit_to_charge_kwh:.1f} kWh",
+            "arbitrage": f"{arbitrage_kwh:.1f} kWh",
             "pv": f"{pv_forecast_kwh:.1f} kWh",
             "heat_pump": f"{heat_pump_kwh:.1f} kWh",
             "current": f"{charge_current:.0f} A",
@@ -325,6 +375,7 @@ def _build_charge_outcome(
             "required_kwh": round(required_kwh, 2),
             "deficit_kwh": round(deficit_to_charge_kwh, 2),
             "deficit_raw_kwh": round(deficit_raw_kwh, 2),
+            "arbitrage_kwh": round(arbitrage_kwh, 2),
             "losses_kwh": round(losses_kwh, 2),
             "pv_forecast_kwh": round(pv_forecast_kwh, 2),
             "heat_pump_kwh": round(heat_pump_kwh, 2),
@@ -333,5 +384,102 @@ def _build_charge_outcome(
             "margin": margin,
             "start_hour": start_hour,
             "end_hour": end_hour,
+            **(arbitrage_details or {}),
         },
     )
+
+
+def _calculate_arbitrage_kwh(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    start_hour: int,
+    end_hour: int,
+    sell_start_hour: int,
+    current_soc: float,
+    capacity_ah: float,
+    voltage: float,
+    required_kwh: float,
+    pv_forecast_hourly: dict[int, float],
+    heat_pump_hourly: dict[int, float],
+    losses_hourly: dict[int, float],
+    hourly_usage: dict[int, float],
+    margin: float,
+    min_arbitrage_price: float,
+    sell_price_entity: str | None,
+    pv_forecast_today_entity: str | None,
+    pv_forecast_remaining_entity: str | None,
+    pv_production_entity: str | None,
+) -> tuple[float, dict[str, float | str]]:
+    details: dict[str, float | str] = {
+        "arbitrage_reason": "not_applicable",
+    }
+
+    sell_price = get_required_float_state(
+        hass, sell_price_entity, entity_name="Sell window price"
+    )
+    if sell_price is None:
+        details["arbitrage_reason"] = "missing_sell_price"
+        return 0.0, details
+
+    details["sell_price"] = round(sell_price, 4)
+    details["min_arbitrage_price"] = round(float(min_arbitrage_price or 0.0), 4)
+    if sell_price <= float(min_arbitrage_price or 0.0):
+        details["arbitrage_reason"] = "sell_price_below_threshold"
+        return 0.0, details
+
+    forecast_adjusted, forecast_reason = get_forecast_adjusted_kwh(
+        hass,
+        config,
+        pv_forecast_today_entity=pv_forecast_today_entity,
+        pv_forecast_remaining_entity=pv_forecast_remaining_entity,
+        pv_production_entity=pv_production_entity,
+    )
+    if forecast_adjusted is None:
+        details["arbitrage_reason"] = forecast_reason or "invalid_forecast_adjustment"
+        return 0.0, details
+
+    capacity_kwh = soc_to_kwh(100.0, capacity_ah, voltage)
+    current_energy_kwh = soc_to_kwh(current_soc, capacity_ah, voltage)
+    free_after = capacity_kwh - (current_energy_kwh + required_kwh)
+
+    now_hour = dt_util.as_local(dt_util.utcnow()).hour
+    surplus_start = max(start_hour, now_hour)
+    surplus_end = min(sell_start_hour, end_hour)
+    if surplus_end <= surplus_start:
+        surplus_kwh = 0.0
+    else:
+        surplus_kwh = sum(
+            max(
+                pv_forecast_hourly.get(hour, 0.0)
+                - hourly_demand(
+                    hour,
+                    hourly_usage=hourly_usage,
+                    heat_pump_hourly=heat_pump_hourly,
+                    losses_hourly=losses_hourly,
+                    margin=margin,
+                ),
+                0.0,
+            )
+            for hour in range(surplus_start, surplus_end)
+        )
+
+    arb_limit = max(free_after - surplus_kwh, 0.0)
+    arbitrage_kwh = min(arb_limit, forecast_adjusted)
+
+    details.update(
+        {
+            "forecast_adjusted": round(forecast_adjusted, 2),
+            "surplus_kwh": round(surplus_kwh, 2),
+            "free_after_kwh": round(free_after, 2),
+            "arb_limit_kwh": round(arb_limit, 2),
+            "sell_window_start_hour": int(sell_start_hour),
+        }
+    )
+
+    if arbitrage_kwh <= 0:
+        details["arbitrage_reason"] = "arb_limit_zero"
+        return 0.0, details
+
+    details["arbitrage_reason"] = "enabled"
+    return arbitrage_kwh, details

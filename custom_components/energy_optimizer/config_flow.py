@@ -36,6 +36,7 @@ from .const import (
     CONF_LOAD_USAGE_20_24,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_MAX_SOC,
+    CONF_MIN_ARBITRAGE_PRICE,
     CONF_MIN_SOC,
     CONF_PRICE_SENSOR,
     CONF_PROG1_SOC_ENTITY,
@@ -57,6 +58,8 @@ from .const import (
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PEAK_FORECAST,
     CONF_PV_PRODUCTION_SENSOR,
+    CONF_SELL_WINDOW_PRICE_SENSOR,
+    CONF_SELL_WINDOW_START_SENSOR,
     CONF_TARIFF_START_HOUR_SENSOR,
     CONF_TARIFF_END_HOUR_SENSOR,
     CONF_TEST_MODE,
@@ -72,6 +75,7 @@ from .const import (
     DEFAULT_HEAT_PUMP_FORECAST_DOMAIN,
     DEFAULT_HEAT_PUMP_FORECAST_SERVICE,
     DEFAULT_MAX_SOC,
+    DEFAULT_MIN_ARBITRAGE_PRICE,
     DEFAULT_MIN_SOC,
     DEFAULT_PV_EFFICIENCY,
     DOMAIN,
@@ -127,6 +131,16 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(CONF_TOMORROW_PRICE_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_MIN_ARBITRAGE_PRICE,
+                    default=DEFAULT_MIN_ARBITRAGE_PRICE,
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+                vol.Optional(CONF_SELL_WINDOW_START_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(CONF_SELL_WINDOW_PRICE_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
             }
@@ -688,6 +702,24 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_TOMORROW_PRICE_SENSOR,
                     default=self._config_entry.data.get(CONF_TOMORROW_PRICE_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_MIN_ARBITRAGE_PRICE,
+                    default=self._config_entry.data.get(
+                        CONF_MIN_ARBITRAGE_PRICE, DEFAULT_MIN_ARBITRAGE_PRICE
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+                vol.Optional(
+                    CONF_SELL_WINDOW_START_SENSOR,
+                    default=self._config_entry.data.get(CONF_SELL_WINDOW_START_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(
+                    CONF_SELL_WINDOW_PRICE_SENSOR,
+                    default=self._config_entry.data.get(CONF_SELL_WINDOW_PRICE_SENSOR),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),

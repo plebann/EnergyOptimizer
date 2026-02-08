@@ -5,6 +5,9 @@ DOMAIN = "energy_optimizer"
 # Config flow steps
 CONF_PRICE_SENSOR = "price_sensor"
 CONF_TOMORROW_PRICE_SENSOR = "tomorrow_price_sensor"
+CONF_MIN_ARBITRAGE_PRICE = "min_arbitrage_price"
+CONF_SELL_WINDOW_START_SENSOR = "sell_window_start_sensor"
+CONF_SELL_WINDOW_PRICE_SENSOR = "sell_window_price_sensor"
 
 CONF_BATTERY_SOC_SENSOR = "battery_soc_sensor"
 CONF_BATTERY_POWER_SENSOR = "battery_power_sensor"
@@ -85,6 +88,7 @@ DEFAULT_BALANCING_INTERVAL_DAYS = 14
 DEFAULT_BALANCING_PV_THRESHOLD = 20.5
 DEFAULT_MAX_CHARGE_CURRENT = 23
 DEFAULT_PV_EFFICIENCY = 0.9
+DEFAULT_MIN_ARBITRAGE_PRICE = 0.0
 DEFAULT_HEAT_PUMP_FORECAST_DOMAIN = "heat_pump_predictor"
 DEFAULT_HEAT_PUMP_FORECAST_SERVICE = "calculate_forecast_energy"
 

@@ -21,6 +21,33 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
+def get_forecast_adjusted_kwh(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    pv_forecast_today_entity: str | None = None,
+    pv_forecast_remaining_entity: str | None = None,
+    pv_production_entity: str | None = None,
+) -> tuple[float | None, str | None]:
+    """Return adjusted PV forecast for today based on production progress."""
+    today_kwh, remaining_kwh, production_kwh, reason = _get_forecast_inputs(
+        hass,
+        config,
+        pv_forecast_today_entity=pv_forecast_today_entity,
+        pv_forecast_remaining_entity=pv_forecast_remaining_entity,
+        pv_production_entity=pv_production_entity,
+    )
+    if reason is not None:
+        return None, reason
+
+    forecast_adjusted, _factor, reason = _calculate_forecast_adjustment(
+        today_kwh,
+        remaining_kwh,
+        production_kwh,
+    )
+    return forecast_adjusted, reason
+
+
 def get_pv_forecast_kwh(
     hass: HomeAssistant,
     config: dict[str, object],
@@ -143,26 +170,69 @@ def _apply_pv_compensation(
     start_hour: int,
     end_hour: int,
 ) -> dict[int, float]:
-    remaining_sensor = config.get(CONF_PV_FORECAST_REMAINING)
-    today_sensor = config.get(CONF_PV_FORECAST_TODAY)
-    production_sensor = config.get(CONF_PV_PRODUCTION_SENSOR)
-    if not remaining_sensor or not today_sensor or not production_sensor:
+    today_kwh, remaining_kwh, production_kwh, reason = _get_forecast_inputs(
+        hass, config
+    )
+    if reason is not None:
         return hourly_kwh
+
+    _forecast_adjusted, factor, reason = _calculate_forecast_adjustment(
+        today_kwh,
+        remaining_kwh,
+        production_kwh,
+    )
+    if reason is not None or factor is None:
+        return hourly_kwh
+
+    factor = min(factor, 1.5)
+    return {hour: value * factor for hour, value in hourly_kwh.items()}
+
+
+def _calculate_forecast_adjustment(
+    today_kwh: float,
+    remaining_kwh: float,
+    production_kwh: float,
+) -> tuple[float | None, float | None, str | None]:
+    expected_kwh = today_kwh - remaining_kwh
+    if expected_kwh <= 0:
+        return None, None, "invalid_denominator"
+    if production_kwh <= 0:
+        return None, None, "invalid_production"
+    factor = production_kwh / expected_kwh
+    forecast_adjusted = today_kwh * factor
+    return forecast_adjusted, factor, None
+
+
+def _get_forecast_inputs(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    pv_forecast_today_entity: str | None = None,
+    pv_forecast_remaining_entity: str | None = None,
+    pv_production_entity: str | None = None,
+) -> tuple[float | None, float | None, float | None, str | None]:
+    remaining_sensor = pv_forecast_remaining_entity or config.get(
+        CONF_PV_FORECAST_REMAINING
+    )
+    today_sensor = pv_forecast_today_entity or config.get(CONF_PV_FORECAST_TODAY)
+    production_sensor = pv_production_entity or config.get(CONF_PV_PRODUCTION_SENSOR)
+    if not remaining_sensor or not today_sensor or not production_sensor:
+        return None, None, None, "missing_sensor"
 
     remaining_state = hass.states.get(remaining_sensor)
     if remaining_state is None:
         _LOGGER.warning("PV remaining forecast sensor %s unavailable", remaining_sensor)
-        return hourly_kwh
+        return None, None, None, "missing_remaining"
 
     today_state = hass.states.get(today_sensor)
     if today_state is None:
         _LOGGER.warning("PV forecast today sensor %s unavailable", today_sensor)
-        return hourly_kwh
+        return None, None, None, "missing_today"
 
     production_state = hass.states.get(production_sensor)
     if production_state is None:
         _LOGGER.warning("PV production sensor %s unavailable", production_sensor)
-        return hourly_kwh
+        return None, None, None, "missing_production"
 
     try:
         remaining_kwh = float(remaining_state.state)
@@ -172,7 +242,7 @@ def _apply_pv_compensation(
             remaining_sensor,
             remaining_state.state,
         )
-        return hourly_kwh
+        return None, None, None, "invalid_remaining"
 
     try:
         today_kwh = float(today_state.state)
@@ -182,7 +252,7 @@ def _apply_pv_compensation(
             today_sensor,
             today_state.state,
         )
-        return hourly_kwh
+        return None, None, None, "invalid_today"
 
     try:
         production_kwh = float(production_state.state)
@@ -192,12 +262,6 @@ def _apply_pv_compensation(
             production_sensor,
             production_state.state,
         )
-        return hourly_kwh
+        return None, None, None, "invalid_production"
 
-    expected_kwh = today_kwh - remaining_kwh
-    if expected_kwh <= 0 or production_kwh <= 0:
-        return hourly_kwh
-
-    factor = production_kwh / expected_kwh
-    factor = min(factor, 1.5)
-    return {hour: value * factor for hour, value in hourly_kwh.items()}
+    return today_kwh, remaining_kwh, production_kwh, None
