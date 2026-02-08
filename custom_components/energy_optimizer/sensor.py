@@ -552,8 +552,7 @@ class MaxSocSensor(EnergyOptimizerSensor):
 class TestModeSensor(EnergyOptimizerSensor):
     """Sensor showing whether test mode is enabled."""
 
-    _attr_has_entity_name = False
-    _attr_name = None
+    _attr_has_entity_name = True
     _attr_translation_key = "test_mode"
     _attr_unique_id = "test_mode"
     _attr_icon = "mdi:test-tube"
