@@ -12,9 +12,11 @@ Energy Optimizer is a Home Assistant custom integration focused on price-aware b
    - Battery Preservation: if PV forecast × 0.9 is lower than available battery space, lock program SOC 1 and 6 to the current SOC (bounded by min SOC) to avoid inefficient cycling. Program 2 is intentionally untouched here because a separate 04:00 optimization will manage it.
    - Normal Operation: if previously locked and conditions improve, restore program SOCs 1/2/6 to min SOC.
    - If none of the above match, no changes are made.
+   - PV forecast compensation sensor is refreshed here (today → yesterday, update today values, recalc factor).
    - Balancing completion is stamped only after SOC stays ≥97% for 2 hours; schedule `check_and_update_balancing_completion` periodically (e.g., every 5 minutes) to advance the timestamp.
 - Balancing completion check: every 5 minutes, stamps last balancing when SOC stays ≥97% for 2 hours.
 - Morning grid charge: at 04:00 (trigger via automation), if Program 2 SOC < 100% and battery reserve is below required morning energy (06:00-13:00), set Program 2 SOC to cover the deficit using windowed load sensors and daily losses.
+- Afternoon grid charge: after tariff end, size Program 2 SOC to cover evening demand and optional arbitrage window.
 
 ## Behavior Notes
 
@@ -24,11 +26,12 @@ Energy Optimizer is a Home Assistant custom integration focused on price-aware b
 ## What’s Included
 
 - Platforms: Sensor only.
-- Services: morning_grid_charge, overnight_schedule.
+- Services: morning_grid_charge, afternoon_grid_charge, overnight_schedule.
 - Sensors:
   - Battery: battery_reserve, battery_space, battery_capacity, usable_capacity
   - Config values: battery_capacity_ah, battery_voltage_config, battery_efficiency_config, min_soc_config, max_soc_config
-  - Tracking: last_balancing_timestamp, last_optimization, optimization_history
+   - Tracking: last_balancing_timestamp, last_optimization, optimization_history
+   - Forecast: pv_forecast_compensation
 
 ## Configuration (UI-Only)
 
