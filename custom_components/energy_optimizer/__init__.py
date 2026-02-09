@@ -121,4 +121,4 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options updates for a config entry."""
-    await async_reload_entry(hass, entry)
+    hass.async_create_task(async_reload_entry(hass, entry))
