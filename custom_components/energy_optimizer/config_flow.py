@@ -136,7 +136,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_MIN_ARBITRAGE_PRICE,
                     default=DEFAULT_MIN_ARBITRAGE_PRICE,
-                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0)),
                 vol.Optional(CONF_SELL_WINDOW_START_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),

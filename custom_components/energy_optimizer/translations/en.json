@@ -11,16 +11,16 @@
         "data": {
           "price_sensor": "Current Price Sensor",
           "tomorrow_price_sensor": "Tomorrow Price Sensor (Optional)",
-          "min_arbitrage_price": "Minimum Arbitrage Price (PLN/kWh)",
+          "min_arbitrage_price": "Minimum Arbitrage Price (PLN/MWh)",
           "sell_window_start_sensor": "Sell Window Start (Optional)",
           "sell_window_price_sensor": "Sell Window Price (Optional)"
         },
         "data_description": {
-          "price_sensor": "Sensor providing current electricity price",
-          "tomorrow_price_sensor": "Sensor providing tomorrow's price data",
-          "min_arbitrage_price": "Do not perform arbitrage below this price (PLN/kWh)",
+          "price_sensor": "Sensor providing current electricity price (PLN/MWh)",
+          "tomorrow_price_sensor": "Sensor providing tomorrow's price data (PLN/MWh)",
+          "min_arbitrage_price": "Do not perform arbitrage below this price (PLN/MWh)",
           "sell_window_start_sensor": "Start time of the selling window (input_datetime or time sensor)",
-          "sell_window_price_sensor": "Price at the selling window peak (PLN/kWh)"
+          "sell_window_price_sensor": "Price at the selling window peak (PLN/MWh)"
         }
       },
       "battery_sensors": {
@@ -182,16 +182,16 @@
         "data": {
           "price_sensor": "Current Price Sensor",
           "tomorrow_price_sensor": "Tomorrow Price Sensor (Optional)",
-          "min_arbitrage_price": "Minimum Arbitrage Price (PLN/kWh)",
+          "min_arbitrage_price": "Minimum Arbitrage Price (PLN/MWh)",
           "sell_window_start_sensor": "Sell Window Start (Optional)",
           "sell_window_price_sensor": "Sell Window Price (Optional)"
         },
         "data_description": {
-          "price_sensor": "Sensor providing current electricity price",
-          "tomorrow_price_sensor": "Sensor providing tomorrow's price data",
-          "min_arbitrage_price": "Do not perform arbitrage below this price (PLN/kWh)",
+          "price_sensor": "Sensor providing current electricity price (PLN/MWh)",
+          "tomorrow_price_sensor": "Sensor providing tomorrow's price data (PLN/MWh)",
+          "min_arbitrage_price": "Do not perform arbitrage below this price (PLN/MWh)",
           "sell_window_start_sensor": "Start time of the selling window (input_datetime or time sensor)",
-          "sell_window_price_sensor": "Price at the selling window peak (PLN/kWh)"
+          "sell_window_price_sensor": "Price at the selling window peak (PLN/MWh)"
         }
       },
       "init": {
