@@ -234,6 +234,9 @@
     "sensor": {
       "test_mode": {
         "name": "Test mode"
+      },
+      "pv_forecast_compensation": {
+        "name": "PV forecast compensation"
       }
     }
   }

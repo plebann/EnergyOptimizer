@@ -18,7 +18,9 @@ from ..const import (
     CONF_PROG1_SOC_ENTITY,
     CONF_PROG2_SOC_ENTITY,
     CONF_PROG6_SOC_ENTITY,
+    CONF_PV_FORECAST_TODAY,
     CONF_PV_FORECAST_TOMORROW,
+    CONF_PV_PRODUCTION_SENSOR,
     DEFAULT_BALANCING_INTERVAL_DAYS,
     DEFAULT_BALANCING_PV_THRESHOLD,
     DEFAULT_MAX_CHARGE_CURRENT,
@@ -52,6 +54,83 @@ async def async_run_evening_behavior(
     if entry is None:
         return
     config = entry.data
+
+    pv_compensation_sensor = None
+    if (
+        DOMAIN in hass.data
+        and entry.entry_id in hass.data[DOMAIN]
+        and isinstance(hass.data[DOMAIN][entry.entry_id], dict)
+    ):
+        pv_compensation_sensor = hass.data[DOMAIN][entry.entry_id].get(
+            "pv_forecast_compensation_sensor"
+        )
+
+    pv_compensation_details: dict[str, float | None] = {}
+    if pv_compensation_sensor is not None:
+
+        def _coerce(value: object | None) -> float | None:
+            if value is None:
+                return None
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return None
+
+        previous_attrs = pv_compensation_sensor.extra_state_attributes or {}
+        forecast_yesterday = _coerce(previous_attrs.get("forecast_today_kwh"))
+        production_yesterday = _coerce(previous_attrs.get("production_today_kwh"))
+
+        forecast_today = None
+        forecast_today_entity = config.get(CONF_PV_FORECAST_TODAY)
+        if forecast_today_entity:
+            forecast_value, forecast_raw, forecast_error = get_float_state_info(
+                hass, forecast_today_entity
+            )
+            if forecast_error is None and forecast_value is not None:
+                forecast_today = forecast_value
+            elif forecast_error == "invalid":
+                _LOGGER.warning(
+                    "Could not parse PV forecast today: %s", forecast_raw
+                )
+
+        production_today = None
+        production_entity = config.get(CONF_PV_PRODUCTION_SENSOR)
+        if production_entity:
+            production_value, production_raw, production_error = get_float_state_info(
+                hass, production_entity
+            )
+            if production_error is None and production_value is not None:
+                production_today = production_value
+            elif production_error == "invalid":
+                _LOGGER.warning(
+                    "Could not parse PV production today: %s", production_raw
+                )
+
+        pv_compensation_sensor.update_compensation(
+            forecast_today_kwh=forecast_today,
+            production_today_kwh=production_today,
+            forecast_yesterday_kwh=forecast_yesterday,
+            production_yesterday_kwh=production_yesterday,
+        )
+
+        updated_attrs = pv_compensation_sensor.extra_state_attributes or {}
+        pv_compensation_details = {
+            "pv_compensation_factor": (
+                float(pv_compensation_sensor.native_value)
+                if pv_compensation_sensor.native_value is not None
+                else None
+            ),
+            "pv_comp_forecast_today_kwh": updated_attrs.get("forecast_today_kwh"),
+            "pv_comp_production_today_kwh": updated_attrs.get(
+                "production_today_kwh"
+            ),
+            "pv_comp_forecast_yesterday_kwh": updated_attrs.get(
+                "forecast_yesterday_kwh"
+            ),
+            "pv_comp_production_yesterday_kwh": updated_attrs.get(
+                "production_yesterday_kwh"
+            ),
+        }
 
     # Program SOC entity IDs reused across scenarios
     prog1_soc = config.get(CONF_PROG1_SOC_ENTITY)
@@ -160,6 +239,7 @@ async def async_run_evening_behavior(
                 "threshold_kwh": balancing_pv_threshold,
                 "target_soc": max_soc,
                 "days_since_last": days_since_balancing,
+                **pv_compensation_details,
             },
             entities_changed=[
                 {"entity_id": prog1_soc, "value": max_soc},
@@ -241,6 +321,7 @@ async def async_run_evening_behavior(
                 "battery_space_kwh": round(battery_space, 2),
                 "current_soc": round(current_soc, 1),
                 "target_soc": round(current_soc, 1),
+                **pv_compensation_details,
             },
             entities_changed=[
                 {"entity_id": prog1_soc, "value": current_soc},
@@ -298,6 +379,7 @@ async def async_run_evening_behavior(
                 "previous_soc": round(current_prog6_soc, 1),
                 "target_soc": min_soc,
                 "pv_forecast_kwh": round(pv_forecast, 2),
+                **pv_compensation_details,
             },
             entities_changed=[
                 {"entity_id": prog1_soc, "value": min_soc},
@@ -325,6 +407,7 @@ async def async_run_evening_behavior(
             "pv_forecast_kwh": round(pv_forecast, 2),
             "battery_space_kwh": round(battery_space, 2) if battery_space else 0,
             "target_soc": round(current_soc, 1) if current_soc else 0,
+            **pv_compensation_details,
         },
     )
     await log_decision_unified(

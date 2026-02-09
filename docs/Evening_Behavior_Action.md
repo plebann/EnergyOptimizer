@@ -12,6 +12,7 @@ Zapobieganie nieefektywnemu rozładowaniu magazynu w nocy oraz wymuszenie pełne
 
 - Sprawdzenie flagi balansowania oraz kiedy została ustawiona
 - Prognoza PV na jutro (po korekcie sprawności)
+- Aktualna prognoza PV i bieżąca produkcja PV (do aktualizacji sensora kompensacji)
 - Aktualny SOC i dostępna pojemność
 - Polityki SOC (limity minimalne/maksymalne)
 - Przewidywane zapotrzebowanie na energię elektryczną
@@ -20,6 +21,7 @@ Zapobieganie nieefektywnemu rozładowaniu magazynu w nocy oraz wymuszenie pełne
 ## Przebieg decyzji (wysoki poziom)
 
 1. **Sprawdzenie potrzeby balansowania**: Czy flaga balansowania jest ustawiona oraz kiedy została ustawiona
+1a. **Aktualizacja sensora kompensacji PV**: Przepisz wartości „dzisiaj” do „wczoraj”, zapisz bieżącą prognozę i produkcję PV jako „dzisiaj”, zaktualizuj wartość sensora.
 2. **Balansowanie wymagane**: Wejdź w tryb balansowania i ustaw cel pełnego SOC (100%) na noc (czyli program 6, 1 i 2)
 3. **Balansowanie niewymagane**: Oceń zapas energii w magazynie w porównaniu z przewidywanym zapotrzebowaniem oraz prognozą PV na następny dzień.
 4. **Niewystarczający zapas energii w magazynie**: Zamroź SOC, aby uniknąć rozładowania w nocy (ustaw minimalny SOC równy bieżącemu SOC w programie 6 i 1).

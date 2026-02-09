@@ -81,6 +81,7 @@ async def async_setup_entry(
         MinSocSensor(coordinator, config_entry, config),
         MaxSocSensor(coordinator, config_entry, config),
         TestModeSensor(coordinator, config_entry, config),
+        PvForecastCompensationSensor(coordinator, config_entry, config),
     ]
 
     # Add last balancing timestamp sensor
@@ -114,6 +115,13 @@ async def async_setup_entry(
     hass.data[DOMAIN][config_entry.entry_id][
         "optimization_history_sensor"
     ] = optimization_history_sensor
+    hass.data[DOMAIN][config_entry.entry_id][
+        "pv_forecast_compensation_sensor"
+    ] = next(
+        sensor
+        for sensor in sensors
+        if isinstance(sensor, PvForecastCompensationSensor)
+    )
 
     if "listeners" not in hass.data[DOMAIN][config_entry.entry_id]:
         hass.data[DOMAIN][config_entry.entry_id]["listeners"] = []
@@ -562,6 +570,104 @@ class TestModeSensor(EnergyOptimizerSensor):
     def native_value(self) -> bool:
         """Return whether test mode is enabled."""
         return is_test_mode(self.config_entry)
+
+
+class PvForecastCompensationSensor(EnergyOptimizerSensor, RestoreSensor):
+    """Sensor storing PV forecast compensation ratio and inputs."""
+
+    _attr_translation_key = "pv_forecast_compensation"
+    _attr_unique_id = "pv_forecast_compensation"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_value: float | None = None
+    _attr_extra_state_attributes: dict[str, Any] = {}
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last state and attributes."""
+        await super().async_added_to_hass()
+
+        if (last_state := await self.async_get_last_state()) is not None:
+            try:
+                self._attr_native_value = float(last_state.state)
+            except (ValueError, TypeError):
+                self._attr_native_value = None
+
+            restored_attrs = dict(last_state.attributes or {})
+            self._attr_extra_state_attributes = {
+                "forecast_yesterday_kwh": restored_attrs.get(
+                    "forecast_yesterday_kwh"
+                ),
+                "forecast_today_kwh": restored_attrs.get("forecast_today_kwh"),
+                "production_yesterday_kwh": restored_attrs.get(
+                    "production_yesterday_kwh"
+                ),
+                "production_today_kwh": restored_attrs.get(
+                    "production_today_kwh"
+                ),
+            }
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current compensation ratio."""
+        return self._attr_native_value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        return self._attr_extra_state_attributes
+
+    def update_compensation(
+        self,
+        *,
+        forecast_today_kwh: float | None,
+        production_today_kwh: float | None,
+        forecast_yesterday_kwh: float | None,
+        production_yesterday_kwh: float | None,
+    ) -> None:
+        """Update attributes and recompute compensation factor."""
+
+        def _ratio(production: float | None, forecast: float | None) -> float | None:
+            if production is None or forecast is None:
+                return None
+            if forecast <= 0 or production < 0:
+                return None
+            return production / forecast
+
+        ratio_today = _ratio(production_today_kwh, forecast_today_kwh)
+        ratio_yesterday = _ratio(production_yesterday_kwh, forecast_yesterday_kwh)
+
+        if ratio_today is not None and ratio_yesterday is not None:
+            factor = (ratio_yesterday + ratio_today * 2.0) / 3.0
+        elif ratio_today is not None:
+            factor = ratio_today
+        elif ratio_yesterday is not None:
+            factor = ratio_yesterday
+        else:
+            factor = None
+
+        self._attr_native_value = round(factor, 4) if factor is not None else None
+        self._attr_extra_state_attributes = {
+            "forecast_yesterday_kwh": (
+                round(forecast_yesterday_kwh, 2)
+                if forecast_yesterday_kwh is not None
+                else None
+            ),
+            "forecast_today_kwh": (
+                round(forecast_today_kwh, 2)
+                if forecast_today_kwh is not None
+                else None
+            ),
+            "production_yesterday_kwh": (
+                round(production_yesterday_kwh, 2)
+                if production_yesterday_kwh is not None
+                else None
+            ),
+            "production_today_kwh": (
+                round(production_today_kwh, 2)
+                if production_today_kwh is not None
+                else None
+            ),
+        }
+        self.async_write_ha_state()
 
 
 class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):

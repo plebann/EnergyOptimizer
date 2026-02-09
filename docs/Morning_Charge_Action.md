@@ -20,6 +20,7 @@ Zapewnienie wystarczającej ilości energii w magazynie na pokrycie zapotrzebowa
   - Zużycie CWU (integracja zewnętrzna) - tymczasowo niedostępne
 - Przewidywana produkcja fotowoltaiczna (z integracją Solcast)
 - Współczynnik wydajności PV (domyślnie 0.9)
+- Współczynnik kompensacji PV (sensor: PV Forecast Compensation)
 - Straty dzienne falownika
 - Sprawność magazynu (domyślnie 90%)
 - Margines bezpieczeństwa (domyślnie 1.1 = +10%)
@@ -52,7 +53,7 @@ Zapewnienie wystarczającej ilości energii w magazynie na pokrycie zapotrzebowa
 
 **Sprawność magazynu**: Jeśli załaduję 1 kWh, rozładuję tylko 0.9 kWh. Dlatego aby uzyskać wymaganą energię, trzeba załadować więcej: `wymagane / 0.9`
 
-**Prognoza PV**: Suma prognozy z `detailedForecast` jest liczona dla okna 6:00–koniec taryfy i następnie mnożona przez współczynnik wydajności PV.
+**Prognoza PV**: Suma prognozy z `detailedForecast` jest liczona dla okna 6:00–koniec taryfy, korygowana kompensacją PV (średnia z kompensacji „dzisiejszej” i z sensora PV Forecast Compensation), a następnie mnożona przez współczynnik wydajności PV.
 
 **Godzina wystarczalności PV (nowe)**:
 1. Dla każdej godziny okna 6:00–koniec taryfy wyznacz godzinowe zapotrzebowanie: zużycie_domowe + zużycie_PC + straty (z marginesem).

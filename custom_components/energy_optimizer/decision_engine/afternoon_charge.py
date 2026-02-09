@@ -27,6 +27,7 @@ from ..const import (
     CONF_PV_FORECAST_TODAY,
     CONF_PV_PRODUCTION_SENSOR,
     CONF_SELL_WINDOW_PRICE_SENSOR,
+    DOMAIN,
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
@@ -111,6 +112,7 @@ async def async_run_afternoon_charge(
             end_hour=end_hour,
             apply_pv_efficiency=False,
             pv_compensate=True,
+            entry_id=entry.entry_id,
         )
     )
 
@@ -129,9 +131,13 @@ async def async_run_afternoon_charge(
         for hour in range(start_hour, end_hour)
     )
 
+    usage_kwh = sum(hourly_usage[hour] for hour in range(start_hour, end_hour))
+
     if required_kwh <= 0.0:
         _LOGGER.info("Required afternoon energy is zero or negative, skipping")
         return
+
+    pv_compensation_factor = _get_pv_compensation_factor(hass, entry.entry_id)
 
     deficit_kwh = required_kwh - reserve_kwh - pv_forecast_kwh
 
@@ -155,6 +161,7 @@ async def async_run_afternoon_charge(
         pv_forecast_today_entity=config.get(CONF_PV_FORECAST_TODAY),
         pv_forecast_remaining_entity=config.get(CONF_PV_FORECAST_REMAINING),
         pv_production_entity=config.get(CONF_PV_PRODUCTION_SENSOR),
+        entry_id=entry.entry_id,
     )
 
     base_deficit_kwh = max(deficit_kwh, 0.0)
@@ -176,6 +183,8 @@ async def async_run_afternoon_charge(
             start_hour=start_hour,
             end_hour=end_hour,
             arbitrage_details=arbitrage_details,
+            usage_kwh=usage_kwh,
+            pv_compensation_factor=pv_compensation_factor,
         )
         return
 
@@ -231,6 +240,8 @@ async def async_run_afternoon_charge(
         margin=margin,
         start_hour=start_hour,
         end_hour=end_hour,
+        usage_kwh=usage_kwh,
+        pv_compensation_factor=pv_compensation_factor,
     )
     outcome.entities_changed = [
         {"entity_id": prog2_soc_entity, "value": target_soc},
@@ -250,6 +261,8 @@ def _build_no_action_outcome(
     losses_kwh: float,
     start_hour: int,
     end_hour: int,
+    usage_kwh: float,
+    pv_compensation_factor: float | None,
     arbitrage_details: dict[str, float | str] | None = None,
 ) -> DecisionOutcome:
     summary = "No action needed"
@@ -272,7 +285,13 @@ def _build_no_action_outcome(
         full_details={
             "reserve_kwh": round(reserve_kwh, 2),
             "required_kwh": round(required_kwh, 2),
+            "usage_kwh": round(usage_kwh, 2),
             "pv_forecast_kwh": round(pv_forecast_kwh, 2),
+            "pv_compensation_factor": (
+                round(pv_compensation_factor, 4)
+                if pv_compensation_factor is not None
+                else None
+            ),
             "heat_pump_kwh": round(heat_pump_kwh, 2),
             "losses_kwh": round(losses_kwh, 2),
             "start_hour": start_hour,
@@ -297,6 +316,8 @@ async def _handle_no_action(
     losses_kwh: float,
     start_hour: int,
     end_hour: int,
+    usage_kwh: float,
+    pv_compensation_factor: float | None,
     arbitrage_details: dict[str, float | str] | None = None,
 ) -> None:
     """Handle no-action path and ensure program SOC reset."""
@@ -316,6 +337,8 @@ async def _handle_no_action(
         losses_kwh=losses_kwh,
         start_hour=start_hour,
         end_hour=end_hour,
+        usage_kwh=usage_kwh,
+        pv_compensation_factor=pv_compensation_factor,
         arbitrage_details=arbitrage_details,
     )
     if prog2_soc_value > min_soc:
@@ -345,6 +368,8 @@ def _build_charge_outcome(
     margin: float,
     start_hour: int,
     end_hour: int,
+    usage_kwh: float,
+    pv_compensation_factor: float | None,
 ) -> DecisionOutcome:
     summary = f"Battery scheduled to charge to {target_soc:.0f}%"
     return DecisionOutcome(
@@ -373,11 +398,17 @@ def _build_charge_outcome(
             "current_soc": round(current_soc, 1),
             "reserve_kwh": round(reserve_kwh, 2),
             "required_kwh": round(required_kwh, 2),
+            "usage_kwh": round(usage_kwh, 2),
             "deficit_kwh": round(deficit_to_charge_kwh, 2),
             "deficit_raw_kwh": round(deficit_raw_kwh, 2),
             "arbitrage_kwh": round(arbitrage_kwh, 2),
             "losses_kwh": round(losses_kwh, 2),
             "pv_forecast_kwh": round(pv_forecast_kwh, 2),
+            "pv_compensation_factor": (
+                round(pv_compensation_factor, 4)
+                if pv_compensation_factor is not None
+                else None
+            ),
             "heat_pump_kwh": round(heat_pump_kwh, 2),
             "charge_current_a": round(charge_current, 1),
             "efficiency": round(efficiency, 1),
@@ -387,6 +418,23 @@ def _build_charge_outcome(
             **(arbitrage_details or {}),
         },
     )
+
+
+def _get_pv_compensation_factor(
+    hass: HomeAssistant, entry_id: str
+) -> float | None:
+    if DOMAIN not in hass.data or entry_id not in hass.data[DOMAIN]:
+        return None
+    sensor = hass.data[DOMAIN][entry_id].get("pv_forecast_compensation_sensor")
+    if sensor is None:
+        return None
+    value = getattr(sensor, "native_value", None)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
 
 
 def _calculate_arbitrage_kwh(
@@ -410,6 +458,7 @@ def _calculate_arbitrage_kwh(
     pv_forecast_today_entity: str | None,
     pv_forecast_remaining_entity: str | None,
     pv_production_entity: str | None,
+    entry_id: str | None = None,
 ) -> tuple[float, dict[str, float | str]]:
     details: dict[str, float | str] = {
         "arbitrage_reason": "not_applicable",
@@ -434,6 +483,7 @@ def _calculate_arbitrage_kwh(
         pv_forecast_today_entity=pv_forecast_today_entity,
         pv_forecast_remaining_entity=pv_forecast_remaining_entity,
         pv_production_entity=pv_production_entity,
+        entry_id=entry_id,
     )
     if forecast_adjusted is None:
         details["arbitrage_reason"] = forecast_reason or "invalid_forecast_adjustment"

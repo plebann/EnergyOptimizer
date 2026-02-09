@@ -21,6 +21,7 @@ Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w
   - Zużycie Pompy Ciepła (integracja zewnętrzna)
   - Zużycie CWU (integracja zewnętrzna) - tymczasowo niedostępne
 - Przewidywana produkcja fotowoltaiczna (z integracją Solcast), z uwzględnieniem kompensacji prognozy na podstawie bieżącej produkcji (bez użycia współczynnika `pv_efficiency`)
+- Współczynnik kompensacji PV (sensor: PV Forecast Compensation) — uśredniany z kompensacją „dzisiejszą”
 - `min_arbitrage_price` (PLN/kWh) – próg opłacalności arbitrażu
 - `pv_production_sensor` – rzeczywista produkcja PV do tej pory (kWh)
 - `pv_forecast_today` i `pv_forecast_remaining` – do urealnienia prognozy (na potrzeby arbitrażu)
@@ -73,7 +74,7 @@ Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w
 - Dla rezerwy (energia dostępna z magazynu): jeśli w magazynie jest 1 kWh, rozładuję 0.9 kWh → uwzględniamy **tylko** straty rozładowania.
 - Dla energii do załadowania: aby uzyskać wymaganą energię po rozładowaniu, trzeba załadować więcej z uwzględnieniem strat ładowania i rozładowania, np. `wymagane / (0.9 × 0.9)`.
 
-**Prognoza PV**: Suma prognozy z `detailedForecast` liczona dla okna `tariff_start_hour` → 22:00, z kompensacją prognozy (bez użycia `pv_efficiency`).
+**Prognoza PV**: Suma prognozy z `detailedForecast` liczona dla okna `tariff_start_hour` → 22:00, z kompensacją prognozy (średnia z kompensacji „dzisiejszej” i z sensora PV Forecast Compensation, bez użycia `pv_efficiency`).
 
 ### Arbitraż – wzory i ograniczenia
 

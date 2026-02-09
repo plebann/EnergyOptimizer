@@ -13,6 +13,7 @@ from ..const import (
     CONF_PV_FORECAST_TODAY,
     CONF_PV_PRODUCTION_SENSOR,
     DEFAULT_PV_EFFICIENCY,
+    DOMAIN,
 )
 
 if TYPE_CHECKING:
@@ -28,6 +29,7 @@ def get_forecast_adjusted_kwh(
     pv_forecast_today_entity: str | None = None,
     pv_forecast_remaining_entity: str | None = None,
     pv_production_entity: str | None = None,
+    entry_id: str | None = None,
 ) -> tuple[float | None, str | None]:
     """Return adjusted PV forecast for today based on production progress."""
     today_kwh, remaining_kwh, production_kwh, reason = _get_forecast_inputs(
@@ -40,12 +42,21 @@ def get_forecast_adjusted_kwh(
     if reason is not None:
         return None, reason
 
-    forecast_adjusted, _factor, reason = _calculate_forecast_adjustment(
+    forecast_adjusted, factor_today, reason = _calculate_forecast_adjustment(
         today_kwh,
         remaining_kwh,
         production_kwh,
     )
-    return forecast_adjusted, reason
+    if reason is not None or factor_today is None:
+        return None, reason
+
+    factor_sensor = _get_sensor_compensation_factor(hass, entry_id)
+    factor_combined = _combine_compensation_factors(factor_today, factor_sensor)
+    if factor_combined is None:
+        return None, "missing_compensation"
+
+    forecast_adjusted = today_kwh * factor_combined
+    return forecast_adjusted, None
 
 
 def get_pv_forecast_kwh(
@@ -56,6 +67,7 @@ def get_pv_forecast_kwh(
     end_hour: int,
     apply_efficiency: bool = True,
     compensate: bool = False,
+    entry_id: str | None = None,
 ) -> float:
     """Return PV forecast energy between start and end hour."""
     hourly_values = get_pv_forecast_hourly_kwh(
@@ -65,6 +77,7 @@ def get_pv_forecast_kwh(
         end_hour=end_hour,
         apply_efficiency=apply_efficiency,
         compensate=compensate,
+        entry_id=entry_id,
     )
     return sum(hourly_values.values())
 
@@ -77,6 +90,7 @@ def get_pv_forecast_hourly_kwh(
     end_hour: int,
     apply_efficiency: bool = True,
     compensate: bool = False,
+    entry_id: str | None = None,
 ) -> dict[int, float]:
     """Return PV forecast energy per hour between start and end hour."""
     hourly_kwh = _collect_pv_forecast_hourly_kwh(
@@ -85,7 +99,12 @@ def get_pv_forecast_hourly_kwh(
 
     if compensate:
         hourly_kwh = _apply_pv_compensation(
-            hass, config, hourly_kwh, start_hour=start_hour, end_hour=end_hour
+            hass,
+            config,
+            hourly_kwh,
+            start_hour=start_hour,
+            end_hour=end_hour,
+            entry_id=entry_id,
         )
 
     if apply_efficiency:
@@ -169,6 +188,7 @@ def _apply_pv_compensation(
     *,
     start_hour: int,
     end_hour: int,
+    entry_id: str | None = None,
 ) -> dict[int, float]:
     today_kwh, remaining_kwh, production_kwh, reason = _get_forecast_inputs(
         hass, config
@@ -176,16 +196,52 @@ def _apply_pv_compensation(
     if reason is not None:
         return hourly_kwh
 
-    _forecast_adjusted, factor, reason = _calculate_forecast_adjustment(
+    _forecast_adjusted, factor_today, reason = _calculate_forecast_adjustment(
         today_kwh,
         remaining_kwh,
         production_kwh,
     )
-    if reason is not None or factor is None:
+    if reason is not None or factor_today is None:
         return hourly_kwh
 
-    factor = min(factor, 1.5)
-    return {hour: value * factor for hour, value in hourly_kwh.items()}
+    factor_sensor = _get_sensor_compensation_factor(hass, entry_id)
+    factor_combined = _combine_compensation_factors(factor_today, factor_sensor)
+    if factor_combined is None:
+        return hourly_kwh
+
+    factor_combined = min(factor_combined, 1.5)
+    return {hour: value * factor_combined for hour, value in hourly_kwh.items()}
+
+
+def _combine_compensation_factors(
+    factor_today: float | None, factor_sensor: float | None
+) -> float | None:
+    if factor_today is None and factor_sensor is None:
+        return None
+    if factor_today is None:
+        return factor_sensor
+    if factor_sensor is None:
+        return factor_today
+    return (factor_today + factor_sensor) / 2.0
+
+
+def _get_sensor_compensation_factor(
+    hass: HomeAssistant, entry_id: str | None
+) -> float | None:
+    if entry_id is None:
+        return None
+    if DOMAIN not in hass.data or entry_id not in hass.data[DOMAIN]:
+        return None
+    sensor = hass.data[DOMAIN][entry_id].get("pv_forecast_compensation_sensor")
+    if sensor is None:
+        return None
+    value = getattr(sensor, "native_value", None)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
 
 
 def _calculate_forecast_adjustment(

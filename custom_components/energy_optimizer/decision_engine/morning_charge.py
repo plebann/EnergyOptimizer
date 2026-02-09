@@ -19,6 +19,7 @@ from ..const import (
     CONF_CHARGE_CURRENT_ENTITY,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
+    DOMAIN,
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
@@ -104,6 +105,8 @@ async def async_run_morning_charge(
             config,
             start_hour=start_hour,
             end_hour=tariff_end_hour,
+            pv_compensate=True,
+            entry_id=entry.entry_id,
         )
     )
     losses_hourly, losses_kwh = calculate_losses(
@@ -129,6 +132,8 @@ async def async_run_morning_charge(
         _LOGGER.info("Required morning energy is zero or negative, skipping")
         return
 
+    pv_compensation_factor = _get_pv_compensation_factor(hass, entry.entry_id)
+
     deficit_full_kwh = required_kwh - reserve_kwh - pv_forecast_kwh
     deficit_sufficiency_kwh = (
         required_sufficiency_kwh - reserve_kwh - pv_sufficiency_kwh
@@ -153,6 +158,7 @@ async def async_run_morning_charge(
             deficit_sufficiency_kwh=deficit_sufficiency_kwh,
             sufficiency_hour=sufficiency_hour,
             sufficiency_reached=sufficiency_reached,
+            pv_compensation_factor=pv_compensation_factor,
         )
         return
 
@@ -210,6 +216,7 @@ async def async_run_morning_charge(
         margin=margin,
         sufficiency_hour=sufficiency_hour,
         sufficiency_reached=sufficiency_reached,
+        pv_compensation_factor=pv_compensation_factor,
     )
     outcome.entities_changed = [
         {"entity_id": prog2_soc_entity, "value": target_soc},
@@ -232,6 +239,7 @@ def _build_no_action_outcome(
     deficit_sufficiency_kwh: float,
     sufficiency_hour: int,
     sufficiency_reached: bool,
+    pv_compensation_factor: float | None,
 ) -> DecisionOutcome:
     sufficiency_label = format_sufficiency_hour(
         sufficiency_hour, sufficiency_reached=sufficiency_reached
@@ -261,6 +269,11 @@ def _build_no_action_outcome(
             "required_sufficiency_kwh": round(required_sufficiency_kwh, 2),
             "pv_sufficiency_kwh": round(pv_sufficiency_kwh, 2),
             "pv_forecast_kwh": round(pv_forecast_kwh, 2),
+            "pv_compensation_factor": (
+                round(pv_compensation_factor, 4)
+                if pv_compensation_factor is not None
+                else None
+            ),
             "heat_pump_kwh": round(heat_pump_kwh, 2),
             "deficit_full_kwh": round(deficit_full_kwh, 2),
             "deficit_sufficiency_kwh": round(deficit_sufficiency_kwh, 2),
@@ -324,6 +337,7 @@ async def _handle_no_action(
     deficit_sufficiency_kwh: float,
     sufficiency_hour: int,
     sufficiency_reached: bool,
+    pv_compensation_factor: float | None,
 ) -> None:
     """Handle no-action path."""
     outcome = _build_no_action_outcome(
@@ -337,6 +351,7 @@ async def _handle_no_action(
         deficit_sufficiency_kwh=deficit_sufficiency_kwh,
         sufficiency_hour=sufficiency_hour,
         sufficiency_reached=sufficiency_reached,
+        pv_compensation_factor=pv_compensation_factor,
     )
     await log_decision_unified(
         hass, entry, outcome, context=integration_context, logger=_LOGGER
@@ -362,6 +377,7 @@ def _build_charge_outcome(
     margin: float,
     sufficiency_hour: int,
     sufficiency_reached: bool,
+    pv_compensation_factor: float | None,
 ) -> DecisionOutcome:
     summary = f"Battery scheduled to charge to {target_soc:.0f}%"
     return DecisionOutcome(
@@ -403,6 +419,11 @@ def _build_charge_outcome(
             "deficit_sufficiency_kwh": round(deficit_sufficiency_kwh, 2),
             "losses_kwh": round(losses_kwh, 2),
             "pv_forecast_kwh": round(pv_forecast_kwh, 2),
+            "pv_compensation_factor": (
+                round(pv_compensation_factor, 4)
+                if pv_compensation_factor is not None
+                else None
+            ),
             "heat_pump_kwh": round(heat_pump_kwh, 2),
             "charge_current_a": round(charge_current, 1),
             "efficiency": round(efficiency, 1),
@@ -411,3 +432,20 @@ def _build_charge_outcome(
             "sufficiency_reached": sufficiency_reached,
         },
     )
+
+
+def _get_pv_compensation_factor(
+    hass: HomeAssistant, entry_id: str
+) -> float | None:
+    if DOMAIN not in hass.data or entry_id not in hass.data[DOMAIN]:
+        return None
+    sensor = hass.data[DOMAIN][entry_id].get("pv_forecast_compensation_sensor")
+    if sensor is None:
+        return None
+    value = getattr(sensor, "native_value", None)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
