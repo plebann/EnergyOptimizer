@@ -710,7 +710,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     default=self._config_entry.data.get(
                         CONF_MIN_ARBITRAGE_PRICE, DEFAULT_MIN_ARBITRAGE_PRICE
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0)),
                 vol.Optional(
                     CONF_SELL_WINDOW_START_SENSOR,
                     default=self._config_entry.data.get(CONF_SELL_WINDOW_START_SENSOR),
