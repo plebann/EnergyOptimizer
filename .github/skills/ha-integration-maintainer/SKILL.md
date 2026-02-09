@@ -1,6 +1,6 @@
 ---
 name: ha-integration-maintainer
-description: Home Assistant + HACS maintenance for the Heat Pump Predictor integration. Use when adding or updating config flow, coordinator, entities, services, translations, recorder/statistics compatibility, dashboards, or HACS release assets. Trigger for any HA/HACS changes to custom_components/heat_pump_predictor/.
+description: Home Assistant + HACS maintenance for the integration. Use when adding or updating config flow, coordinator, entities, services, translations, recorder/statistics compatibility, dashboards, or HACS release assets. Trigger for any HA/HACS changes to custom_components/heat_pump_predictor/.
 ---
 
 # Home Assistant Integration Maintainer (Heat Pump Predictor)

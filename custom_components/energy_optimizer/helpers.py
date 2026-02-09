@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-
 def is_test_mode(entry: ConfigEntry) -> bool:
     """Return True when test mode is enabled for the config entry."""
     from .const import CONF_TEST_MODE

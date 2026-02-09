@@ -10,10 +10,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
+    CONF_BATTERY_CURRENT_SENSOR,
+    CONF_BATTERY_POWER_SENSOR,
     CONF_BATTERY_SOC_SENSOR,
+    CONF_BATTERY_VOLTAGE_SENSOR,
     CONF_PRICE_SENSOR,
+    CONF_PV_FORECAST_REMAINING,
     CONF_PV_FORECAST_TODAY,
     CONF_PV_FORECAST_TOMORROW,
+    CONF_PV_PRODUCTION_SENSOR,
     DOMAIN,
 )
 from .helpers import get_float_state_info
@@ -52,20 +57,28 @@ class EnergyOptimizerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Returns:
             Dictionary containing updated data for coordinator consumers.
         """
-        data: dict[str, Any] = {}
+        data: dict[str, Any] = {"states": {}}
         config = self.entry.data
 
-        for key in (
+        entity_keys = (
             CONF_BATTERY_SOC_SENSOR,
+            CONF_BATTERY_POWER_SENSOR,
+            CONF_BATTERY_VOLTAGE_SENSOR,
+            CONF_BATTERY_CURRENT_SENSOR,
             CONF_PRICE_SENSOR,
             CONF_PV_FORECAST_TODAY,
             CONF_PV_FORECAST_TOMORROW,
-        ):
+            CONF_PV_FORECAST_REMAINING,
+            CONF_PV_PRODUCTION_SENSOR,
+        )
+
+        for key in entity_keys:
             entity_id = config.get(key)
+            if not entity_id:
+                continue
             value, _raw, error = get_float_state_info(self.hass, entity_id)
-            if error is None and value is not None:
-                data[key] = value
-            else:
-                data[key] = None
+            data["states"][entity_id] = (
+                value if error is None and value is not None else None
+            )
 
         return data
