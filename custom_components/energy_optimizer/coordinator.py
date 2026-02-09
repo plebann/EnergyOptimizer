@@ -41,6 +41,7 @@ class EnergyOptimizerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER,
             name=DOMAIN,
             update_interval=UPDATE_INTERVAL,
+            config_entry=entry,
         )
         self.hass = hass
         self.entry = entry
