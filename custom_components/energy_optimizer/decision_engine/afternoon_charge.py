@@ -36,7 +36,7 @@ from ..const import (
 )
 from ..decision_engine.common import (
     get_required_current_soc_state,
-    get_required_prog2_soc_state,
+    get_required_prog4_soc_state,
     resolve_entry,
 )
 from ..helpers import (
@@ -71,10 +71,10 @@ async def async_run_afternoon_charge(
         return
     config = entry.data
 
-    prog2_soc_state = get_required_prog2_soc_state(hass, config)
-    if prog2_soc_state is None:
+    prog4_soc_state = get_required_prog4_soc_state(hass, config)
+    if prog4_soc_state is None:
         return
-    prog2_soc_entity, prog2_soc_value = prog2_soc_state
+    prog4_soc_entity, prog4_soc_value = prog4_soc_state
 
     current_soc_state = get_required_current_soc_state(hass, config)
     if current_soc_state is None:
@@ -172,8 +172,8 @@ async def async_run_afternoon_charge(
             hass,
             entry,
             integration_context=integration_context,
-            prog2_soc_entity=prog2_soc_entity,
-            prog2_soc_value=prog2_soc_value,
+            prog4_soc_entity=prog4_soc_entity,
+            prog4_soc_value=prog4_soc_value,
             min_soc=min_soc,
             reserve_kwh=reserve_kwh,
             required_kwh=required_kwh,
@@ -208,7 +208,7 @@ async def async_run_afternoon_charge(
 
     await set_program_soc(
         hass,
-        prog2_soc_entity,
+        prog4_soc_entity,
         target_soc,
         entry=entry,
         logger=_LOGGER,
@@ -244,7 +244,7 @@ async def async_run_afternoon_charge(
         pv_compensation_factor=pv_compensation_factor,
     )
     outcome.entities_changed = [
-        {"entity_id": prog2_soc_entity, "value": target_soc},
+        {"entity_id": prog4_soc_entity, "value": target_soc},
         {"entity_id": charge_current_entity, "value": charge_current},
     ]
     await log_decision_unified(
@@ -306,8 +306,8 @@ async def _handle_no_action(
     entry,
     *,
     integration_context: Context,
-    prog2_soc_entity: str,
-    prog2_soc_value: float,
+    prog4_soc_entity: str,
+    prog4_soc_value: float,
     min_soc: float,
     reserve_kwh: float,
     required_kwh: float,
@@ -323,7 +323,7 @@ async def _handle_no_action(
     """Handle no-action path and ensure program SOC reset."""
     await set_program_soc(
         hass,
-        prog2_soc_entity,
+        prog4_soc_entity,
         min_soc,
         entry=entry,
         logger=_LOGGER,
@@ -341,9 +341,9 @@ async def _handle_no_action(
         pv_compensation_factor=pv_compensation_factor,
         arbitrage_details=arbitrage_details,
     )
-    if prog2_soc_value > min_soc:
+    if prog4_soc_value > min_soc:
         outcome.entities_changed = [
-            {"entity_id": prog2_soc_entity, "value": min_soc}
+            {"entity_id": prog4_soc_entity, "value": min_soc}
         ]
     await log_decision_unified(
         hass, entry, outcome, context=integration_context, logger=_LOGGER

@@ -4,7 +4,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from ..const import CONF_BATTERY_SOC_SENSOR, CONF_PROG2_SOC_ENTITY, DOMAIN
+from ..const import (
+    CONF_BATTERY_SOC_SENSOR,
+    CONF_PROG2_SOC_ENTITY,
+    CONF_PROG4_SOC_ENTITY,
+    DOMAIN,
+)
 from ..helpers import get_required_float_state
 
 if TYPE_CHECKING:
@@ -54,6 +59,21 @@ def get_required_prog2_soc_state(
     if prog2_soc_value is None:
         return None
     return str(prog2_soc_entity), prog2_soc_value
+
+
+def get_required_prog4_soc_state(
+    hass: HomeAssistant, config: dict[str, object]
+) -> tuple[str, float] | None:
+    """Return Program 4 SOC entity id and value when available."""
+    prog4_soc_entity = config.get(CONF_PROG4_SOC_ENTITY)
+    prog4_soc_value = get_required_float_state(
+        hass,
+        prog4_soc_entity,
+        entity_name="Program 4 SOC entity",
+    )
+    if prog4_soc_value is None:
+        return None
+    return str(prog4_soc_entity), prog4_soc_value
 
 
 def get_required_current_soc_state(
