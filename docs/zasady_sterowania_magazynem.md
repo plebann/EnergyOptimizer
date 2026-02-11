@@ -47,7 +47,17 @@
 
 ## MOMENTY AKCJI I ZASADY STEROWANIA
 
+**Tabela skrótowa (stan aktualny):**
+
+| Obszar | Okno | Kluczowe wejścia | Główna decyzja |
+| --- | --- | --- | --- |
+| Poranne ładowanie | 06:00 → `tariff_end_hour` | SOC, prognozy PV i zużycia, straty, balancing ongoing | Ładuj z sieci do wyliczonego SOC lub brak akcji |
+| Popołudniowe ładowanie | `tariff_start_hour` → 22:00 | SOC, prognozy PV i zużycia, straty, ceny sprzedaży, program 4 | Ładuj z sieci (z arbitrażem) lub reset programu 4 |
+| Zachowanie wieczorne | 22:00 → 04:00 | balancing interval, próg PV, reserve, grid assist | Balancing, preservation lub powrót do min SOC |
+
 ### **00:00 - ANALIZA DZIENNYCH CEN RCE**
+
+**TODO:** Proces niezaimplementowany w obecnym decision engine.
 
 **Cel:** Identyfikacja kluczowych okien czasowych na podstawie cen RCE na cały dzień.
 
@@ -160,45 +170,45 @@ szczyt_wieczorny = {
 
 **Dane wejściowe:**
 - Aktualny SoC magazynu
-- Prognoza produkcji PV na dzień bieżący
-- Prognoza zużycia (dom + PC) w godzinach taryfy wysokiej (6:00-13:00 zimą / 6:00-15:00 latem)
-- Prognoza produkcji PV na dzień następny
-- Ceny RCE na dzień następny (szczyt_poranny_jutro, szczyt_wieczorny_jutro)
+- Prognoza produkcji PV na dzień bieżący (okno 6:00 → `tariff_end_hour`)
+- Prognoza zużycia (dom + PC) w oknie 6:00 → `tariff_end_hour`
+- Straty falownika w oknie porannym
+- Informacja, czy trwa balansowanie (balancing ongoing)
 
 **Algorytm:**
 
 ```
-# 1. Określ godziny wysokiej taryfy do pokrycia
-miesiąc = obecny_miesiąc()
-IF miesiąc IN [4, 5, 6, 7, 8, 9]:  # kwiecień-wrzesień (LATO)
-    godziny_wysokiej_taryfy = 6:00 do 15:00 oraz 17:00 do 22:00
-ELSE:  # październik-marzec (ZIMA)
-    godziny_wysokiej_taryfy = 6:00 do 13:00 oraz 15:00 do 22:00
+# 1. Sprawdź, czy balansowanie jest w toku
+IF balancing_ongoing:
+    pomiń_akcję()
 
-# 2. Oblicz całkowite zapotrzebowanie w godzinach wysokiej taryfy
-zużycie_dom = suma(prognoza_zużycia_dom(h) FOR h IN godziny_wysokiej_taryfy)
-zużycie_PC = suma(prognoza_zużycia_PC(h) FOR h IN godziny_wysokiej_taryfy)
-zużycie_CWU = suma(prognoza_zużycia_CWU(h) FOR h IN godziny_wysokiej_taryfy)
-całkowite_zużycie = zużycie_dom + zużycie_PC + zużycie_CWU
+# 2. Okno obliczeń: 6:00 → tariff_end_hour
+okno = 6:00 do tariff_end_hour
 
-# 3. Oblicz dostępną produkcję PV w godzinach wysokiej taryfy
-produkcja_PV = suma(prognoza_PV(h) FOR h IN godziny_wysokiej_taryfy)
+# 3. Oblicz zapotrzebowanie w oknie (dom + PC + straty, z marginesem)
+required_kwh = suma(zapotrzebowania_w_oknie)
 
-# 4. Oblicz dostępną energię z magazynu
-dostępna_energia_z_magazynu = (aktualny_SoC - 20%) × pojemność_magazynu
+# 4. Oblicz rezerwę energii w magazynie (powyżej min_soc)
+reserve_kwh = energia_użyteczna_z_magazynu
 
-# 5. Oblicz deficyt energii
-deficyt = całkowite_zużycie - produkcja_PV - dostępna_energia_z_magazynu
+# 5. Oblicz prognozę PV w oknie (z kompensacją i efektywnością)
+pv_kwh = prognoza_PV(okno)
 
-# 6. Decyzja o ładowaniu
+# 6. Wyznacz deficyt (pełne okno vs godzina wystarczalności)
+deficyt_full = required_kwh - reserve_kwh - pv_kwh
+deficyt_suff = required_sufficiency_kwh - reserve_kwh - pv_sufficiency_kwh
+deficyt = max(deficyt_full, deficyt_suff)
+
+# 7. Jeśli deficyt > 0, wyznacz target SOC i prąd ładowania
 IF deficyt > 0:
-    # Nie wystarczy energii na pokrycie godzin wysokiej taryfy
-    doładuj = min(deficyt × 1,1, wolne_miejsce_w_magazynie)  # 10% margines bezpieczeństwa
-    ładuj_z_sieci(doładuj)
+    ładuj_z_sieci(deficyt)
 ELSE:
-    # Wystarczy energii, nie ładuj
     nie_ładuj()
 ```
+
+**Sprawność magazynu**:
+- Jeśli rozładowuję energię już zgromadzoną w magazynie, sprawność liczona jest **jednorazowo** (strata na rozładowaniu).
+- Jeśli muszę najpierw doładować z sieci, aby tę energię później rozładować, sprawność liczona jest **podwójnie** (ładowanie i rozładowanie): `wymagane / (0.9 × 0.9)`.
 
 **Akcje:**
 - `ładuj_z_sieci(ilość_kWh)` - włącz tryb force charge z sieci do osiągnięcia docelowego SoC
@@ -207,6 +217,8 @@ ELSE:
 ---
 
 ### **WSCHÓD SŁOŃCA - DECYZJA O BLOKOWANIU ŁADOWANIA Z PV**
+
+**TODO:** Proces niezaimplementowany w obecnym decision engine.
 
 **Cel:** Ustalić, czy opłaca się zablokować ładowanie magazynu z PV w oczekiwaniu na niższe ceny RCE w dołku dziennym.
 
@@ -286,6 +298,8 @@ ELSE:
 
 ### **SZCZYT PORANNY - SPRZEDAŻ PORANNA**
 
+**TODO:** Proces niezaimplementowany w obecnym decision engine.
+
 **Cel:** Sprzedać energię z magazynu po wysokiej cenie RCE, zachowując wystarczającą ilość na potrzeby domu do momentu rozpoczęcia produkcji PV.
 
 **Czas wykonania:** `szczyt_poranny.szczytowa_godzina` (jeśli szczyt_poranny != NULL)
@@ -336,6 +350,8 @@ ELSE:
 
 ### **DOŁEK DZIENNY - WŁĄCZENIE ŁADOWANIA Z PV**
 
+**TODO:** Proces niezaimplementowany w obecnym decision engine.
+
 **Cel:** Rozpocząć ładowanie magazynu z PV w momencie najniższych cen RCE (jeśli wcześniej było zablokowane).
 
 **Czas wykonania:** `dołek_dzienny.start` (jeśli dołek_dzienny != NULL i flaga "czekam_na_dołek" == TRUE)
@@ -361,82 +377,73 @@ ELSE:
 
 ---
 
-### **13:00 (ZIMĄ) / 15:00 (LATEM) - ŁADOWANIE W NISKIEJ TARYFIE DZIENNEJ + KOREKTA**
+### **Popołudniowe ładowanie z sieci (koniec taryfy dziennej)**
 
-**Cel:** 
-1. Skorygować prognozy na podstawie rzeczywistej produkcji PV do tej pory
-2. Doładować magazyn z sieci w taryfie niskiej, jeśli potrzeba
+**Cel:**
+1. Pokryć zapotrzebowanie do 22:00 po zakończeniu taryfy dziennej.
+2. Opcjonalnie doładować pod arbitraż, jeśli cena sprzedaży spełnia próg.
 
 **Dane wejściowe:**
-- Aktualna godzina (13:00 zimą, 15:00 latem)
-- Prognoza produkcji PV na dzień bieżący (oryginalna z rana)
-- Rzeczywista produkcja PV od wschodu słońca do teraz
 - Aktualny SoC magazynu
-- `szczyt_wieczorny` (z analizy o 00:00)
-- Prognoza zużycia na popołudnie i wieczór
+- Docelowy SOC programu 4 (ładowanie z sieci)
+- `tariff_start_hour` (start okna) oraz stały koniec okna: 22:00
+- Prognoza zużycia (dom + PC) w oknie `tariff_start_hour` → 22:00
+- Prognoza PV w oknie `tariff_start_hour` → 22:00 (z kompensacją, bez `pv_efficiency`)
+- Straty falownika w oknie
+- `sell_window_price` i `min_arbitrage_price`
+- `pv_forecast_today`, `pv_forecast_remaining`, `pv_production_sensor` (do urealnienia prognozy dla arbitrażu)
+- `sell_window_start_hour` (okno sprzedaży)
+- Flaga `afternoon_grid_assist`
 
 **Algorytm:**
 
 ```
-# 1. KOREKTA PROGNOZY PV
-godziny_od_wschodu = wszystkie_godziny od wschód_słońca DO obecna_godzina
-suma_rzeczywista_PV = suma(rzeczywista_produkcja_PV(h) FOR h IN godziny_od_wschodu)
-suma_prognoza_PV = suma(prognoza_PV(h) FOR h IN godziny_od_wschodu)
+# 1. Okno obliczeń: tariff_start_hour → 22:00
+okno = tariff_start_hour do 22:00
 
-IF suma_prognoza_PV > 0:
-    współczynnik_korekty = suma_rzeczywista_PV / suma_prognoza_PV
+# 2. Oblicz zapotrzebowanie w oknie (dom + PC + straty, z marginesem)
+required_kwh = suma(zapotrzebowania_w_oknie)
+
+# 3. Oblicz rezerwę energii w magazynie (powyżej min_soc)
+reserve_kwh = energia_użyteczna_z_magazynu
+
+# 4. Oblicz prognozę PV w oknie (z kompensacją, bez pv_efficiency)
+pv_kwh = prognoza_PV(okno)
+
+# 5. Deficyt bazowy
+deficyt = required_kwh - reserve_kwh - pv_kwh
+
+# 6. Arbitraż (opcjonalny)
+IF sell_price > min_arbitrage_price AND forecast_adjusted dostępny:
+    surplus_kwh = nadwyżki_PV(teraz → sell_window_start)
+    free_after = pojemność - (energia_bieżąca + required_kwh)
+    arb_limit = max(free_after - surplus_kwh, 0)
+    arbitrage_kwh = min(arb_limit, forecast_adjusted)
 ELSE:
-    współczynnik_korekty = 0
+    arbitrage_kwh = 0
 
-# Skoryguj pozostałą prognozę na popołudnie
-godziny_pozostałe = obecna_godzina+1 DO zachód_słońca
-FOR h IN godziny_pozostałe:
-    skorygowana_prognoza_PV(h) = prognoza_PV(h) × współczynnik_korekty
+# 7. Deficyt całkowity i decyzja
+base_deficit = max(deficyt, 0)
+total_deficit = base_deficit + arbitrage_kwh
+grid_assist = base_deficit > 0
 
-# 2. PROGNOZA STANU MAGAZYNU WIECZOREM
-przewidywana_produkcja_PV_popołudnie = suma(skorygowana_prognoza_PV(h) FOR h IN godziny_pozostałe)
-przewidywane_zużycie_popołudnie = suma(prognoza_zużycia(h) FOR h IN obecna_godzina DO 22:00)
-
-przewidywane_SoC_wieczorem = aktualny_SoC + (przewidywana_produkcja_PV_popołudnie - przewidywane_zużycie_popołudnie) / pojemność_magazynu
-
-# 3. DECYZJA O ŁADOWANIU Z SIECI
-# Sprawdź czy będzie sprzedaż wieczorem
-IF szczyt_wieczorny != NULL AND szczyt_wieczorny.max_cena > 95,1 gr/kWh:
-    # Chcemy mieć pełny magazyn na sprzedaż wieczorem
-    cel_SoC = 100%
-    
-    IF przewidywane_SoC_wieczorem < cel_SoC:
-        niedobór = (cel_SoC - przewidywane_SoC_wieczorem) × pojemność_magazynu
-        doładuj = min(niedobór, wolne_miejsce_w_magazynie)
-        ładuj_z_sieci(doładuj)
-    ELSE:
-        nie_ładuj()
+IF total_deficit <= 0:
+    # reset programu 4 do min_soc
+    nie_ładuj()
 ELSE:
-    # Nie będzie sprzedaży, ale sprawdź czy wystarczy na wieczór bez poboru z sieci w wysokiej taryfie
-    godziny_wysokiej_taryfy_wieczorem = obecna_godzina DO 22:00
-    zużycie_w_wysokiej = suma(prognoza_zużycia(h) FOR h IN godziny_wysokiej_taryfy_wieczorem)
-    dostępna_energia_z_PV = przewidywana_produkcja_PV_popołudnie
-    dostępna_energia_z_magazynu = (przewidywane_SoC_wieczorem - 20%) × pojemność_magazynu
-    
-    suma_dostępnej_energii = dostępna_energia_z_PV + dostępna_energia_z_magazynu
-    
-    IF suma_dostępnej_energii < zużycie_w_wysokiej:
-        # Nie wystarczy - doładuj z sieci w niskiej taryfie
-        niedobór = zużycie_w_wysokiej - suma_dostępnej_energii
-        doładuj = min(niedobór × 1,2, wolne_miejsce_w_magazynie)  # 20% margines
-        ładuj_z_sieci(doładuj)
-    ELSE:
-        nie_ładuj()
+    ładuj_z_sieci(total_deficit)
 ```
 
 **Akcje:**
-- `ładuj_z_sieci(ilość_kWh)` - ładowanie z sieci w taryfie niskiej
-
-**Uwaga:** To jest ostatni moment w ciągu dnia na tanie ładowanie z sieci (poza nocą).
+- Ustaw SOC programu 4 i prąd ładowania z sieci
+- Ustaw `afternoon_grid_assist` na podstawie deficytu bazowego
+- Przy braku deficytu: przywróć SOC programu 4 do minimum
 
 ---
 
 ### **SZCZYT WIECZORNY - SPRZEDAŻ WIECZORNA**
+
+**TODO:** Proces niezaimplementowany w obecnym decision engine.
 
 **Cel:** Sprzedać energię z magazynu po wysokiej cenie wieczornej, uwzględniając prognozy na następny dzień.
 
@@ -526,42 +533,46 @@ nie_sprzedawaj()
 ### **22:00 - ZACHOWANIE WIECZORNE**
 
 **Cel:** 
-1. Balansowanie magazynu (co 10 dni pełne naładowanie)
-2. Przygotowanie magazynu na noc w zależności od prognozy na jutro
+1. Balansowanie magazynu, gdy jest wymagane (parametryzowane interwałem i progiem PV).
+2. Ochrona energii na noc (preservation) do 04:00, gdy grozi niedobór.
+3. Przywrócenie trybu normalnego, jeśli nie ma przesłanek do ochrony.
 
 **Dane wejściowe:**
 - Data ostatniego pełnego balansowania magazynu
-- Aktualny SoC magazynu
+- `balancing_interval_days` oraz `balancing_pv_threshold`
 - Prognoza produkcji PV na jutro
+- Aktualny SoC magazynu, min/max SOC
+- `afternoon_grid_assist`
+- Prognozy zużycia (20:00–04:00) oraz straty falownika
+- Programy SOC: prog1/prog2/prog6 oraz max charge current
 
 **Algorytm:**
 
 ```
-# 1. SPRAWDŹ CZY POTRZEBNE BALANSOWANIE
-dni_od_ostatniego_balansowania = dzisiaj - data_ostatniego_balansowania
+# 1. Aktualizacja sensora kompensacji PV (wartości „dzisiaj” → „wczoraj”)
+zaktualizuj_pv_compensation()
 
-IF dni_od_ostatniego_balansowania >= 10:
-    # Wymuszenie pełnego naładowania i utrzymania
-    ładuj_do_100%_i_utrzymuj_do_06:00()
-    zapisz_datę_balansowania(dzisiaj)
+# 2. Balansowanie
+balancing_due = brak_ostatniego_balansu LUB dni_od_ostatniego_balansu >= balancing_interval_days
+IF balancing_due AND pv_forecast_tomorrow < balancing_pv_threshold:
+    ustaw_prog1_prog2_prog6_na_100%
+    ustaw_max_charge_current
+    ustaw_balancing_ongoing
     RETURN
 
-# 2. OPTYMALIZACJA NA PODSTAWIE PROGNOZY NA JUTRO
-suma_prognoza_PV_jutro = suma(prognoza_PV_jutro(h) FOR h IN cały_dzień_jutro)
-wolne_miejsce_w_magazynie = (100% - aktualny_SoC) × pojemność_magazynu
+# 3. Preservation do 04:00
+required_to_04 = zapotrzebowanie(20:00-24:00) + zapotrzebowanie(00:00-04:00)
+reserve_kwh = energia_użyteczna_z_magazynu
+battery_space = pojemność - energia_bieżąca
+pv_with_efficiency = pv_forecast_tomorrow × 0.9
 
-# Jeśli jutro słaba produkcja PV i nie zapełni magazynu
-IF suma_prognoza_PV_jutro < wolne_miejsce_w_magazynie:
-    # Zablokuj rozładowanie magazynu - niech dom czerpie z sieci w niskiej taryfie
-    # Oszczędzamy energię w magazynie na godziny wysokiej taryfy jutro
-    blokuj_rozładowanie_magazynu()
-    # Dom będzie zasilany bezpośrednio z sieci (tania taryfa nocna)
-ELSE:
-    # Jutro dobra produkcja, magazyn się zapełni
-    # Pozwól magazynowi rozładować się naturalnie
-    pozwól_naturalne_rozładowanie()
-    # Magazyn może zasilać dom w nocy, spadnie do ~20% przed 6:00
+IF afternoon_grid_assist OR reserve_kwh < required_to_04 OR pv_with_efficiency < battery_space:
+    ustaw_prog1_i_prog6_na_bieżący_SOC
+    RETURN
 
+# 4. Przywrócenie trybu normalnego
+IF prog6_soc > min_soc:
+    ustaw_prog1_prog2_prog6_na_min_soc
 ```
 
 **Akcje:**
@@ -572,6 +583,8 @@ ELSE:
 ---
 
 ## STEROWANIE BOJLEREM CWU
+
+**TODO:** Proces niezaimplementowany w obecnym decision engine.
 
 **Cel:** Wykorzystać bojler jako elastyczny "magazyn ciepła" do optymalizacji zużycia energii.
 
@@ -610,6 +623,8 @@ IF (szczyt_wieczorny.max_cena > 95,1 gr/kWh) AND (nadwyżki_PV_w_południe > 3 k
 ---
 
 ## PRIORYTETY PRZEPŁYWU ENERGII
+
+**TODO:** Proces niezaimplementowany w obecnym decision engine.
 
 ### **Podczas produkcji PV:**
 
@@ -653,6 +668,8 @@ IF (szczyt_wieczorny.max_cena > 95,1 gr/kWh) AND (nadwyżki_PV_w_południe > 3 k
 ---
 
 ## ZARZĄDZANIE FLAGAMI I STANEM
+
+**TODO:** Proces niezaimplementowany w obecnym decision engine.
 
 ### **Flagi globalne:**
 - `czekam_na_dołek` (BOOL) - czy zablokowano ładowanie z PV w oczekiwaniu na dołek

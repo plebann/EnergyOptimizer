@@ -7,31 +7,21 @@ Energy Optimizer is a Home Assistant custom integration focused on price-aware b
 
 ## What It Does
 
-- Overnight handling: runs nightly at 22:00 (manual calls behave the same) and picks one of three modes using PV forecast, balancing cadence, and battery space:
-   - Battery Balancing: if balancing is due and tomorrow's PV forecast is below the balancing PV threshold, set program SOCs 1/2/6 to max SOC and optional max charge current to 23 A.
-   - Battery Preservation: if PV forecast × 0.9 is lower than available battery space, lock program SOC 1 and 6 to the current SOC (bounded by min SOC) to avoid inefficient cycling. Program 2 is intentionally untouched here because a separate 04:00 optimization will manage it.
-   - Normal Operation: if previously locked and conditions improve, restore program SOCs 1/2/6 to min SOC.
-   - If none of the above match, no changes are made.
-   - PV forecast compensation sensor is refreshed here (today → yesterday, update today values, recalc factor).
-   - Balancing completion is stamped only after SOC stays ≥97% for 2 hours; schedule `check_and_update_balancing_completion` periodically (e.g., every 5 minutes) to advance the timestamp.
-- Balancing completion check: every 5 minutes, stamps last balancing when SOC stays ≥97% for 2 hours.
-- Morning grid charge: at 04:00 (trigger via automation), if Program 2 SOC < 100% and battery reserve is below required morning energy (06:00-13:00), set Program 2 SOC to cover the deficit using windowed load sensors and daily losses.
-- Afternoon grid charge: after tariff end, size Program 2 SOC to cover evening demand and optional arbitrage window.
+- Overnight handling: runs nightly at 22:00 and selects a mode based on PV forecast, balancing cadence, and battery state.
+- Morning grid charge: plans a morning top-up to cover high-tariff demand when needed.
+- Afternoon grid charge: plans an afternoon top-up to cover evening demand and optional arbitrage.
+- Consistent decision logging with sensors and notifications.
 
 ## Behavior Notes
 
-- Notifications: overnight_schedule sends notify messages when modes change. The service is parameterless.
+- Notifications: decision outcomes are logged and can trigger notifications.
 - Data sources: services rely on current Home Assistant states; ensure numeric sensors return valid values.
 
 ## What’s Included
 
-- Platforms: Sensor only.
+- Platforms: Sensor, Binary Sensor.
 - Services: morning_grid_charge, afternoon_grid_charge, overnight_schedule.
-- Sensors:
-  - Battery: battery_reserve, battery_space, battery_capacity, usable_capacity
-  - Config values: battery_capacity_ah, battery_voltage_config, battery_efficiency_config, min_soc_config, max_soc_config
-   - Tracking: last_balancing_timestamp, last_optimization, optimization_history
-   - Forecast: pv_forecast_compensation
+- Sensors: battery, configuration, tracking, and forecast helpers.
 
 ## Configuration (UI-Only)
 
@@ -42,8 +32,8 @@ Energy Optimizer is a Home Assistant custom integration focused on price-aware b
 ### Service Architecture
 
 Service handlers live in `custom_components/energy_optimizer/service_handlers/`:
-- `morning.py` - Morning grid charge sizing and Program 2 SOC adjustment
-- `overnight.py` - Battery schedule optimization (balancing/preservation/normal at 22:00)
+- `morning.py` - Morning grid charge
+- `overnight.py` - Overnight handling
 
 ### Sensor Platform
 

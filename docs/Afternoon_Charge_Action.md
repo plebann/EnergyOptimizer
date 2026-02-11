@@ -15,7 +15,7 @@ Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w
 
 - Aktualny SOC baterii i dostępna pojemność magazynu
 - Polityki SOC (limity minimalne/maksymalne)
-- Docelowy SOC programu 2 (ładowanie z sieci)
+- Docelowy SOC programu 4 (ładowanie z sieci)
 - Przewidywane zużycie energii w oknie popołudniowym:
   - Zużycie domowe (z czujników w okienkach 4‑godzinnych)
   - Zużycie Pompy Ciepła (integracja zewnętrzna)
@@ -25,6 +25,7 @@ Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w
 - `min_arbitrage_price` (PLN/kWh) – próg opłacalności arbitrażu
 - `pv_production_sensor` – rzeczywista produkcja PV do tej pory (kWh)
 - `pv_forecast_today` i `pv_forecast_remaining` – do urealnienia prognozy (na potrzeby arbitrażu)
+- `sell_window_price` – cena sprzedaży (warunek arbitrażu)
 - Straty dzienne falownika
 - Sprawność magazynu (domyślnie 90%):
    - przy wyznaczaniu rezerwy uwzględnia straty **tylko na rozładowaniu**
@@ -33,6 +34,7 @@ Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w
 - Sensor godziny startu taryfy: `tariff_start_hour` **(nowy, wymagany do okna obliczeń)**
 - Sensor godziny końca taryfy: `tariff_end_hour` (wyzwalacz akcji)
 - Ustawienie włączenia Pompy Ciepła (jeśli wyłączone, zużycie PC = 0)
+- Sensor wsparcia z sieci po południu (afternoon grid assist)
 
 ## Przebieg decyzji (wysoki poziom)
 
@@ -82,7 +84,7 @@ Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w
 - **Urealniona prognoza PV**:
    - `forecast_adjusted = pv_forecast_today * pv_production / (pv_forecast_today - pv_forecast_remaining)`
 - **Bufor** (nadwyżka PV do okna sprzedaży):
-   - `surplus_kwh = sum(max(pv_forecast[h] - load_forecast[h], 0))`
+   - `surplus_kwh = sum(max(pv_forecast[h] - load_forecast[h], 0))` od bieżącej godziny do startu okna sprzedaży
 - **Wolne miejsce po ładowaniu podstawowym**:
    - `free_after = capacity_kwh - (current_energy_kwh + required_kwh)`
 - **Limit arbitrażu**:
@@ -98,9 +100,12 @@ Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w
 ## Efekty sterowania (koncepcyjne)
 
 - Ustaw docelowy SOC programu 2 (ładowanie z sieci) na obliczoną wartość
+- Ustaw docelowy SOC programu 4 (ładowanie z sieci) na obliczoną wartość
 - Ustaw prąd ładowania z sieci na obliczoną wartość (okno do 22:00)
 - Uwzględnij arbitraż: docelowy SOC i prąd ładowania bazują na `required_kwh + arb_kwh`
 - Falownik automatycznie rozpocznie ładowanie do osiągnięcia docelowego SOC
+- Stan wsparcia z sieci po południu jest ustawiany na podstawie bazowego deficytu (bez arbitrażu)
+- Jeśli brak deficytu (po arbitrażu), program 4 SOC jest przywracany do minimalnego SOC
 
 ## Obsługa błędów
 

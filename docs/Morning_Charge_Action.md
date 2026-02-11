@@ -30,14 +30,14 @@ Zapewnienie wystarczającej ilości energii w magazynie na pokrycie zapotrzebowa
 ## Przebieg decyzji (wysoki poziom)
 
 1. **Walidacja konfiguracji**: Sprawdź czy wszystkie wymagane sensory są skonfigurowane i dostępne
-2. **Sprawdzenie stanu programu 2**: Jeśli docelowy SOC programu 2 jest już na 100%, pomiń akcję
+2. **Sprawdzenie balansowania**: Jeśli trwa balansowanie, pomiń akcję i wyloguj stan „balancing ongoing”.
 3. **Obliczenie rezerwy energii**: Ile energii użytecznej jest obecnie w magazynie (ponad minimalny SOC)
 4. **Obliczenie zapotrzebowania**: Ile energii będzie potrzebne w godzinach wysokiej taryfy (6:00–koniec taryfy z sensora)
    - Suma zużycia domowego z czujników
    - Zapytanie serwisu `heat_pump_predictor.calculate_forecast_energy` o zużycie Pompy Ciepła
    - Dodanie strat falownika proporcjonalnie do czasu (straty_dzienne / 24 × liczba_godzin) **z marginesem**
    - Korekta na margines bezpieczeństwa
-5. **Obliczenie produkcji PV**: Suma prognozy PV z integracji Solcast dla godzin wysokiej taryfy, skorygowana współczynnikiem wydajności
+5. **Obliczenie produkcji PV**: Suma prognozy PV z integracji Solcast dla godzin wysokiej taryfy, skorygowana kompensacją PV oraz współczynnikiem wydajności (domyślnie 0.9).
 6. **Porównanie zapotrzebowanie vs dostępne źródła**:
    - Jeśli **rezerwa + prognoza PV >= zapotrzebowanie**: Brak akcji, energia wystarczy
    - Jeśli **deficyt > 0**: Oblicz ile energii załadować uwzględniając sprawność magazynu i zaplanuj doładowanie
@@ -51,7 +51,7 @@ Zapewnienie wystarczającej ilości energii w magazynie na pokrycie zapotrzebowa
 4. Deficyt przed sprawnością = zapotrzebowanie_całkowite - rezerwa - prognoza_PV
 5. Deficyt do załadowania = deficyt / sprawność (np. 15.4 / 0.9 = 17.1 kWh)
 
-**Sprawność magazynu**: Jeśli załaduję 1 kWh, rozładuję tylko 0.9 kWh. Dlatego aby uzyskać wymaganą energię, trzeba załadować więcej: `wymagane / 0.9`
+**Sprawność magazynu**: W praktyce energia do załadowania uwzględnia straty na ładowaniu i rozładowaniu: `wymagane / (0.9 × 0.9)`.
 
 **Prognoza PV**: Suma prognozy z `detailedForecast` jest liczona dla okna 6:00–koniec taryfy, korygowana kompensacją PV (średnia z kompensacji „dzisiejszej” i z sensora PV Forecast Compensation), a następnie mnożona przez współczynnik wydajności PV.
 
@@ -121,6 +121,7 @@ Możliwe strategie:
 - Brak sensora PV w konfiguracji → używany jest fallback do `pv_forecast_today` jeśli dostępny
 - Wyłączona Pompa Ciepła → HP = 0 kWh (informacja debug)
 - Brak szczegółowej prognozy PV (`detailedForecast`) → PV = 0 kWh (warning)
+- Trwa balansowanie → akcja poranna pomijana, log „balancing ongoing”
 
 ## Logowanie i powiadomienia
 

@@ -10,33 +10,30 @@ Zapobieganie nieefektywnemu rozładowaniu magazynu w nocy oraz wymuszenie pełne
 
 ## Wejścia (koncepcyjne)
 
-- Sprawdzenie flagi balansowania oraz kiedy została ustawiona
-- Prognoza PV na jutro (po korekcie sprawności)
+- Liczba dni od ostatniego balansowania (sensor last_balancing)
+- Interwał balansowania (`balancing_interval_days`)
+- Próg PV dla balansowania (`balancing_pv_threshold`)
+- Prognoza PV na jutro
 - Aktualna prognoza PV i bieżąca produkcja PV (do aktualizacji sensora kompensacji)
 - Aktualny SOC i dostępna pojemność
 - Polityki SOC (limity minimalne/maksymalne)
-- Przewidywane zapotrzebowanie na energię elektryczną
-- Flagi włączenia systemu i trybów ręcznych
+- Przewidywane zapotrzebowanie na energię elektryczną (20:00–04:00)
+- Flaga wsparcia sieci po południu (afternoon grid assist)
+- Encje prog1/prog2/prog6 SOC oraz max charge current
 
 ## Przebieg decyzji (wysoki poziom)
 
-1. **Sprawdzenie potrzeby balansowania**: Czy flaga balansowania jest ustawiona oraz kiedy została ustawiona
-1a. **Aktualizacja sensora kompensacji PV**: Przepisz wartości „dzisiaj” do „wczoraj”, zapisz bieżącą prognozę i produkcję PV jako „dzisiaj”, zaktualizuj wartość sensora.
-2. **Balansowanie wymagane**: Wejdź w tryb balansowania i ustaw cel pełnego SOC (100%) na noc (czyli program 6, 1 i 2)
-3. **Balansowanie niewymagane**: Oceń zapas energii w magazynie w porównaniu z przewidywanym zapotrzebowaniem oraz prognozą PV na następny dzień.
-4. **Niewystarczający zapas energii w magazynie**: Zamroź SOC, aby uniknąć rozładowania w nocy (ustaw minimalny SOC równy bieżącemu SOC w programie 6 i 1).
-5. **W pozostałych przypadkach**: Przywróć tryb normalny i ustaw docelowy minimalny SOC w programie 6, 1 i 2.
+1. **Aktualizacja sensora kompensacji PV**: Przepisz wartości „dzisiaj” do „wczoraj”, zapisz bieżącą prognozę i produkcję PV jako „dzisiaj”, zaktualizuj wartość sensora.
+2. **Sprawdzenie balansowania**: Balansowanie jest wymagane, jeśli brak ostatniego balansu lub minął interwał dni oraz prognoza PV na jutro jest poniżej progu.
+3. **Balansowanie wymagane**: Ustaw cel 100% SOC na noc (programy 1/2/6) oraz maksymalny prąd ładowania; ustaw flagę „balancing ongoing”.
+4. **Balansowanie niewymagane**: Oblicz rezerwę i zapotrzebowanie do 04:00 (20:00–24:00 oraz 00:00–04:00) z uwzględnieniem strat i marginesu. Wyznacz przestrzeń magazynu oraz prognozę PV z efektywnością 0.9.
+5. **Tryb ochrony (preservation)**: Jeśli włączone wsparcie z sieci po południu **lub** rezerwa jest niewystarczająca **lub** prognoza PV < przestrzeń magazynu, zamroź SOC (programy 1 i 6 na bieżący SOC).
+6. **Tryb normalny**: Jeśli brak przesłanek do ochrony i program 6 jest powyżej minimalnego SOC, przywróć normalny minimalny SOC (programy 1/2/6).
 
 ### Szczegóły decyzyjne
-1. Sprawdzanie potrzeby balansowania.
-Jeżeli jest ustawiona flaga balansowania oznacza, że mamy priorytet balansowania. Żeby określić, czy należy uruchomić balansowanie, należy sprawdzić:
-- czy minęło więcej niż 2 dni od ustawienia flagi balansowania?
--- jeżeli tak, bezwarunkowo balansowanie jest wymagane
--- jeżeli nie, sprawdź, czy magazyn ma szansę się naładować jutro z produkcji PV. Aby to określić porównaj przewidywane zapotrzebowanie na energię elektryczną z prognozą produkcji PV oraz pojemnością magazynu
-2. Ocena zapasu energii.
-W tym celu należy po pierwsze sprawdzić, kiedy wypada godzina niezależności PV. Niezależność PV oznacza, że w danej godzinie będzie większa prognozowana skorygowana produkcja PV niż przewidywane zapotrzebowanie na energię w tej godzinie.
-Jeżeli w dniu następnym takiej godziny nie istnieje (zapotrzebowanie przekracza produkcję) - mamy niewystarczający zapas energii.
-Jeżeli taka godzina została określona, sumujemy zapotrzebowanie na energię elektryczną od godziny 22 do tej wyliczonej godziny. Od tej wartości odejmujemy prognozowaną skorygowaną produkcję PV oraz dostępną energię w magazynie (zawsze energię użyteczną, tj. przy założeniu rozładowania do poziomu MinSOC). Jeżeli liczba jest większa od zera (niedobór energii) mamy niewystarczający zapas energii. W przeciwnym razie możemy ustawić tryb normalny i używać energii z magazynu na potrzeby domu (optymalizacja kosztów dystrybucji).
+1. **Balansowanie**: aktywne, gdy `days_since_balancing >= balancing_interval_days` (lub brak last_balancing) oraz `pv_forecast_tomorrow < balancing_pv_threshold`.
+2. **Preservation**: aktywne, gdy `afternoon_grid_assist = True` **lub** `reserve_kwh < required_to_04` **lub** `pv_forecast_tomorrow × 0.9 < battery_space`.
+3. **Normal**: aktywne, gdy preservation nie jest wymagane i program 6 ma SOC powyżej minimalnego.
 
 ## Wpływ na maszynę stanów
 
