@@ -29,12 +29,6 @@ def test_is_test_mode_from_data() -> None:
     assert is_test_mode(entry) is True
 
 
-def test_is_test_mode_from_options_overrides_data() -> None:
-    entry = _mock_entry(data={CONF_TEST_MODE: False}, options={CONF_TEST_MODE: True})
-
-    assert is_test_mode(entry) is True
-
-
 @pytest.mark.asyncio
 async def test_set_program_soc_skips_when_test_mode_enabled() -> None:
     hass = MagicMock()

@@ -229,6 +229,9 @@
     "binary_sensor": {
       "balancing_ongoing": {
         "name": "Balancing ongoing"
+      },
+      "afternoon_grid_assist": {
+        "name": "Afternoon grid assist"
       }
     },
     "sensor": {

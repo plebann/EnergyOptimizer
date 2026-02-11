@@ -7,28 +7,39 @@ from typing import TYPE_CHECKING
 
 from homeassistant.util import dt as dt_util
 
-from ..calculations.battery import calculate_battery_space
+from ..calculations.battery import calculate_battery_reserve, calculate_battery_space
+from ..calculations.energy import calculate_losses, hourly_demand
+from ..calculations.utils import build_hourly_usage_array
 from ..const import (
+    CONF_BATTERY_CAPACITY_AH,
+    CONF_BATTERY_EFFICIENCY,
     CONF_BALANCING_INTERVAL_DAYS,
     CONF_BALANCING_PV_THRESHOLD,
     CONF_BATTERY_SOC_SENSOR,
+    CONF_BATTERY_VOLTAGE,
     DOMAIN,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_MAX_SOC,
+    CONF_MIN_SOC,
     CONF_PROG1_SOC_ENTITY,
     CONF_PROG2_SOC_ENTITY,
     CONF_PROG6_SOC_ENTITY,
     CONF_PV_FORECAST_TODAY,
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PRODUCTION_SENSOR,
+    DEFAULT_BATTERY_CAPACITY_AH,
+    DEFAULT_BATTERY_EFFICIENCY,
+    DEFAULT_BATTERY_VOLTAGE,
     DEFAULT_BALANCING_INTERVAL_DAYS,
     DEFAULT_BALANCING_PV_THRESHOLD,
     DEFAULT_MAX_CHARGE_CURRENT,
     DEFAULT_MAX_SOC,
+    DEFAULT_MIN_SOC,
 )
 from ..decision_engine.common import resolve_entry
 from ..helpers import get_float_state_info
 from ..controllers.inverter import set_program_soc, set_max_charge_current
+from ..utils.forecast import async_get_forecasts
 from ..utils.logging import DecisionOutcome, log_decision_unified
 
 if TYPE_CHECKING:
@@ -140,6 +151,7 @@ async def async_run_evening_behavior(
     # Get sensor reference from hass.data
     last_balancing_sensor = None
     balancing_ongoing_sensor = None
+    afternoon_grid_assist_sensor = None
     if (
         DOMAIN in hass.data
         and entry.entry_id in hass.data[DOMAIN]
@@ -149,6 +161,9 @@ async def async_run_evening_behavior(
         last_balancing_sensor = hass.data[DOMAIN][entry.entry_id]["last_balancing_sensor"]
         balancing_ongoing_sensor = hass.data[DOMAIN][entry.entry_id].get(
             "balancing_ongoing_sensor"
+        )
+        afternoon_grid_assist_sensor = hass.data[DOMAIN][entry.entry_id].get(
+            "afternoon_grid_assist_sensor"
         )
     else:
         _LOGGER.warning(
@@ -270,7 +285,7 @@ async def async_run_evening_behavior(
         _LOGGER.warning("Current battery SOC not available, skipping preservation check")
         return
 
-    min_soc = config.get("min_soc", 15)
+    min_soc = config.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
     if current_soc < min_soc:
         _LOGGER.info(
             "Current SOC %.1f%% below minimum %.1f%%, using min_soc as lock target",
@@ -280,9 +295,75 @@ async def async_run_evening_behavior(
         current_soc = min_soc
 
     # Calculate battery space
-    capacity_ah = config.get("battery_capacity_ah", 200)
-    voltage = config.get("battery_voltage", 48)
-    max_soc = config.get("max_soc", 100)
+    capacity_ah = config.get(CONF_BATTERY_CAPACITY_AH, DEFAULT_BATTERY_CAPACITY_AH)
+    voltage = config.get(CONF_BATTERY_VOLTAGE, DEFAULT_BATTERY_VOLTAGE)
+    max_soc = config.get(CONF_MAX_SOC, DEFAULT_MAX_SOC)
+    efficiency = config.get(CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY)
+    margin = 1.1
+
+    reserve_kwh = calculate_battery_reserve(
+        current_soc,
+        min_soc,
+        capacity_ah,
+        voltage,
+        efficiency=efficiency,
+    )
+
+    hourly_usage = build_hourly_usage_array(
+        config, hass.states.get, daily_load_fallback=None
+    )
+    losses_hourly, _ = calculate_losses(hass, config, hours_morning=8, margin=margin)
+    _, heat_pump_hourly_20_24, _, _ = (
+        await async_get_forecasts(
+            hass,
+            config,
+            start_hour=20,
+            end_hour=24,
+            apply_pv_efficiency=False,
+            pv_compensate=True,
+            entry_id=entry.entry_id,
+        )
+    )
+    _, heat_pump_hourly_00_04, _, _ = (
+        await async_get_forecasts(
+            hass,
+            config,
+            start_hour=0,
+            end_hour=4,
+            apply_pv_efficiency=False,
+            pv_compensate=True,
+            entry_id=entry.entry_id,
+        )
+    )
+    heat_pump_hourly = {
+        **heat_pump_hourly_20_24,
+        **heat_pump_hourly_00_04,
+    }
+
+    required_20_24_kwh = sum(
+        hourly_demand(
+            hour,
+            hourly_usage=hourly_usage,
+            heat_pump_hourly=heat_pump_hourly,
+            losses_hourly=losses_hourly,
+            margin=margin,
+        )
+        for hour in range(20, 24)
+    )
+    required_00_04_kwh = sum(
+        hourly_demand(
+            hour,
+            hourly_usage=hourly_usage,
+            heat_pump_hourly=heat_pump_hourly,
+            losses_hourly=losses_hourly,
+            margin=margin,
+        )
+        for hour in range(0, 4)
+    )
+    required_to_04_kwh = required_20_24_kwh + required_00_04_kwh
+
+    reserve_insufficient = reserve_kwh < required_to_04_kwh
+    grid_assist_on = bool(afternoon_grid_assist_sensor and afternoon_grid_assist_sensor.is_on)
 
     battery_space = calculate_battery_space(current_soc, max_soc, capacity_ah, voltage)
     pv_with_efficiency = pv_forecast * 0.9  # 90% efficiency factor
@@ -292,9 +373,23 @@ async def async_run_evening_behavior(
         battery_space,
         pv_with_efficiency,
     )
+    _LOGGER.debug(
+        "Reserve until 04:00: reserve=%.2f kWh, required=%.2f kWh, grid_assist=%s",
+        reserve_kwh,
+        required_to_04_kwh,
+        grid_assist_on,
+    )
 
     # SCENARIO 2: Battery Preservation Mode
-    if pv_with_efficiency < battery_space:
+    if grid_assist_on or reserve_insufficient or pv_with_efficiency < battery_space:
+        reasons = []
+        if grid_assist_on:
+            reasons.append("afternoon_grid_assist")
+        if reserve_insufficient:
+            reasons.append("reserve_insufficient")
+        if pv_with_efficiency < battery_space:
+            reasons.append("pv_insufficient")
+        reason_detail = ", ".join(reasons) if reasons else "preservation_required"
         _LOGGER.info(
             "Activating battery preservation mode (PV %.2f kWh < space %.2f kWh)",
             pv_with_efficiency,
@@ -308,17 +403,26 @@ async def async_run_evening_behavior(
             scenario="Evening behavior",
             action_type="preservation_enabled",
             summary=summary,
-            reason=f"SOC locked at {current_soc:.0f}%, PV: {pv_with_efficiency:.1f}, battery space: {battery_space:.1f}",
+            reason=(
+                f"SOC locked at {current_soc:.0f}%, PV: {pv_with_efficiency:.1f}, "
+                f"battery space: {battery_space:.1f}, reason: {reason_detail}"
+            ),
             key_metrics={
                 "result": summary,
                 "pv_forecast": f"{pv_forecast:.1f} kWh",
                 "battery_space": f"{battery_space:.1f} kWh",
+                "reserve": f"{reserve_kwh:.1f} kWh",
+                "required_to_04": f"{required_to_04_kwh:.1f} kWh",
                 "target": f"{current_soc:.0f}%",
             },
             full_details={
                 "pv_forecast_kwh": round(pv_forecast, 2),
                 "pv_with_efficiency_kwh": round(pv_with_efficiency, 2),
                 "battery_space_kwh": round(battery_space, 2),
+                "reserve_kwh": round(reserve_kwh, 2),
+                "required_to_04_kwh": round(required_to_04_kwh, 2),
+                "reserve_insufficient": reserve_insufficient,
+                "afternoon_grid_assist": grid_assist_on,
                 "current_soc": round(current_soc, 1),
                 "target_soc": round(current_soc, 1),
                 **pv_compensation_details,
@@ -352,6 +456,8 @@ async def async_run_evening_behavior(
         current_prog6_soc is not None
         and current_prog6_soc > min_soc
         and not (pv_with_efficiency < battery_space)
+        and not reserve_insufficient
+        and not grid_assist_on
     ):
         _LOGGER.info(
             "Restoring normal operation (current: %.0f%%, restoring to: %.0f%%)",
@@ -376,11 +482,17 @@ async def async_run_evening_behavior(
                 "pv_forecast": f"{pv_forecast:.1f} kWh",
                 "battery_space": f"{battery_space:.1f} kWh",
                 "pv_with_efficiency": f"{pv_with_efficiency:.1f} kWh",
+                "reserve": f"{reserve_kwh:.1f} kWh",
+                "required_to_04": f"{required_to_04_kwh:.1f} kWh",
             },
             full_details={
                 "previous_soc": round(current_prog6_soc, 1),
                 "target_soc": min_soc,
                 "pv_forecast_kwh": round(pv_forecast, 2),
+                "reserve_kwh": round(reserve_kwh, 2),
+                "required_to_04_kwh": round(required_to_04_kwh, 2),
+                "reserve_insufficient": reserve_insufficient,
+                "afternoon_grid_assist": grid_assist_on,
             },
             entities_changed=[
                 {"entity_id": prog1_soc, "value": min_soc},
@@ -408,6 +520,10 @@ async def async_run_evening_behavior(
             "pv_forecast_kwh": round(pv_forecast, 2),
             "battery_space_kwh": round(battery_space, 2) if battery_space else 0,
             "target_soc": round(current_soc, 1) if current_soc else 0,
+            "reserve_kwh": round(reserve_kwh, 2),
+            "required_to_04_kwh": round(required_to_04_kwh, 2),
+            "reserve_insufficient": reserve_insufficient,
+            "afternoon_grid_assist": grid_assist_on,
             **pv_compensation_details,
         },
     )

@@ -71,6 +71,20 @@ async def async_run_afternoon_charge(
         return
     config = entry.data
 
+    grid_assist_sensor = None
+    if (
+        DOMAIN in hass.data
+        and entry.entry_id in hass.data[DOMAIN]
+        and isinstance(hass.data[DOMAIN][entry.entry_id], dict)
+    ):
+        grid_assist_sensor = hass.data[DOMAIN][entry.entry_id].get(
+            "afternoon_grid_assist_sensor"
+        )
+
+    def _set_grid_assist(enabled: bool) -> None:
+        if grid_assist_sensor is not None:
+            grid_assist_sensor.set_assist(enabled)
+
     prog4_soc_state = get_required_prog4_soc_state(hass, config)
     if prog4_soc_state is None:
         return
@@ -134,6 +148,7 @@ async def async_run_afternoon_charge(
     usage_kwh = sum(hourly_usage[hour] for hour in range(start_hour, end_hour))
 
     if required_kwh <= 0.0:
+        _set_grid_assist(False)
         _LOGGER.info("Required afternoon energy is zero or negative, skipping")
         return
 
@@ -166,6 +181,8 @@ async def async_run_afternoon_charge(
 
     base_deficit_kwh = max(deficit_kwh, 0.0)
     total_deficit_kwh = base_deficit_kwh + arbitrage_kwh
+
+    _set_grid_assist(base_deficit_kwh > 0.0)
 
     if total_deficit_kwh <= 0.0:
         await _handle_no_action(
