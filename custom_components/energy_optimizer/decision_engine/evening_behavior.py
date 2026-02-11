@@ -374,12 +374,13 @@ async def async_run_evening_behavior(
                 "previous": f"{current_prog6_soc:.0f}%",
                 "target": f"{min_soc:.0f}%",
                 "pv_forecast": f"{pv_forecast:.1f} kWh",
+                "battery_space": f"{battery_space:.1f} kWh",
+                "pv_with_efficiency": f"{pv_with_efficiency:.1f} kWh",
             },
             full_details={
                 "previous_soc": round(current_prog6_soc, 1),
                 "target_soc": min_soc,
                 "pv_forecast_kwh": round(pv_forecast, 2),
-                **pv_compensation_details,
             },
             entities_changed=[
                 {"entity_id": prog1_soc, "value": min_soc},
