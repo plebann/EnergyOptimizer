@@ -13,10 +13,6 @@ from .energy import (
     calculate_required_energy,
     calculate_surplus_energy,
 )
-from .heat_pump import (
-    estimate_daily_consumption,
-    interpolate_cop,
-)
 from .utils import clamp, interpolate, is_valid_percentage, safe_float
 
 __all__ = [
@@ -30,9 +26,6 @@ __all__ = [
     # Energy
     "calculate_required_energy",
     "calculate_surplus_energy",
-    # Heat pump
-    "estimate_daily_consumption",
-    "interpolate_cop",
     # Utils
     "clamp",
     "interpolate",
