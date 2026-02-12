@@ -7,9 +7,9 @@ This project is a Home Assistant custom integration that must be compatible with
 ## Core Requirements
 
 ### Integration Structure
-- Domain: `heat_pump_predictor`
-- All integration files must be in `custom_components/heat_pump_predictor/`
-- Follow the structure documented in `.copilot-tracking/research/20241221-hacs-compatible-integration-research.md`
+- Domain: `energy_optimizer`
+- All integration files must be in `custom_components/energy_optimizer/`
+- Follow the structure documented in `.copilot-tracking/research/20241221-hacs-compatible-integration-research.md` and audit notes in `.copilot-tracking/research/20260212-copilot-instructions-audit-research.md`
 
 ### Mandatory Patterns
 
@@ -105,40 +105,10 @@ Ensure:
 
 ## Common Patterns
 
-### Setup Entry
-```python
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up from a config entry."""
-    coordinator = MyCoordinator(hass, entry.data)
-    await coordinator.async_config_entry_first_refresh()
-    
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    return True
-```
-
-### Unload Entry
-```python
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
-    return unload_ok
-```
-
-### Device Info
-```python
-from homeassistant.helpers.device_registry import DeviceInfo
-
-device_info = DeviceInfo(
-    identifiers={(DOMAIN, unique_id)},
-    name="Device Name",
-    manufacturer="Manufacturer",
-    model="Model",
-    sw_version="1.0.0",
-)
-```
+- Setup entry: store coordinator in `hass.data`, call `async_config_entry_first_refresh`, forward platforms.
+- Unload entry: unload platforms and remove entry from `hass.data`.
+- Device info: register device via `DeviceInfo` on entities.
+- See `.copilot-tracking/research/20241221-hacs-compatible-integration-research.md` for full examples.
 
 ## Avoid These Mistakes
 
@@ -153,7 +123,7 @@ device_info = DeviceInfo(
 
 ## When Generating Code
 
-1. **Check research document** first: `.copilot-tracking/research/20241221-hacs-compatible-integration-research.md`
+1. **Check research documents** first: `.copilot-tracking/research/20260212-copilot-instructions-audit-research.md` and `.copilot-tracking/research/20241221-hacs-compatible-integration-research.md`
 2. **Follow Home Assistant patterns** exactly as documented
 3. **Include proper typing** with type hints
 4. **Add docstrings** to all public functions/classes
@@ -164,24 +134,37 @@ device_info = DeviceInfo(
 ## Useful Commands
 
 ```bash
-# Run tests
+# Run tests (pytest, if configured in repo)
 pytest tests/ -v
 
-# Run with coverage
-pytest tests/ --cov=custom_components.heat_pump_predictor --cov-report=term-missing
+# Run a single test file (adjust path)
+pytest tests/test_helpers.py -v
 
-# Lint code
+# Run matching tests by keyword
+pytest tests/ -k "test_name" -v
+
+# Run with coverage
+pytest tests/ --cov=custom_components.energy_optimizer --cov-report=term-missing
+
+# Update snapshots (syrupy, if configured in repo)
+pytest tests/ --snapshot-update
+
+# Note: Tests may emit DEBUG/WARNING/INFO logs from the integration; this is normal if tests still pass.
+# Note: Full test run can take several seconds; allow it to complete before interrupting.
+
+# Lint code (if configured in repo)
 pre-commit run --all-files
 
-# Format code
+# Format code (if configured in repo)
 ruff format .
 
-# Check types
-mypy custom_components/heat_pump_predictor
+# Check types (if configured in repo)
+mypy custom_components/energy_optimizer
 ```
 
 ## Reference Documentation
 
+- Research: `.copilot-tracking/research/20260212-copilot-instructions-audit-research.md`
 - Research: `.copilot-tracking/research/20241221-hacs-compatible-integration-research.md`
 - HA Docs: https://developers.home-assistant.io/
 - HACS Docs: https://hacs.xyz/docs/publish/integration

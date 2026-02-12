@@ -1,16 +1,16 @@
 ---
 name: ha-integration-maintainer
-description: Home Assistant + HACS maintenance for the integration. Use when adding or updating config flow, coordinator, entities, services, translations, recorder/statistics compatibility, dashboards, or HACS release assets. Trigger for any HA/HACS changes to custom_components/heat_pump_predictor/.
+description: Home Assistant + HACS maintenance for the integration. Use when adding or updating config flow, coordinator, entities, services, translations, recorder/statistics compatibility, dashboards, or HACS release assets. Trigger for any HA/HACS changes to custom_components/energy_optimizer/.
 ---
 
-# Home Assistant Integration Maintainer (Heat Pump Predictor)
+# Home Assistant Integration Maintainer (Energy Optimizer)
 
-Use this skill whenever modifying or validating the Heat Pump Predictor integration for Home Assistant (HACS-compatible). Keep outputs concise; prefer checklists and ready snippets.
+Use this skill whenever modifying or validating the Energy Optimizer integration for Home Assistant (HACS-compatible). Keep outputs concise; prefer checklists and ready snippets.
 
 ## Scope and Triggers
 - Changes to config flow, coordinator, entities, services, translations, recorder/statistics, dashboards, or HACS packaging.
 - Debugging UpdateFailed, missing entities, translation or manifest issues, recorder/state_class warnings, or HACS validation.
-- Preparing releases (version bumps, docs alignment) for heat_pump_predictor.
+- Preparing releases (version bumps, docs alignment) for energy_optimizer.
 
 ## Quick Checklist (per change)
 - Config flow: async_step_user with voluptuous; validate 3 inputs (energy total_increasing, running binary, temperature sensor); surface errors via errors dict.
@@ -66,9 +66,9 @@ Use this skill whenever modifying or validating the Heat Pump Predictor integrat
 - Confirm hacs.json name set; README matches behavior.
 - Run tests (pytest) if available; lint if configured.
 - Validate strings.json is valid JSON and covers translation_keys used.
-- Tag/release per repo workflow; ensure assets in custom_components/heat_pump_predictor/ only.
+- Tag/release per repo workflow; ensure assets in custom_components/energy_optimizer/ only.
 
 ## References (read as needed)
 - Project README for sensor expectations and ApexCharts examples.
-- custom_components/heat_pump_predictor/const.py for domain, keys, and intervals.
+- custom_components/energy_optimizer/const.py for domain, keys, and intervals.
 - copilot/python-ha-integration.md for coding conventions (imports, async, logging, entities, constants).

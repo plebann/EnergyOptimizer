@@ -4,7 +4,7 @@
 
 ### Required Files
 ```
-custom_components/heat_pump_predictor/
+custom_components/energy_optimizer/
 ├── __init__.py              # Integration setup/teardown
 ├── manifest.json            # Integration metadata
 ├── config_flow.py           # UI configuration
@@ -31,12 +31,12 @@ custom_components/heat_pump_predictor/
 ## Naming Conventions
 
 ### Files
-- Lowercase with underscores: `heat_pump_predictor.py`
+- Lowercase with underscores: `energy_optimizer.py`
 - Platform files match HA domains: `sensor.py`, `switch.py`
 - Test files prefixed: `test_init.py`, `test_config_flow.py`
 
 ### Classes
-- PascalCase: `HeatPumpCoordinator`, `HeatPumpSensor`
+- PascalCase: `EnergyOptimizerCoordinator`, `EnergyOptimizerSensor`
 - Suffix with type: `*Entity`, `*Coordinator`, `*ConfigFlow`
 
 ### Functions
@@ -49,7 +49,7 @@ custom_components/heat_pump_predictor/
 
 ### Entity IDs
 - Format: `{domain}.{device}_{feature}`
-- Example: `sensor.heat_pump_temperature`
+- Example: `sensor.energy_optimizer_temperature`
 - Automatically generated from unique_id
 
 ## Type Hints
@@ -132,7 +132,7 @@ class MyEntity(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, device_id)},
-            name=f"Heat Pump {device_id}",
+            name=f"Energy Optimizer {device_id}",
             manufacturer="ACME Corp",
             model="HP-2000",
             sw_version="1.2.3",
@@ -149,7 +149,7 @@ class MyEntity(CoordinatorEntity, SensorEntity):
   "config": {
     "step": {
       "user": {
-        "title": "Set up Heat Pump Predictor",
+        "title": "Set up Energy Optimizer",
         "data": {
           "host": "Host",
           "api_key": "API Key"
@@ -189,13 +189,13 @@ from homeassistant.components.sensor import (
 from homeassistant.const import UnitOfTemperature
 
 @dataclass(frozen=True)
-class HeatPumpSensorDescription(SensorEntityDescription):
-    """Describes a heat pump sensor."""
+class EnergyOptimizerSensorDescription(SensorEntityDescription):
+    """Describes an energy optimizer sensor."""
     
     value_fn: Callable[[dict], Any] | None = None
 
-SENSOR_TYPES: tuple[HeatPumpSensorDescription, ...] = (
-    HeatPumpSensorDescription(
+SENSOR_TYPES: tuple[EnergyOptimizerSensorDescription, ...] = (
+  EnergyOptimizerSensorDescription(
         key="temperature",
         device_class=SensorDeviceClass.TEMPERATURE,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
@@ -231,10 +231,10 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up sensors."""
-    coordinator: HeatPumpCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: EnergyOptimizerCoordinator = hass.data[DOMAIN][entry.entry_id]
     
     entities = [
-        HeatPumpSensor(coordinator, description)
+        EnergyOptimizerSensor(coordinator, description)
         for description in SENSOR_TYPES
     ]
     
@@ -287,7 +287,7 @@ If adding custom services, define in services.yaml:
 ```yaml
 set_mode:
   name: Set operating mode
-  description: Set the heat pump operating mode
+  description: Set the energy optimizer operating mode
   fields:
     mode:
       name: Mode

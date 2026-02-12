@@ -646,8 +646,8 @@ IF (szczyt_wieczorny.max_cena > 95,1 gr/kWh) AND (nadwyżki_PV_w_południe > 3 k
 
 **Taryfa niska (22:00-6:00, 13:00-15:00 zimą / 15:00-17:00 latem):**
 ```
-1. Magazyn → dom (jeśli SoC > minimum)
-2. Sieć → dom (tania taryfa)
+1. Sieć → dom (tania taryfa)
+2. Magazyn → dom (jeśli SoC > minimum)
    
    WYJĄTEK: Jeśli flaga "blokuj_rozładowanie" aktywna:
    1. Sieć → dom (oszczędzamy magazyn na wysoką taryfę)
@@ -661,8 +661,8 @@ IF (szczyt_wieczorny.max_cena > 95,1 gr/kWh) AND (nadwyżki_PV_w_południe > 3 k
 
 ### **Podczas sprzedaży (force discharge):**
 ```
-1. Magazyn → sieć (eksport)
-2. Magazyn → dom (dom zasilany z magazynu)
+1. Magazyn → dom (dom zasilany z magazynu)
+2. Magazyn → sieć (eksport)
 ```
 
 ---
@@ -692,7 +692,7 @@ IF (szczyt_wieczorny.max_cena > 95,1 gr/kWh) AND (nadwyżki_PV_w_południe > 3 k
 
 ## UWAGI IMPLEMENTACYJNE
 
-1. **Wszystkie ceny RCE są w PLN/kWh netto** (bez VAT)
+1. **Wszystkie ceny RCE są w PLN/MWh netto** (bez VAT)
 2. **Sprawność magazynu 90%** uwzględniana w każdym obliczeniu arbitrażu
 3. **Marginesy bezpieczeństwa:**
    - Przy sprzedaży: zostaw 10-20% marginesu energii
