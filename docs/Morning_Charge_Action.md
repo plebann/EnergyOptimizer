@@ -42,6 +42,26 @@ Zapewnienie wystarczającej ilości energii w magazynie na pokrycie zapotrzebowa
    - Jeśli **rezerwa + prognoza PV >= zapotrzebowanie**: Brak akcji, energia wystarczy
    - Jeśli **deficyt > 0**: Oblicz ile energii załadować uwzględniając sprawność magazynu i zaplanuj doładowanie
 
+## Diagram (Mermaid)
+
+```mermaid
+flowchart TD
+   MC_start([Run morning charge]) --> MC_pre{Entry + entities ok?}
+   MC_pre -->|no| MC_exit[Exit]
+   MC_pre -->|yes| MC_balancing{Balancing ongoing?}
+   MC_balancing -->|yes| MC_exit_balancing[No action]
+   MC_balancing -->|no| MC_inputs[Compute inputs]
+   MC_inputs --> MC_deficit{Deficit > 0?}
+   MC_deficit -->|no| MC_no_action[No action]
+   MC_deficit -->|yes| MC_charge[Charge scheduled]
+   MC_exit -.-> MC_exit_note[Note: missing entry or entities]
+   MC_exit_balancing -.-> MC_exit_balancing_note[Note: log no-action, balancing ongoing]
+   MC_inputs -.-> MC_inputs_note[Note: reserve, forecasts till sufficiency window or tarrif end]
+   MC_deficit -.-> MC_deficit_note[Note: deficit is max of full vs sufficiency]
+   MC_no_action -.-> MC_no_action_note[Note: log no-action, deficit <= 0]
+   MC_charge -.-> MC_charge_note[Note: set prog2 SOC and charge current]
+```
+
 ### Szczegóły decyzyjne
 
 **Algorytm obliczania deficytu:**

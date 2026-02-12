@@ -452,13 +452,7 @@ async def async_run_evening_behavior(
         elif prog6_error == "invalid":
             _LOGGER.warning("Could not parse prog6 SOC: %s", prog6_raw)
 
-    if (
-        current_prog6_soc is not None
-        and current_prog6_soc > min_soc
-        and not (pv_with_efficiency < battery_space)
-        and not reserve_insufficient
-        and not grid_assist_on
-    ):
+    if current_prog6_soc is not None and current_prog6_soc > min_soc:
         _LOGGER.info(
             "Restoring normal operation (current: %.0f%%, restoring to: %.0f%%)",
             current_prog6_soc,

@@ -30,6 +30,26 @@ Zapobieganie nieefektywnemu rozładowaniu magazynu w nocy oraz wymuszenie pełne
 5. **Tryb ochrony (preservation)**: Jeśli włączone wsparcie z sieci po południu **lub** rezerwa jest niewystarczająca **lub** prognoza PV < przestrzeń magazynu, zamroź SOC (programy 1 i 6 na bieżący SOC).
 6. **Tryb normalny**: Jeśli brak przesłanek do ochrony i program 6 jest powyżej minimalnego SOC, przywróć normalny minimalny SOC (programy 1/2/6).
 
+## Diagram (Mermaid)
+
+```mermaid
+flowchart TD
+	EB_start([Run evening behavior]) --> EB_comp[Update PV compensation sensor]
+	EB_comp --> EB_balance{Balancing due AND PV < threshold?}
+	EB_balance -->|yes| EB_balancing[Balancing mode]
+	EB_balance -->|no| EB_inputs[Compute overnight inputs]
+	EB_inputs --> EB_preserve{Grid assist OR reserve insufficient OR PV < space?}
+	EB_preserve -->|yes| EB_freeze[Preservation mode]
+	EB_preserve -->|no| EB_restore{Prog6 > min?}
+	EB_restore -->|yes| EB_normal[Normal behavior]
+	EB_restore -->|no| EB_no_action[No action]
+	EB_balancing -.-> EB_balancing_note[Note: set prog1/2/6 SOC to max and max charge current]
+	EB_inputs -.-> EB_inputs_note[Note: reserve, battery space, required to 04:00]
+	EB_freeze -.-> EB_freeze_note[Note: set prog1/prog6 SOC to current]
+	EB_normal -.-> EB_normal_note[Note: set prog1/2/6 SOC to min]
+	EB_no_action -.-> EB_no_action_note[Note: log no-action]
+```
+
 ### Szczegóły decyzyjne
 1. **Balansowanie**: aktywne, gdy `days_since_balancing >= balancing_interval_days` (lub brak last_balancing) oraz `pv_forecast_tomorrow < balancing_pv_threshold`.
 2. **Preservation**: aktywne, gdy `afternoon_grid_assist = True` **lub** `reserve_kwh < required_to_04` **lub** `pv_forecast_tomorrow × 0.9 < battery_space`.
