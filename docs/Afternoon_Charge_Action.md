@@ -67,25 +67,19 @@ Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w
 
 ```mermaid
 flowchart TD
-  AC_start([Run afternoon charge]) --> AC_pre{Entry + entities ok?}
-   AC_pre -->|no| AC_exit[Exit]
-   AC_pre -->|yes| AC_inputs[Compute inputs]
-   AC_inputs --> AC_required{Energy required > 0?}
-   AC_required -->|no| AC_skip[No action]
-   AC_required -->|yes| AC_base[Compute base deficit]
+   AC_start([Run afternoon charge]) --> AC_inputs[Compute inputs]
+    AC_inputs --> AC_base[Compute base deficit]
    AC_base -.-> AC_grid_assist_note[Note: grid assist on when base deficit > 0]
    AC_base --> AC_arb[Compute arbitrage]
    AC_arb -.-> AC_arb_note[Note: extra energy to charge for later sale at high prices]
    AC_arb --> AC_total{Total deficit > 0?}
    AC_total -->|no| AC_reset[No action]
    AC_total -->|yes| AC_charge[Charge scheduled]
-   AC_exit -.-> AC_exit_note[Note: missing entry or entities]
-   AC_skip -.-> AC_skip_note[Note: grid assist off, required <= 0]
-    AC_inputs -.-> AC_inputs_note[Note: reserve, forecasts, losses, required from tariff_start_hour to 22:00]
-    AC_base -.-> AC_base_note[Note: base deficit = required - reserve - PV]
-    AC_total -.-> AC_total_note[Note: total deficit = base + arbitrage]
-   AC_reset -.-> AC_reset_note[Note: set prog4 SOC to min and log no-action]
-   AC_charge -.-> AC_charge_note[Note: set prog4 SOC and charge current]
+      AC_inputs -.-> AC_inputs_note[Note: reserve, forecasts, losses, required from tariff_start_hour to 22:00]
+       AC_base -.-> AC_base_note[Note: base deficit is required minus reserve and PV, clamped to zero]
+      AC_total -.-> AC_total_note[Note: total deficit = base + arbitrage]
+    AC_reset -.-> AC_reset_note[Note: set prog4 SOC to min and log no-action]
+    AC_charge -.-> AC_charge_note[Note: set prog4 SOC and charge current]
 ```
 
 ### Szczegóły decyzyjne

@@ -148,9 +148,10 @@ async def async_run_afternoon_charge(
     usage_kwh = sum(hourly_usage[hour] for hour in range(start_hour, end_hour))
 
     if required_kwh <= 0.0:
-        _set_grid_assist(False)
-        _LOGGER.info("Required afternoon energy is zero or negative, skipping")
-        return
+        _LOGGER.info(
+            "Required afternoon energy is zero or negative, proceeding with arbitrage only"
+        )
+        required_kwh = 0.0
 
     pv_compensation_factor = _get_pv_compensation_factor(hass, entry.entry_id)
 
