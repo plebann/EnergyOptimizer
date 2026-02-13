@@ -8,13 +8,14 @@ from homeassistant.util import dt as dt_util
 
 from ..const import (
     CONF_PV_EFFICIENCY,
-    CONF_PV_FORECAST_SENSOR,
     CONF_PV_FORECAST_REMAINING,
     CONF_PV_FORECAST_TODAY,
+    CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PRODUCTION_SENSOR,
     DEFAULT_PV_EFFICIENCY,
     DOMAIN,
 )
+from .time_window import build_hour_window
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -59,30 +60,7 @@ def get_forecast_adjusted_kwh(
     return forecast_adjusted, None
 
 
-def get_pv_forecast_kwh(
-    hass: HomeAssistant,
-    config: dict[str, object],
-    *,
-    start_hour: int = 6,
-    end_hour: int,
-    apply_efficiency: bool = True,
-    compensate: bool = False,
-    entry_id: str | None = None,
-) -> float:
-    """Return PV forecast energy between start and end hour."""
-    hourly_values = get_pv_forecast_hourly_kwh(
-        hass,
-        config,
-        start_hour=start_hour,
-        end_hour=end_hour,
-        apply_efficiency=apply_efficiency,
-        compensate=compensate,
-        entry_id=entry_id,
-    )
-    return sum(hourly_values.values())
-
-
-def get_pv_forecast_hourly_kwh(
+def get_pv_forecast(
     hass: HomeAssistant,
     config: dict[str, object],
     *,
@@ -110,7 +88,14 @@ def get_pv_forecast_hourly_kwh(
     if apply_efficiency:
         hourly_kwh = _apply_pv_efficiency(config, hourly_kwh)
 
-    return hourly_kwh
+    return sum(hourly_kwh.values()), hourly_kwh
+
+
+def get_pv_compensation_factor(
+    hass: HomeAssistant, entry_id: str | None
+) -> float | None:
+    """Return the PV compensation factor from the integration sensor."""
+    return _get_sensor_compensation_factor(hass, entry_id)
 
 
 def _collect_pv_forecast_hourly_kwh(
@@ -121,49 +106,79 @@ def _collect_pv_forecast_hourly_kwh(
     end_hour: int,
 ) -> dict[int, float]:
     """Collect PV forecast energy per hour without efficiency adjustments."""
-    pv_sensor = config.get(CONF_PV_FORECAST_SENSOR) or config.get(
-        CONF_PV_FORECAST_TODAY
-    )
-    hourly_kwh: dict[int, float] = {hour: 0.0 for hour in range(start_hour, end_hour)}
+    hour_window = build_hour_window(start_hour, end_hour)
+    hourly_kwh: dict[int, float] = {hour: 0.0 for hour in hour_window}
+    now_hour = dt_util.now().hour
+    today_sensor = config.get(CONF_PV_FORECAST_TODAY)
+    tomorrow_sensor = config.get(CONF_PV_FORECAST_TOMORROW)
+    segments: list[tuple[list[dict], int, int]] = []
 
-    if not pv_sensor:
-        _LOGGER.warning("PV forecast sensor not configured")
+    if start_hour < now_hour:
+        if end_hour < start_hour:
+            _LOGGER.error(
+                "Invalid PV forecast window: end_hour %s < start_hour %s for tomorrow",
+                end_hour,
+                start_hour,
+            )
+            return hourly_kwh
+        detailed = _get_detailed_forecast(hass, tomorrow_sensor, "tomorrow")
+        if detailed:
+            segments.append((detailed, start_hour, end_hour))
+    elif end_hour > start_hour:
+        detailed = _get_detailed_forecast(hass, today_sensor, "today")
+        if detailed:
+            segments.append((detailed, start_hour, end_hour))
+    else:
+        detailed_today = _get_detailed_forecast(hass, today_sensor, "today")
+        if detailed_today:
+            segments.append((detailed_today, start_hour, 24))
+        detailed_tomorrow = _get_detailed_forecast(hass, tomorrow_sensor, "tomorrow")
+        if detailed_tomorrow:
+            segments.append((detailed_tomorrow, 0, end_hour))
+
+    if not segments:
         return hourly_kwh
 
-    pv_state = hass.states.get(pv_sensor)
-    if pv_state is None:
-        _LOGGER.warning("PV forecast sensor %s unavailable", pv_sensor)
-        return hourly_kwh
-
-    detailed_forecast = pv_state.attributes.get("detailedHourly")
-    if detailed_forecast is None:
-        detailed_forecast = pv_state.attributes.get("detailedForecast")
-
-    if not isinstance(detailed_forecast, list):
-        _LOGGER.warning(
-            "PV forecast sensor has no detailedHourly/detailedForecast: %s",
-            pv_sensor,
-        )
-        return hourly_kwh
-
-    for item in detailed_forecast:
-        if not isinstance(item, dict):
-            continue
-        period_start = item.get("period_start")
-        pv_estimate = item.get("pv_estimate")
-        if period_start is None or pv_estimate is None:
-            continue
-        dt_value = dt_util.parse_datetime(str(period_start))
-        if dt_value is None:
-            continue
-        dt_value = dt_util.as_local(dt_value)
-        if start_hour <= dt_value.hour < end_hour:
-            try:
-                hourly_kwh[dt_value.hour] += float(pv_estimate)
-            except (ValueError, TypeError):
+    for detailed, window_start, window_end in segments:
+        for item in detailed:
+            if not isinstance(item, dict):
                 continue
+            period_start = item.get("period_start")
+            pv_estimate = item.get("pv_estimate")
+            if period_start is None or pv_estimate is None:
+                continue
+            dt_value = dt_util.parse_datetime(str(period_start))
+            if dt_value is None:
+                continue
+            dt_value = dt_util.as_local(dt_value)
+            if window_start <= dt_value.hour < window_end:
+                try:
+                    hourly_kwh[dt_value.hour] += float(pv_estimate)
+                except (ValueError, TypeError):
+                    continue
 
     return hourly_kwh
+
+
+def _get_detailed_forecast(
+    hass: HomeAssistant, sensor: str | None, label: str
+) -> list[dict] | None:
+    if not sensor:
+        _LOGGER.warning("PV forecast %s sensor not configured", label)
+        return None
+    pv_state = hass.states.get(sensor)
+    if pv_state is None:
+        _LOGGER.warning("PV forecast %s sensor %s unavailable", label, sensor)
+        return None
+    detailed = pv_state.attributes.get("detailedHourly")
+    if not isinstance(detailed, list):
+        _LOGGER.warning(
+            "PV forecast %s sensor has no detailedHourly: %s",
+            label,
+            sensor,
+        )
+        return None
+    return detailed
 
 
 def _apply_pv_efficiency(

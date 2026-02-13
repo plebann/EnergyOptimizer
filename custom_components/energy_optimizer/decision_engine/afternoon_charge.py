@@ -35,6 +35,7 @@ from ..const import (
     DEFAULT_MIN_SOC,
 )
 from ..decision_engine.common import (
+    build_charge_outcome,
     get_required_current_soc_state,
     get_required_prog4_soc_state,
     resolve_entry,
@@ -46,7 +47,7 @@ from ..helpers import (
 )
 from ..controllers.inverter import set_charge_current, set_program_soc
 from ..utils.forecast import async_get_forecasts
-from ..utils.pv_forecast import get_forecast_adjusted_kwh
+from ..utils.pv_forecast import get_forecast_adjusted_kwh, get_pv_compensation_factor
 from ..utils.logging import DecisionOutcome, log_decision_unified
 
 if TYPE_CHECKING:
@@ -93,7 +94,7 @@ async def async_run_afternoon_charge(
     current_soc_state = get_required_current_soc_state(hass, config)
     if current_soc_state is None:
         return
-    _battery_soc_entity, current_soc = current_soc_state
+    _, current_soc = current_soc_state
 
     capacity_ah = config.get(CONF_BATTERY_CAPACITY_AH, DEFAULT_BATTERY_CAPACITY_AH)
     voltage = config.get(CONF_BATTERY_VOLTAGE, DEFAULT_BATTERY_VOLTAGE)
@@ -116,8 +117,10 @@ async def async_run_afternoon_charge(
 
     start_hour = resolve_tariff_start_hour(hass, config)
     end_hour = 22
-    hours_window = max(end_hour - start_hour, 1)
+    hours = max(end_hour - start_hour, 1)
 
+    usage = sum(hourly_usage[hour] for hour in range(start_hour, end_hour))
+    
     heat_pump_kwh, heat_pump_hourly, pv_forecast_kwh, pv_forecast_hourly = (
         await async_get_forecasts(
             hass,
@@ -131,19 +134,10 @@ async def async_run_afternoon_charge(
     )
 
     losses_hourly, losses_kwh = calculate_losses(
-        hass, config, hours_morning=hours_window, margin=margin
+        hass, config, hours=hours, margin=margin
     )
 
-    required_kwh = sum(
-        hourly_demand(
-            hour,
-            hourly_usage=hourly_usage,
-            heat_pump_hourly=heat_pump_hourly,
-            losses_hourly=losses_hourly,
-            margin=margin,
-        )
-        for hour in range(start_hour, end_hour)
-    )
+    required_kwh = (usage + heat_pump_kwh + losses_kwh) * margin
 
     usage_kwh = sum(hourly_usage[hour] for hour in range(start_hour, end_hour))
 
@@ -153,7 +147,7 @@ async def async_run_afternoon_charge(
         )
         required_kwh = 0.0
 
-    pv_compensation_factor = _get_pv_compensation_factor(hass, entry.entry_id)
+    pv_compensation_factor = get_pv_compensation_factor(hass, entry.entry_id)
 
     deficit_kwh = required_kwh - reserve_kwh - pv_forecast_kwh
 
@@ -241,12 +235,14 @@ async def async_run_afternoon_charge(
         context=integration_context,
     )
 
-    outcome = _build_charge_outcome(
+    outcome = build_charge_outcome(
+        scenario="Afternoon Grid Charge",
+        mode="afternoon",
         target_soc=target_soc,
         required_kwh=required_kwh,
         reserve_kwh=reserve_kwh,
         deficit_to_charge_kwh=deficit_to_charge_kwh,
-        deficit_raw_kwh=deficit_kwh,
+        deficit_all_kwh=deficit_kwh,
         arbitrage_kwh=arbitrage_kwh,
         arbitrage_details=arbitrage_details,
         pv_forecast_kwh=pv_forecast_kwh,
@@ -368,91 +364,6 @@ async def _handle_no_action(
     )
 
 
-def _build_charge_outcome(
-    *,
-    target_soc: float,
-    required_kwh: float,
-    reserve_kwh: float,
-    deficit_to_charge_kwh: float,
-    deficit_raw_kwh: float,
-    arbitrage_kwh: float,
-    arbitrage_details: dict[str, float | str] | None,
-    pv_forecast_kwh: float,
-    heat_pump_kwh: float,
-    charge_current: float,
-    current_soc: float,
-    losses_kwh: float,
-    efficiency: float,
-    margin: float,
-    start_hour: int,
-    end_hour: int,
-    usage_kwh: float,
-    pv_compensation_factor: float | None,
-) -> DecisionOutcome:
-    summary = f"Battery scheduled to charge to {target_soc:.0f}%"
-    return DecisionOutcome(
-        scenario="Afternoon Grid Charge",
-        action_type="charge_scheduled",
-        summary=summary,
-        reason=(
-            f"Deficit {deficit_to_charge_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
-            f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh, "
-            f"arbitrage {arbitrage_kwh:.1f} kWh, current {charge_current:.0f} A"
-        ),
-        key_metrics={
-            "target": f"{target_soc:.0f}%",
-            "result": summary,
-            "required": f"{required_kwh:.1f} kWh",
-            "reserve": f"{reserve_kwh:.1f} kWh",
-            "deficit": f"{deficit_to_charge_kwh:.1f} kWh",
-            "arbitrage": f"{arbitrage_kwh:.1f} kWh",
-            "pv": f"{pv_forecast_kwh:.1f} kWh",
-            "heat_pump": f"{heat_pump_kwh:.1f} kWh",
-            "current": f"{charge_current:.0f} A",
-            "window": f"{start_hour:02d}:00-{end_hour:02d}:00",
-        },
-        full_details={
-            "target_soc": round(target_soc, 1),
-            "current_soc": round(current_soc, 1),
-            "reserve_kwh": round(reserve_kwh, 2),
-            "required_kwh": round(required_kwh, 2),
-            "usage_kwh": round(usage_kwh, 2),
-            "deficit_kwh": round(deficit_to_charge_kwh, 2),
-            "deficit_raw_kwh": round(deficit_raw_kwh, 2),
-            "arbitrage_kwh": round(arbitrage_kwh, 2),
-            "losses_kwh": round(losses_kwh, 2),
-            "pv_forecast_kwh": round(pv_forecast_kwh, 2),
-            "pv_compensation_factor": (
-                round(pv_compensation_factor, 4)
-                if pv_compensation_factor is not None
-                else None
-            ),
-            "heat_pump_kwh": round(heat_pump_kwh, 2),
-            "charge_current_a": round(charge_current, 1),
-            "efficiency": round(efficiency, 1),
-            "margin": margin,
-            "start_hour": start_hour,
-            "end_hour": end_hour,
-            **(arbitrage_details or {}),
-        },
-    )
-
-
-def _get_pv_compensation_factor(
-    hass: HomeAssistant, entry_id: str
-) -> float | None:
-    if DOMAIN not in hass.data or entry_id not in hass.data[DOMAIN]:
-        return None
-    sensor = hass.data[DOMAIN][entry_id].get("pv_forecast_compensation_sensor")
-    if sensor is None:
-        return None
-    value = getattr(sensor, "native_value", None)
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return None
 
 
 def _calculate_arbitrage_kwh(

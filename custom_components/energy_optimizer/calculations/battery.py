@@ -53,14 +53,14 @@ def calculate_battery_reserve(
     Returns:
         Available reserve energy (kWh).
     """
-    if current_soc <= min_soc:
-        return 0.0
 
     if efficiency <= 0:
         return 0.0
 
     reserve_soc = current_soc - min_soc
     reserve_kwh = soc_to_kwh(reserve_soc, capacity_ah, voltage)
+    if reserve_kwh <= 0:
+        return reserve_kwh * (200 - efficiency) / 100.0
     return reserve_kwh * (efficiency / 100.0)
 
 
