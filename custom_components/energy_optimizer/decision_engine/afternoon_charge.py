@@ -35,7 +35,7 @@ from ..const import (
     DEFAULT_MIN_SOC,
 )
 from ..decision_engine.common import (
-    build_charge_outcome,
+    build_afternoon_charge_outcome,
     get_required_current_soc_state,
     get_required_prog4_soc_state,
     resolve_entry,
@@ -46,7 +46,7 @@ from ..helpers import (
     resolve_tariff_start_hour,
 )
 from ..controllers.inverter import set_charge_current, set_program_soc
-from ..utils.forecast import async_get_forecasts
+from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.pv_forecast import get_forecast_adjusted_kwh, get_pv_compensation_factor
 from ..utils.logging import DecisionOutcome, log_decision_unified
 
@@ -121,16 +121,17 @@ async def async_run_afternoon_charge(
 
     usage = sum(hourly_usage[hour] for hour in range(start_hour, end_hour))
     
-    heat_pump_kwh, heat_pump_hourly, pv_forecast_kwh, pv_forecast_hourly = (
-        await async_get_forecasts(
-            hass,
-            config,
-            start_hour=start_hour,
-            end_hour=end_hour,
-            apply_pv_efficiency=False,
-            pv_compensate=True,
-            entry_id=entry.entry_id,
-        )
+    heat_pump_kwh, heat_pump_hourly = await get_heat_pump_forecast_window(
+        hass, config, start_hour=start_hour, end_hour=end_hour
+    )
+    pv_forecast_kwh, pv_forecast_hourly = get_pv_forecast_window(
+        hass,
+        config,
+        start_hour=start_hour,
+        end_hour=end_hour,
+        apply_efficiency=False,
+        compensate=True,
+        entry_id=entry.entry_id,
     )
 
     losses_hourly, losses_kwh = calculate_losses(
@@ -235,9 +236,8 @@ async def async_run_afternoon_charge(
         context=integration_context,
     )
 
-    outcome = build_charge_outcome(
+    outcome = build_afternoon_charge_outcome(
         scenario="Afternoon Grid Charge",
-        mode="afternoon",
         target_soc=target_soc,
         required_kwh=required_kwh,
         reserve_kwh=reserve_kwh,

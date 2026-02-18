@@ -43,7 +43,7 @@ from ..const import (
 from ..decision_engine.common import resolve_entry
 from ..helpers import get_float_state_info
 from ..controllers.inverter import set_program_soc, set_max_charge_current
-from ..utils.forecast import async_get_forecasts
+from ..utils.forecast import get_heat_pump_forecast_window
 from ..utils.logging import DecisionOutcome, log_decision_unified
 
 if TYPE_CHECKING:
@@ -322,15 +322,8 @@ async def async_run_evening_behavior(
     
     _, losses_kwh = calculate_losses(hass, config, hours=8, margin=margin)
 
-    heat_pump_kwh, _, _, _ = (
-        await async_get_forecasts(
-            hass,
-            config,
-            start_hour=22,
-            end_hour=4,
-            pv_compensate=True,
-            entry_id=entry.entry_id,
-        )
+    heat_pump_kwh, _ = await get_heat_pump_forecast_window(
+        hass, config, start_hour=22, end_hour=4
     )
 
     required_kwh = (usage + heat_pump_kwh + losses_kwh) * margin

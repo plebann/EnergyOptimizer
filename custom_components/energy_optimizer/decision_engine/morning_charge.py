@@ -26,7 +26,7 @@ from ..const import (
     DEFAULT_MIN_SOC,
 )
 from ..decision_engine.common import (
-    build_charge_outcome,
+    build_morning_charge_outcome,
     get_required_current_soc_state,
     get_required_prog2_soc_state,
     resolve_entry,
@@ -37,7 +37,7 @@ from ..helpers import (
     set_balancing_ongoing,
 )
 from ..controllers.inverter import set_charge_current, set_program_soc
-from ..utils.forecast import async_get_forecasts
+from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.pv_forecast import get_pv_compensation_factor
 from ..utils.logging import DecisionOutcome, format_sufficiency_hour, log_decision_unified
 
@@ -100,15 +100,16 @@ async def async_run_morning_charge(
 
     start_hour = 6
     hours = max(tariff_end_hour - start_hour, 1)
-    heat_pump_kwh, heat_pump_hourly, pv_forecast_kwh, pv_forecast_hourly = (
-        await async_get_forecasts(
-            hass,
-            config,
-            start_hour=start_hour,
-            end_hour=tariff_end_hour,
-            pv_compensate=True,
-            entry_id=entry.entry_id,
-        )
+    heat_pump_kwh, heat_pump_hourly = await get_heat_pump_forecast_window(
+        hass, config, start_hour=start_hour, end_hour=tariff_end_hour
+    )
+    pv_forecast_kwh, pv_forecast_hourly = get_pv_forecast_window(
+        hass,
+        config,
+        start_hour=start_hour,
+        end_hour=tariff_end_hour,
+        compensate=True,
+        entry_id=entry.entry_id,
     )
     losses_hourly, losses_kwh = calculate_losses(
         hass, config, hours=hours, margin=margin
@@ -198,9 +199,8 @@ async def async_run_morning_charge(
         context=integration_context,
     )
 
-    outcome = build_charge_outcome(
+    outcome = build_morning_charge_outcome(
         scenario="Morning Grid Charge",
-        mode="morning",
         target_soc=target_soc,
         required_kwh=required_kwh,
         required_sufficiency_kwh=required_sufficiency_kwh,
@@ -220,6 +220,8 @@ async def async_run_morning_charge(
         sufficiency_hour=sufficiency_hour,
         sufficiency_reached=sufficiency_reached,
         pv_compensation_factor=pv_compensation_factor,
+        start_hour=start_hour,
+        end_hour=tariff_end_hour,
     )
     outcome.entities_changed = [
         {"entity_id": prog2_soc_entity, "value": target_soc},
