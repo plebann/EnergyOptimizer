@@ -10,12 +10,10 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorStateClass,
 )
-from homeassistant.const import EntityCategory
 from homeassistant.helpers.restore_state import ExtraStoredData
 from homeassistant.util import dt as dt_util
 
 from ..base import EnergyOptimizerSensor
-from ...helpers import is_test_mode
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -194,21 +192,6 @@ class LastOptimizationSensor(EnergyOptimizerSensor, RestoreSensor):
         }
         self.async_write_ha_state()
         _LOGGER.debug("Logged optimization: %s - %s", scenario, details)
-
-
-class TestModeSensor(EnergyOptimizerSensor):
-    """Sensor showing whether test mode is enabled."""
-
-    _attr_has_entity_name = True
-    _attr_translation_key = "test_mode"
-    _attr_unique_id = "test_mode"
-    _attr_icon = "mdi:test-tube"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> bool:
-        """Return whether test mode is enabled."""
-        return is_test_mode(self.config_entry)
 
 
 class PvForecastCompensationSensor(EnergyOptimizerSensor, RestoreSensor):

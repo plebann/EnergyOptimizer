@@ -24,7 +24,6 @@ from .entities.sensors import (
     MinSocSensor,
     OptimizationHistorySensor,
     PvForecastCompensationSensor,
-    TestModeSensor,
     UsableCapacitySensor,
 )
 from .services import check_and_update_balancing_completion
@@ -54,7 +53,6 @@ async def async_setup_entry(
         BatteryEfficiencySensor(coordinator, config_entry, config),
         MinSocSensor(coordinator, config_entry, config),
         MaxSocSensor(coordinator, config_entry, config),
-        TestModeSensor(coordinator, config_entry, config),
         PvForecastCompensationSensor(coordinator, config_entry, config),
     ]
 

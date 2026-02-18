@@ -13,9 +13,15 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-def is_test_mode(entry: ConfigEntry) -> bool:
+def is_test_mode(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Return True when test mode is enabled for the config entry."""
-    from .const import CONF_TEST_MODE
+    from .const import CONF_TEST_MODE, DOMAIN
+
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if isinstance(entry_data, dict):
+        test_mode_switch = entry_data.get("test_mode_switch")
+        if test_mode_switch is not None:
+            return bool(test_mode_switch.is_on)
 
     if CONF_TEST_MODE in entry.data:
         return bool(entry.data.get(CONF_TEST_MODE))

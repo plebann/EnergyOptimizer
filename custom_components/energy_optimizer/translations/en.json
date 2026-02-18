@@ -71,7 +71,6 @@
           "charge_current_entity": "Charge Current Control (Optional)",
           "discharge_current_entity": "Discharge Current Control (Optional)",
           "max_charge_current_entity": "Max Charge Current (Optional)",
-          "test_mode": "Test Mode",
           "grid_charge_switch": "Grid Charge Switch (Optional)"
         },
         "data_description": {
@@ -79,7 +78,6 @@
           "charge_current_entity": "Entity to control charge current limit",
           "discharge_current_entity": "Entity to control discharge current limit",
           "max_charge_current_entity": "Entity to cap charge current (set to default 23A during balancing)",
-          "test_mode": "When enabled, the integration will not change any entity values",
           "grid_charge_switch": "Switch to enable/disable grid charging"
         }
       },
@@ -205,8 +203,7 @@
           "battery_efficiency": "Battery Efficiency (%)",
           "balancing_interval_days": "Balancing Interval (Days)",
           "balancing_pv_threshold_kwh": "Balancing PV Threshold (kWh)",
-          "max_charge_current_entity": "Max Charge Current (Optional)",
-          "test_mode": "Test Mode"
+          "max_charge_current_entity": "Max Charge Current (Optional)"
         },
         "data_description": {
           "battery_capacity_ah": "Battery capacity in Ampere-hours",
@@ -216,8 +213,7 @@
           "battery_efficiency": "Round-trip efficiency (90-95% typical)",
           "balancing_interval_days": "How often to trigger full balancing if PV forecast is low (default 14 days)",
           "balancing_pv_threshold_kwh": "Only enable balancing when tomorrow's PV forecast is below this threshold",
-          "max_charge_current_entity": "Entity to cap charge current (set to default 23A during balancing)",
-          "test_mode": "When enabled, the integration will not change any entity values"
+          "max_charge_current_entity": "Entity to cap charge current (set to default 23A during balancing)"
         }
       }
     },
@@ -235,11 +231,13 @@
       }
     },
     "sensor": {
-      "test_mode": {
-        "name": "Test mode"
-      },
       "pv_forecast_compensation": {
         "name": "PV forecast compensation"
+      }
+    },
+    "switch": {
+      "test_mode": {
+        "name": "Test mode"
       }
     }
   }

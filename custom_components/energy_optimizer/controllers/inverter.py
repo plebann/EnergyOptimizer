@@ -49,7 +49,7 @@ async def set_program_soc(
     value = float(ceil(value))
 
     if entry is not None:
-        if is_test_mode(entry):
+        if is_test_mode(hass, entry):
             if logger:
                 logger.info("Test mode enabled - skipping set_value for %s", entity_id)
             else:
@@ -84,7 +84,7 @@ async def set_max_charge_current(
         return
 
     if entry is not None:
-        if is_test_mode(entry):
+        if is_test_mode(hass, entry):
             if logger:
                 logger.info("Test mode enabled - skipping set_value for %s", entity_id)
             else:
@@ -119,7 +119,7 @@ async def set_charge_current(
         return
 
     if entry is not None:
-        if is_test_mode(entry):
+        if is_test_mode(hass, entry):
             if logger:
                 logger.info("Test mode enabled - skipping set_value for %s", entity_id)
             else:

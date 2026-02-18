@@ -62,7 +62,6 @@ from .const import (
     CONF_SELL_WINDOW_START_SENSOR,
     CONF_TARIFF_START_HOUR_SENSOR,
     CONF_TARIFF_END_HOUR_SENSOR,
-    CONF_TEST_MODE,
     CONF_TODAY_LOAD_SENSOR,
     CONF_TOMORROW_PRICE_SENSOR,
     CONF_WEATHER_FORECAST,
@@ -266,7 +265,6 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_MAX_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(CONF_TEST_MODE, default=True): selector.BooleanSelector(),
                 vol.Optional(CONF_GRID_CHARGE_SWITCH): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="switch")
                 ),
@@ -867,10 +865,6 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(
-                    CONF_TEST_MODE,
-                    default=self._config_entry.data.get(CONF_TEST_MODE, False),
-                ): selector.BooleanSelector(),
                 vol.Optional(
                     CONF_GRID_CHARGE_SWITCH,
                     default=self._config_entry.data.get(CONF_GRID_CHARGE_SWITCH),

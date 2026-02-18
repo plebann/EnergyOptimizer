@@ -15,7 +15,6 @@ from .tracking import (
     LastOptimizationSensor,
     OptimizationHistorySensor,
     PvForecastCompensationSensor,
-    TestModeSensor,
 )
 
 __all__ = [
@@ -31,6 +30,5 @@ __all__ = [
     "MinSocSensor",
     "OptimizationHistorySensor",
     "PvForecastCompensationSensor",
-    "TestModeSensor",
     "UsableCapacitySensor",
 ]
