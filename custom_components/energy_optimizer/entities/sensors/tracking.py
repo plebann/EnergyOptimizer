@@ -265,6 +265,9 @@ class PvForecastCompensationSensor(EnergyOptimizerSensor, RestoreSensor):
             factor = ratio_yesterday
         else:
             factor = None
+        
+        if factor is not None and factor > 1:
+            factor = 1 + factor * 0.1
 
         self._attr_native_value = round(factor, 4) if factor is not None else None
         self._attr_extra_state_attributes = {
