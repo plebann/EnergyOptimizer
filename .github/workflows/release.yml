@@ -15,6 +15,9 @@ on:
 
 run-name: Create Release (${{ github.event.inputs.version_increment || 'patch' }} increment)
 
+env:
+  INTEGRATION_NAME: energy_optimizer
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -53,13 +56,13 @@ jobs:
 
       - name: Update manifest.json (local only, not committed)
         run: |
-          cd custom_components/energy_optimizer
+          cd custom_components/${{ env.INTEGRATION_NAME }}
           jq --arg v "${{ steps.version.outputs.version }}" '.version = $v' manifest.json > tmp.json && mv tmp.json manifest.json
 
       - name: Create release archive
         run: |
-          cd custom_components/energy_optimizer
-          zip -r ../../energy_optimizer.zip . -x "__pycache__/*" "**/__pycache__/*"
+          cd custom_components/${{ env.INTEGRATION_NAME }}
+          zip -r ../../${{ env.INTEGRATION_NAME }}.zip . -x "__pycache__/*" "**/__pycache__/*"
 
       - name: Create tag
         run: |
@@ -71,9 +74,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: Release ${{ steps.version.outputs.version }}
+          name: Release ${{ env.INTEGRATION_NAME }} ${{ steps.version.outputs.version }}
           generate_release_notes: true
           files: |
-            energy_optimizer.zip
+            ${{ env.INTEGRATION_NAME }}.zip
           draft: false
           prerelease: false
