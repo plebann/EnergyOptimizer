@@ -198,6 +198,7 @@ async def async_run_afternoon_charge(
             target_soc=target_soc,
             reserve_kwh=reserve_kwh,
             required_kwh=required_kwh,
+            deficit_kwh=total_deficit_kwh,
             pv_forecast_kwh=pv_forecast_kwh,
             heat_pump_kwh=heat_pump_kwh,
             losses_kwh=losses_kwh,
@@ -280,6 +281,7 @@ def _build_no_action_outcome(
     required_kwh: float,
     pv_forecast_kwh: float,
     heat_pump_kwh: float,
+    deficit_kwh: float,
     losses_kwh: float,
     start_hour: int,
     end_hour: int,
@@ -293,7 +295,7 @@ def _build_no_action_outcome(
         action_type="no_action",
         summary=summary,
         reason=(
-            f"Deficit <= 0 kWh, reserve {reserve_kwh:.1f} kWh, "
+            f"Deficit {deficit_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
             f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh"
         ),
         key_metrics={
@@ -333,6 +335,7 @@ async def _handle_no_action(
     target_soc: float,
     reserve_kwh: float,
     required_kwh: float,
+    deficit_kwh: float,
     pv_forecast_kwh: float,
     heat_pump_kwh: float,
     losses_kwh: float,
@@ -347,6 +350,7 @@ async def _handle_no_action(
         reserve_kwh=reserve_kwh,
         required_kwh=required_kwh,
         pv_forecast_kwh=pv_forecast_kwh,
+        deficit_kwh=deficit_kwh,
         heat_pump_kwh=heat_pump_kwh,
         losses_kwh=losses_kwh,
         start_hour=start_hour,
