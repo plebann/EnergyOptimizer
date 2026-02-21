@@ -4,9 +4,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from homeassistant.core import Context
 from homeassistant.util import dt as dt_util
 
 from ..calculations.battery import (
+    apply_efficiency_compensation,
     calculate_battery_reserve,
     calculate_charge_current,
     calculate_soc_delta,
@@ -16,28 +18,21 @@ from ..calculations.battery import (
 from ..calculations.energy import calculate_losses, hourly_demand
 from ..calculations.utils import build_hourly_usage_array
 from ..const import (
-    CONF_BATTERY_CAPACITY_AH,
-    CONF_BATTERY_EFFICIENCY,
-    CONF_BATTERY_VOLTAGE,
     CONF_CHARGE_CURRENT_ENTITY,
-    CONF_MAX_SOC,
-    CONF_MIN_SOC,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_PV_FORECAST_REMAINING,
     CONF_PV_FORECAST_TODAY,
     CONF_PV_PRODUCTION_SENSOR,
     CONF_SELL_WINDOW_PRICE_SENSOR,
-    DOMAIN,
-    DEFAULT_BATTERY_CAPACITY_AH,
-    DEFAULT_BATTERY_EFFICIENCY,
-    DEFAULT_BATTERY_VOLTAGE,
-    DEFAULT_MAX_SOC,
-    DEFAULT_MIN_SOC,
 )
 from ..decision_engine.common import (
     build_afternoon_charge_outcome,
+    calculate_no_action_target_soc,
+    get_battery_config,
+    get_entry_data,
     get_required_current_soc_state,
     get_required_prog4_soc_state,
+    handle_no_action_soc_update,
     resolve_entry,
 )
 from ..helpers import (
@@ -51,7 +46,7 @@ from ..utils.pv_forecast import get_forecast_adjusted_kwh, get_pv_compensation_f
 from ..utils.logging import DecisionOutcome, log_decision_unified
 
 if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant, Context
+    from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,9 +56,6 @@ async def async_run_afternoon_charge(
 ) -> None:
     """Run afternoon grid charge routine."""
 
-    # Import Context here to avoid circular import
-    from homeassistant.core import Context
-
     # Create integration context for this decision engine run
     integration_context = Context()
 
@@ -72,15 +64,12 @@ async def async_run_afternoon_charge(
         return
     config = entry.data
 
-    grid_assist_sensor = None
-    if (
-        DOMAIN in hass.data
-        and entry.entry_id in hass.data[DOMAIN]
-        and isinstance(hass.data[DOMAIN][entry.entry_id], dict)
-    ):
-        grid_assist_sensor = hass.data[DOMAIN][entry.entry_id].get(
-            "afternoon_grid_assist_sensor"
-        )
+    entry_data = get_entry_data(hass, entry.entry_id)
+    grid_assist_sensor = (
+        entry_data.get("afternoon_grid_assist_sensor")
+        if entry_data is not None
+        else None
+    )
 
     def _set_grid_assist(enabled: bool) -> None:
         if grid_assist_sensor is not None:
@@ -96,19 +85,15 @@ async def async_run_afternoon_charge(
         return
     _, current_soc = current_soc_state
 
-    capacity_ah = config.get(CONF_BATTERY_CAPACITY_AH, DEFAULT_BATTERY_CAPACITY_AH)
-    voltage = config.get(CONF_BATTERY_VOLTAGE, DEFAULT_BATTERY_VOLTAGE)
-    min_soc = config.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
-    max_soc = config.get(CONF_MAX_SOC, DEFAULT_MAX_SOC)
-    efficiency = config.get(CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY)
+    bc = get_battery_config(config)
     margin = margin if margin is not None else 1.1
 
     reserve_kwh = calculate_battery_reserve(
         current_soc,
-        min_soc,
-        capacity_ah,
-        voltage,
-        efficiency=efficiency,
+        bc.min_soc,
+        bc.capacity_ah,
+        bc.voltage,
+        efficiency=bc.efficiency,
     )
 
     hourly_usage = build_hourly_usage_array(
@@ -119,7 +104,7 @@ async def async_run_afternoon_charge(
     end_hour = 22
     hours = max(end_hour - start_hour, 1)
 
-    usage = sum(hourly_usage[hour] for hour in range(start_hour, end_hour))
+    usage_kwh = sum(hourly_usage[hour] for hour in range(start_hour, end_hour))
     
     heat_pump_kwh, heat_pump_hourly = await get_heat_pump_forecast_window(
         hass, config, start_hour=start_hour, end_hour=end_hour
@@ -138,9 +123,7 @@ async def async_run_afternoon_charge(
         hass, config, hours=hours, margin=margin
     )
 
-    required_kwh = (usage + heat_pump_kwh + losses_kwh) * margin
-
-    usage_kwh = sum(hourly_usage[hour] for hour in range(start_hour, end_hour))
+    required_kwh = (usage_kwh + heat_pump_kwh + losses_kwh) * margin
 
     if required_kwh <= 0.0:
         _LOGGER.info(
@@ -159,8 +142,8 @@ async def async_run_afternoon_charge(
         end_hour=end_hour,
         sell_start_hour=resolve_sell_window_start_hour(hass, config),
         current_soc=current_soc,
-        capacity_ah=capacity_ah,
-        voltage=voltage,
+        capacity_ah=bc.capacity_ah,
+        voltage=bc.voltage,
         required_kwh=required_kwh,
         pv_forecast_hourly=pv_forecast_hourly,
         heat_pump_hourly=heat_pump_hourly,
@@ -181,14 +164,15 @@ async def async_run_afternoon_charge(
     _set_grid_assist(base_deficit_kwh > 0.0)
 
     if total_deficit_kwh <= 0.0:
-        target_soc = min_soc
-        if reserve_kwh + total_deficit_kwh > 0:
-            soc_delta = calculate_soc_delta(
-                reserve_kwh + total_deficit_kwh, capacity_ah=capacity_ah, voltage=voltage
-            )
-            target_soc = calculate_target_soc(
-                min_soc, soc_delta, max_soc=max_soc
-            )
+        target_soc = calculate_no_action_target_soc(
+            reserve_kwh=reserve_kwh,
+            deficit_kwh=total_deficit_kwh,
+            current_soc=current_soc,
+            min_soc=bc.min_soc,
+            max_soc=bc.max_soc,
+            capacity_ah=bc.capacity_ah,
+            voltage=bc.voltage,
+        )
         await _handle_no_action(
             hass,
             entry,
@@ -210,22 +194,23 @@ async def async_run_afternoon_charge(
         )
         return
 
-    deficit_to_charge_kwh = (
-        total_deficit_kwh / ((efficiency / 100.0) ** 2)
-        if efficiency
-        else total_deficit_kwh
+    deficit_to_charge_kwh = apply_efficiency_compensation(
+        total_deficit_kwh,
+        bc.efficiency,
     )
     soc_delta = calculate_soc_delta(
-        deficit_to_charge_kwh, capacity_ah=capacity_ah, voltage=voltage
+        deficit_to_charge_kwh,
+        capacity_ah=bc.capacity_ah,
+        voltage=bc.voltage,
     )
-    target_soc = calculate_target_soc(current_soc, soc_delta, max_soc=max_soc)
+    target_soc = calculate_target_soc(current_soc, soc_delta, max_soc=bc.max_soc)
 
     charge_current_entity = config.get(CONF_CHARGE_CURRENT_ENTITY)
     charge_current = calculate_charge_current(
         deficit_to_charge_kwh,
         current_soc=current_soc,
-        capacity_ah=capacity_ah,
-        voltage=voltage,
+        capacity_ah=bc.capacity_ah,
+        voltage=bc.voltage,
     )
 
     await set_program_soc(
@@ -259,7 +244,7 @@ async def async_run_afternoon_charge(
         charge_current=charge_current,
         current_soc=current_soc,
         losses_kwh=losses_kwh,
-        efficiency=efficiency,
+        efficiency=bc.efficiency,
         margin=margin,
         start_hour=start_hour,
         end_hour=end_hour,
@@ -359,24 +344,14 @@ async def _handle_no_action(
         pv_compensation_factor=pv_compensation_factor,
         arbitrage_details=arbitrage_details,
     )
-
-    entities_changed: list[dict[str, float | str]] = []
-    if abs(target_soc - prog4_soc_value) > 0.01:
-        await set_program_soc(
-            hass,
-            prog4_soc_entity,
-            target_soc,
-            entry=entry,
-            logger=_LOGGER,
-            context=integration_context,
-        )
-        entities_changed.append({"entity_id": prog4_soc_entity, "value": target_soc})
-
-    if entities_changed:
-        outcome.entities_changed = entities_changed
-
-    await log_decision_unified(
-        hass, entry, outcome, context=integration_context, logger=_LOGGER
+    await handle_no_action_soc_update(
+        hass,
+        entry,
+        integration_context=integration_context,
+        prog_soc_entity=prog4_soc_entity,
+        current_prog_soc=prog4_soc_value,
+        target_soc=target_soc,
+        outcome=outcome,
     )
 
 

@@ -37,6 +37,8 @@ def test_kwh_to_soc():
     # Handle zero capacity gracefully
     assert kwh_to_soc(5, 0, 48) == 0.0
 
+    assert kwh_to_soc(-5, 200, 48) == pytest.approx(-52, rel=1)
+
 
 def test_calculate_battery_reserve():
     """Test battery reserve calculation."""

@@ -381,6 +381,9 @@ def test_calculate_target_soc() -> None:
 
     assert target_soc == pytest.approx(43.0)
 
+    assert calculate_target_soc(80, -52, max_soc=100) == 28.0
+    assert calculate_target_soc(30, -52, max_soc=100) == -22.0
+
 
 def test_calculate_charge_current_rounds_up() -> None:
     current = calculate_charge_current(

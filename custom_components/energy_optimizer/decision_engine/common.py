@@ -1,23 +1,112 @@
 """Shared helpers for decision engine modules."""
 from __future__ import annotations
 
+import dataclasses
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from ..calculations.battery import calculate_soc_delta, calculate_target_soc
+from ..controllers.inverter import set_program_soc
 from ..const import (
+    CONF_BATTERY_CAPACITY_AH,
+    CONF_BATTERY_EFFICIENCY,
     CONF_BATTERY_SOC_SENSOR,
+    CONF_BATTERY_VOLTAGE,
+    CONF_MAX_SOC,
+    CONF_MIN_SOC,
     CONF_PROG2_SOC_ENTITY,
     CONF_PROG4_SOC_ENTITY,
+    DEFAULT_BATTERY_CAPACITY_AH,
+    DEFAULT_BATTERY_EFFICIENCY,
+    DEFAULT_BATTERY_VOLTAGE,
+    DEFAULT_MAX_SOC,
+    DEFAULT_MIN_SOC,
     DOMAIN,
 )
 from ..helpers import get_required_float_state
-from ..utils.logging import DecisionOutcome, format_sufficiency_hour
+from ..utils.logging import DecisionOutcome, format_sufficiency_hour, log_decision_unified
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
-    from homeassistant.core import HomeAssistant
+    from homeassistant.core import Context, HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class BatteryConfig:
+    """Battery configuration extracted from config entry data."""
+
+    capacity_ah: float
+    voltage: float
+    min_soc: float
+    max_soc: float
+    efficiency: float
+
+
+def get_battery_config(config: dict[str, Any]) -> BatteryConfig:
+    """Extract battery configuration from config entry data."""
+    return BatteryConfig(
+        capacity_ah=config.get(CONF_BATTERY_CAPACITY_AH, DEFAULT_BATTERY_CAPACITY_AH),
+        voltage=config.get(CONF_BATTERY_VOLTAGE, DEFAULT_BATTERY_VOLTAGE),
+        min_soc=config.get(CONF_MIN_SOC, DEFAULT_MIN_SOC),
+        max_soc=config.get(CONF_MAX_SOC, DEFAULT_MAX_SOC),
+        efficiency=config.get(CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY),
+    )
+
+
+def calculate_no_action_target_soc(
+    *,
+    reserve_kwh: float,
+    deficit_kwh: float,
+    current_soc: float,
+    min_soc: float,
+    max_soc: float,
+    capacity_ah: float,
+    voltage: float,
+) -> float:
+    """Calculate target SOC for no-action paths used by decision engines."""
+    target_soc = min_soc
+    if reserve_kwh + deficit_kwh > 0:
+        soc_delta = calculate_soc_delta(
+            deficit_kwh,
+            capacity_ah=capacity_ah,
+            voltage=voltage,
+        )
+        target_soc = calculate_target_soc(current_soc, soc_delta, max_soc=max_soc)
+        target_soc = max(target_soc, min_soc)
+    return target_soc
+
+
+async def handle_no_action_soc_update(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    *,
+    integration_context: Context,
+    prog_soc_entity: str,
+    current_prog_soc: float,
+    target_soc: float,
+    outcome: DecisionOutcome,
+) -> None:
+    """Handle no-action path: conditionally update program SOC and log outcome."""
+    entities_changed: list[dict[str, float | str]] = []
+    if abs(target_soc - current_prog_soc) > 0.01:
+        await set_program_soc(
+            hass,
+            prog_soc_entity,
+            target_soc,
+            entry=entry,
+            logger=_LOGGER,
+            context=integration_context,
+        )
+        entities_changed.append({"entity_id": prog_soc_entity, "value": target_soc})
+
+    if entities_changed:
+        outcome.entities_changed = entities_changed
+
+    await log_decision_unified(
+        hass, entry, outcome, context=integration_context, logger=_LOGGER
+    )
 
 
 def resolve_entry(hass: HomeAssistant, entry_id: str | None) -> ConfigEntry | None:
@@ -45,6 +134,17 @@ def resolve_entry(hass: HomeAssistant, entry_id: str | None) -> ConfigEntry | No
         return None
 
     return entries[0]
+
+
+def get_entry_data(hass: HomeAssistant, entry_id: str) -> dict[str, Any] | None:
+    """Return runtime integration data dict for an entry, when available."""
+    if (
+        DOMAIN in hass.data
+        and entry_id in hass.data[DOMAIN]
+        and isinstance(hass.data[DOMAIN][entry_id], dict)
+    ):
+        return hass.data[DOMAIN][entry_id]
+    return None
 
 
 def get_required_prog2_soc_state(
@@ -299,96 +399,3 @@ def build_afternoon_charge_outcome(
     )
 
 
-def build_charge_outcome(
-    *,
-    scenario: str,
-    mode: str,
-    target_soc: float,
-    required_kwh: float,
-    reserve_kwh: float,
-    deficit_to_charge_kwh: float,
-    pv_forecast_kwh: float,
-    heat_pump_kwh: float,
-    charge_current: float,
-    current_soc: float,
-    losses_kwh: float,
-    efficiency: float,
-    margin: float,
-    pv_compensation_factor: float | None,
-    required_sufficiency_kwh: float | None = None,
-    pv_sufficiency_kwh: float | None = None,
-    deficit_all_kwh: float | None = None,
-    deficit_kwh: float | None = None,
-    deficit_sufficiency_kwh: float | None = None,
-    sufficiency_hour: int | None = None,
-    sufficiency_reached: bool | None = None,
-    arbitrage_kwh: float | None = None,
-    arbitrage_details: dict[str, float | str] | None = None,
-    start_hour: int | None = None,
-    end_hour: int | None = None,
-    usage_kwh: float | None = None,
-) -> DecisionOutcome:
-    """Build a charge decision outcome for morning or afternoon routines."""
-    if start_hour is None or end_hour is None:
-        raise ValueError("start_hour and end_hour are required for charge outcomes")
-
-    if mode == "morning":
-        if None in (
-            required_sufficiency_kwh,
-            pv_sufficiency_kwh,
-            deficit_all_kwh,
-            deficit_kwh,
-            deficit_sufficiency_kwh,
-            sufficiency_hour,
-            sufficiency_reached,
-        ):
-            raise ValueError("missing morning charge outcome inputs")
-        return build_morning_charge_outcome(
-            scenario=scenario,
-            target_soc=target_soc,
-            required_kwh=required_kwh,
-            required_sufficiency_kwh=required_sufficiency_kwh,
-            reserve_kwh=reserve_kwh,
-            deficit_to_charge_kwh=deficit_to_charge_kwh,
-            deficit_all_kwh=deficit_all_kwh,
-            deficit_kwh=deficit_kwh,
-            deficit_sufficiency_kwh=deficit_sufficiency_kwh,
-            pv_forecast_kwh=pv_forecast_kwh,
-            pv_sufficiency_kwh=pv_sufficiency_kwh,
-            heat_pump_kwh=heat_pump_kwh,
-            charge_current=charge_current,
-            current_soc=current_soc,
-            losses_kwh=losses_kwh,
-            efficiency=efficiency,
-            margin=margin,
-            sufficiency_hour=sufficiency_hour,
-            sufficiency_reached=sufficiency_reached,
-            pv_compensation_factor=pv_compensation_factor,
-            start_hour=start_hour,
-            end_hour=end_hour,
-        )
-
-    if None in (deficit_all_kwh, arbitrage_kwh, usage_kwh):
-        raise ValueError("missing afternoon charge outcome inputs")
-
-    return build_afternoon_charge_outcome(
-        scenario=scenario,
-        target_soc=target_soc,
-        required_kwh=required_kwh,
-        reserve_kwh=reserve_kwh,
-        deficit_to_charge_kwh=deficit_to_charge_kwh,
-        deficit_all_kwh=deficit_all_kwh,
-        arbitrage_kwh=arbitrage_kwh,
-        arbitrage_details=arbitrage_details,
-        pv_forecast_kwh=pv_forecast_kwh,
-        heat_pump_kwh=heat_pump_kwh,
-        charge_current=charge_current,
-        current_soc=current_soc,
-        losses_kwh=losses_kwh,
-        efficiency=efficiency,
-        margin=margin,
-        start_hour=start_hour,
-        end_hour=end_hour,
-        usage_kwh=usage_kwh,
-        pv_compensation_factor=pv_compensation_factor,
-    )

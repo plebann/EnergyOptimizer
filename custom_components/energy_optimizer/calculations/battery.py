@@ -212,6 +212,21 @@ def calculate_soc_delta(
     return kwh_to_soc(energy_to_charge_kwh, capacity_ah, voltage)
 
 
+def apply_efficiency_compensation(kwh: float, efficiency: float) -> float:
+    """Adjust deficit kWh for round-trip battery efficiency losses.
+
+    Args:
+        kwh: Energy deficit (kWh).
+        efficiency: Battery efficiency (%) value.
+
+    Returns:
+        Compensated energy (kWh), accounting for charge and discharge losses.
+    """
+    if not efficiency:
+        return kwh
+    return kwh / ((efficiency / 100.0) ** 2)
+
+
 def calculate_target_soc(
     current_soc: float,
     soc_delta: float,
