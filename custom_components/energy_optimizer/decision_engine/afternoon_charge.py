@@ -182,9 +182,9 @@ async def async_run_afternoon_charge(
 
     if total_deficit_kwh <= 0.0:
         target_soc = min_soc
-        if abs(total_deficit_kwh) < reserve_kwh:
+        if reserve_kwh + total_deficit_kwh > 0:
             soc_delta = calculate_soc_delta(
-                abs(total_deficit_kwh), capacity_ah=capacity_ah, voltage=voltage
+                reserve_kwh + total_deficit_kwh, capacity_ah=capacity_ah, voltage=voltage
             )
             target_soc = calculate_target_soc(
                 min_soc, soc_delta, max_soc=max_soc
