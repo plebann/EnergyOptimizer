@@ -143,13 +143,21 @@ async def async_run_morning_charge(
     deficit_all_kwh = max(deficit_kwh, deficit_sufficiency_kwh)
 
     if deficit_all_kwh <= 0.0:
+        target_soc = min_soc
+        if abs(deficit_all_kwh) < reserve_kwh:
+            soc_delta = calculate_soc_delta(
+                abs(deficit_all_kwh), capacity_ah=capacity_ah, voltage=voltage
+            )
+            target_soc = calculate_target_soc(
+                min_soc, soc_delta, max_soc=max_soc
+            )
         await _handle_no_action(
             hass,
             entry,
             integration_context=integration_context,
             prog2_soc_entity=prog2_soc_entity,
             prog2_soc_value=prog2_soc_value,
-            min_soc=min_soc,
+            target_soc=target_soc,
             reserve_kwh=reserve_kwh,
             required_kwh=required_kwh,
             required_sufficiency_kwh=required_sufficiency_kwh,
@@ -331,7 +339,7 @@ async def _handle_no_action(
     integration_context: Context,
     prog2_soc_entity: str,
     prog2_soc_value: float,
-    min_soc: float,
+    target_soc: float,
     reserve_kwh: float,
     required_kwh: float,
     required_sufficiency_kwh: float,
@@ -358,6 +366,22 @@ async def _handle_no_action(
         sufficiency_reached=sufficiency_reached,
         pv_compensation_factor=pv_compensation_factor,
     )
+
+    entities_changed: list[dict[str, float | str]] = []
+    if abs(target_soc - prog2_soc_value) > 0.01:
+        await set_program_soc(
+            hass,
+            prog2_soc_entity,
+            target_soc,
+            entry=entry,
+            logger=_LOGGER,
+            context=integration_context,
+        )
+        entities_changed.append({"entity_id": prog2_soc_entity, "value": target_soc})
+
+    if entities_changed:
+        outcome.entities_changed = entities_changed
+
     await log_decision_unified(
         hass, entry, outcome, context=integration_context, logger=_LOGGER
     )

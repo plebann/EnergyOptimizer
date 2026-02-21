@@ -13,6 +13,7 @@ from ..const import (
     DEFAULT_HEAT_PUMP_FORECAST_DOMAIN,
     DEFAULT_HEAT_PUMP_FORECAST_SERVICE,
 )
+from .time_window import build_hour_window
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ async def get_heat_pump_forecast(
         return 0.0, {}
 
     total_kwh = float(response.get("total_energy_kwh", 0.0) or 0.0)
+    window_hours = set(build_hour_window(starting_hour, (starting_hour + hours_ahead) % 24))
     hourly_kwh: dict[int, float] = {}
     hours_list = response.get("hours")
     if isinstance(hours_list, list):
@@ -80,8 +82,9 @@ async def get_heat_pump_forecast(
             dt_parsed = dt_util.parse_datetime(str(dt_value))
             if dt_parsed is None:
                 continue
-            dt_local = dt_util.as_local(dt_parsed)
-            hour = dt_local.hour
+            hour = dt_parsed.hour
+            if hour not in window_hours:
+                continue
             try:
                 hourly_kwh[hour] = hourly_kwh.get(hour, 0.0) + float(energy_value)
             except (ValueError, TypeError):

@@ -181,13 +181,21 @@ async def async_run_afternoon_charge(
     _set_grid_assist(base_deficit_kwh > 0.0)
 
     if total_deficit_kwh <= 0.0:
+        target_soc = min_soc
+        if abs(total_deficit_kwh) < reserve_kwh:
+            soc_delta = calculate_soc_delta(
+                abs(total_deficit_kwh), capacity_ah=capacity_ah, voltage=voltage
+            )
+            target_soc = calculate_target_soc(
+                min_soc, soc_delta, max_soc=max_soc
+            )
         await _handle_no_action(
             hass,
             entry,
             integration_context=integration_context,
             prog4_soc_entity=prog4_soc_entity,
             prog4_soc_value=prog4_soc_value,
-            min_soc=min_soc,
+            target_soc=target_soc,
             reserve_kwh=reserve_kwh,
             required_kwh=required_kwh,
             pv_forecast_kwh=pv_forecast_kwh,
@@ -322,7 +330,7 @@ async def _handle_no_action(
     integration_context: Context,
     prog4_soc_entity: str,
     prog4_soc_value: float,
-    min_soc: float,
+    target_soc: float,
     reserve_kwh: float,
     required_kwh: float,
     pv_forecast_kwh: float,
@@ -334,15 +342,7 @@ async def _handle_no_action(
     pv_compensation_factor: float | None,
     arbitrage_details: dict[str, float | str] | None = None,
 ) -> None:
-    """Handle no-action path and ensure program SOC reset."""
-    await set_program_soc(
-        hass,
-        prog4_soc_entity,
-        min_soc,
-        entry=entry,
-        logger=_LOGGER,
-        context=integration_context,
-    )
+    """Handle no-action path."""
     outcome = _build_no_action_outcome(
         reserve_kwh=reserve_kwh,
         required_kwh=required_kwh,
@@ -355,10 +355,22 @@ async def _handle_no_action(
         pv_compensation_factor=pv_compensation_factor,
         arbitrage_details=arbitrage_details,
     )
-    if prog4_soc_value > min_soc:
-        outcome.entities_changed = [
-            {"entity_id": prog4_soc_entity, "value": min_soc}
-        ]
+
+    entities_changed: list[dict[str, float | str]] = []
+    if abs(target_soc - prog4_soc_value) > 0.01:
+        await set_program_soc(
+            hass,
+            prog4_soc_entity,
+            target_soc,
+            entry=entry,
+            logger=_LOGGER,
+            context=integration_context,
+        )
+        entities_changed.append({"entity_id": prog4_soc_entity, "value": target_soc})
+
+    if entities_changed:
+        outcome.entities_changed = entities_changed
+
     await log_decision_unified(
         hass, entry, outcome, context=integration_context, logger=_LOGGER
     )

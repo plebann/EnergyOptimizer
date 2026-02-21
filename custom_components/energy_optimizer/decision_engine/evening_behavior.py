@@ -211,6 +211,8 @@ async def async_run_evening_behavior(
             _LOGGER.warning("Could not parse PV forecast: %s", pv_raw)
     pv_efficiency = config.get(CONF_PV_EFFICIENCY, DEFAULT_PV_EFFICIENCY)
     pv_factor_sensor = _get_sensor_compensation_factor(hass, entry_id)
+    if pv_factor_sensor is None:
+        pv_factor_sensor = 1.0
     pv_with_efficiency = pv_forecast * pv_efficiency * pv_factor_sensor
     _LOGGER.debug(
         "Balancing check: due=%s, pv_forecast_with_efficiency=%.2f kWh, threshold=%.2f kWh",

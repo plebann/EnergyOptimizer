@@ -78,7 +78,7 @@ flowchart TD
       AC_inputs -.-> AC_inputs_note[Note: reserve, forecasts, losses, required from tariff_start_hour to 22:00]
        AC_base -.-> AC_base_note[Note: base deficit is required minus reserve and PV, clamped to zero]
       AC_total -.-> AC_total_note[Note: total deficit = base + arbitrage]
-    AC_reset -.-> AC_reset_note[Note: set prog4 SOC to min and log no-action]
+   AC_reset -.-> AC_reset_note[Note: no-action; optional prog4 SOC correction to computed target and log]
     AC_charge -.-> AC_charge_note[Note: set prog4 SOC and charge current]
 ```
 
@@ -95,7 +95,7 @@ flowchart TD
 - Dla rezerwy (energia dostępna z magazynu): jeśli w magazynie jest 1 kWh, rozładuję 0.9 kWh → uwzględniamy **tylko** straty rozładowania.
 - Dla energii do załadowania: aby uzyskać wymaganą energię po rozładowaniu, trzeba załadować więcej z uwzględnieniem strat ładowania i rozładowania, np. `wymagane / (0.9 × 0.9)`.
 
-**Prognoza PV**: Suma prognozy z `detailedForecast` liczona dla okna `tariff_start_hour` → 22:00, z kompensacją prognozy (średnia z kompensacji „dzisiejszej” i z sensora PV Forecast Compensation, bez użycia `pv_efficiency`).
+**Prognoza PV**: Suma prognozy z `detailedHourly` (lub fallback `detailedForecast`) liczona dla okna `tariff_start_hour` → 22:00, z kompensacją prognozy (średnia z kompensacji „dzisiejszej” i z sensora PV Forecast Compensation, bez użycia `pv_efficiency`).
 
 ### Arbitraż – wzory i ograniczenia
 
@@ -118,13 +118,12 @@ flowchart TD
 
 ## Efekty sterowania (koncepcyjne)
 
-- Ustaw docelowy SOC programu 2 (ładowanie z sieci) na obliczoną wartość
 - Ustaw docelowy SOC programu 4 (ładowanie z sieci) na obliczoną wartość
 - Ustaw prąd ładowania z sieci na obliczoną wartość (okno do 22:00)
 - Uwzględnij arbitraż: docelowy SOC i prąd ładowania bazują na `required_kwh + arb_kwh`
 - Falownik automatycznie rozpocznie ładowanie do osiągnięcia docelowego SOC
 - Stan wsparcia z sieci po południu jest ustawiany na podstawie bazowego deficytu (bez arbitrażu)
-- Jeśli brak deficytu (po arbitrażu), program 4 SOC jest przywracany do minimalnego SOC
+- Jeśli brak deficytu (po arbitrażu), możliwa jest korekta `prog4_soc` do wyliczonego `target_soc` (tylko gdy różni się od wartości bieżącej)
 
 ## Obsługa błędów
 

@@ -705,6 +705,17 @@ IF (szczyt_wieczorny.max_cena > 95,1 gr/kWh) AND (nadwyżki_PV_w_południe > 3 k
 6. **Balansowanie magazynu:** Co 10 dni wymuszenie pełnego cyklu ładowania do 100% i utrzymania przez noc (dla zdrowia baterii)
 7. **Sterowanie falownikiem (Solarman):** używaj dedykowanego programu (np. Program 1) i ustawiaj `number.inverter_program_<n>_soc`, `select.inverter_work_mode` (Selling First / Zero Export to Load), `select.inverter_program_<n>_charging` (grid/disabled), prądy `inverter_battery_max_charging_current` / `inverter_battery_max_discharging_current` / `inverter_battery_grid_charging_current` oraz `number.inverter_grid_max_export_power`; godzina startu programu `time.inverter_program_<n>_time` może być użyta do aktywacji profilu. Jeśli automatyka korzysta z wielu programów czasowych, przypisz: P2=04:00 (ładowanie z sieci), P3=szczyt poranny, P4=niskotarifowe doładowanie dzienne (start może być korygowany inną automatyzacją), P5=szczyt wieczorny 17-21, P6=22:00 (balansowanie). Przy balansowaniu ustaw SOC w P6 oraz odzwierciedlij cel SOC w P1 (opcjonalnie P2).
 
+
+## FORMAT DANYCH SENSORA CEN
+Sensor cen ma atrybut **prices**
+Jest to lista obiektów o takiej strukturze:
+```
+    dtime: '2026-02-18 00:15:00'
+    period: 00:00 - 00:15
+    rce_pln: '437.00'
+    business_date: '2026-02-18'
+```
+
 ---
 
 ## CHECKLIST PRZED KAŻDĄ AKCJĄ

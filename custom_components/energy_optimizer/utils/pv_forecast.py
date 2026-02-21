@@ -150,7 +150,6 @@ def _collect_pv_forecast_hourly_kwh(
             dt_value = dt_util.parse_datetime(str(period_start))
             if dt_value is None:
                 continue
-            dt_value = dt_util.as_local(dt_value)
             if window_start <= dt_value.hour < window_end:
                 try:
                     hourly_kwh[dt_value.hour] += float(pv_estimate)
@@ -172,8 +171,10 @@ def _get_detailed_forecast(
         return None
     detailed = pv_state.attributes.get("detailedHourly")
     if not isinstance(detailed, list):
+        detailed = pv_state.attributes.get("detailedForecast")
+    if not isinstance(detailed, list):
         _LOGGER.warning(
-            "PV forecast %s sensor has no detailedHourly: %s",
+            "PV forecast %s sensor has no detailedHourly/detailedForecast: %s",
             label,
             sensor,
         )

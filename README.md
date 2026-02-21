@@ -33,6 +33,7 @@ Energy Optimizer is a Home Assistant custom integration focused on price-aware b
 
 Service handlers live in `custom_components/energy_optimizer/service_handlers/`:
 - `morning.py` - Morning grid charge
+- `afternoon.py` - Afternoon grid charge (short planning path with arbitrage support)
 - `overnight.py` - Overnight handling
 
 ### Sensor Platform
@@ -66,7 +67,7 @@ While Energy Optimizer can work with any compatible entities, these integrations
 - **Separation of Concerns**: Service handlers, helpers, and calculations in dedicated modules
 - **HACS Compliance**: Follows Home Assistant Custom Component best practices
 - **Maintainability**: Small, focused modules (~90-600 lines each)
-- **Testability**: 48 unit tests covering edge cases and calculations
+- **Testability**: 81 unit tests covering edge cases and calculations
 - **Extensibility**: Easy to add new services and sensors
 
 ## Installation

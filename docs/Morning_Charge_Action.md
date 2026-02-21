@@ -70,7 +70,7 @@ flowchart TD
 
 **Sprawność magazynu**: W praktyce energia do załadowania uwzględnia straty na ładowaniu i rozładowaniu: `wymagane / (0.9 × 0.9)`.
 
-**Prognoza PV**: Suma prognozy z `detailedForecast` jest liczona dla okna 6:00–koniec taryfy, korygowana kompensacją PV (średnia z kompensacji „dzisiejszej” i z sensora PV Forecast Compensation), a następnie mnożona przez współczynnik wydajności PV.
+**Prognoza PV**: Suma prognozy z `detailedHourly` (lub fallback `detailedForecast`) jest liczona dla okna 6:00–koniec taryfy, korygowana kompensacją PV (średnia z kompensacji „dzisiejszej” i z sensora PV Forecast Compensation), a następnie mnożona przez współczynnik wydajności PV.
 
 **Godzina wystarczalności PV (nowe)**:
 1. Dla każdej godziny okna 6:00–koniec taryfy wyznacz godzinowe zapotrzebowanie: zużycie_domowe + zużycie_PC + straty (z marginesem).
@@ -115,6 +115,7 @@ Ten algorytm zapewnia:
 - Ustaw docelowy SOC programu 2 (ładowanie z sieci) na obliczoną wartość
 - Ustaw prąd ładowania z sieci na obliczoną wartość (2h okno ładowania)
 - Falownik automatycznie rozpocznie ładowanie do osiągnięcia docelowego SOC
+- W ścieżce „no action” możliwa jest korekta `prog2_soc` do wyliczonego `target_soc` (gdy różni się od bieżącej wartości)
 
 ## Obsługa błędów
 
@@ -137,7 +138,7 @@ Możliwe strategie:
 - Brak serwisu HP → HP = 0 kWh (warning)
 - Brak sensora PV w konfiguracji → używany jest fallback do `pv_forecast_today` jeśli dostępny
 - Wyłączona Pompa Ciepła → HP = 0 kWh (informacja debug)
-- Brak szczegółowej prognozy PV (`detailedForecast`) → PV = 0 kWh (warning)
+- Brak szczegółowej prognozy PV (`detailedHourly` i `detailedForecast`) → PV = 0 kWh (warning)
 - Trwa balansowanie → akcja poranna pomijana, log „balancing ongoing”
 
 ## Logowanie i powiadomienia
