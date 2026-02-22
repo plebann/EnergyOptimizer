@@ -64,8 +64,6 @@ from .const import (
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PEAK_FORECAST,
     CONF_PV_PRODUCTION_SENSOR,
-    CONF_SELL_WINDOW_PRICE_SENSOR,
-    CONF_SELL_WINDOW_START_SENSOR,
     CONF_TARIFF_START_HOUR_SENSOR,
     CONF_TARIFF_END_HOUR_SENSOR,
     CONF_TODAY_LOAD_SENSOR,
@@ -142,12 +140,6 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_MIN_ARBITRAGE_PRICE,
                     default=DEFAULT_MIN_ARBITRAGE_PRICE,
                 ): vol.All(vol.Coerce(float), vol.Range(min=0)),
-                vol.Optional(CONF_SELL_WINDOW_START_SENSOR): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
-                ),
-                vol.Optional(CONF_SELL_WINDOW_PRICE_SENSOR): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor")
-                ),
                 vol.Optional(CONF_EVENING_MAX_PRICE_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -733,18 +725,6 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                         CONF_MIN_ARBITRAGE_PRICE, DEFAULT_MIN_ARBITRAGE_PRICE
                     ),
                 ): vol.All(vol.Coerce(float), vol.Range(min=0)),
-                vol.Optional(
-                    CONF_SELL_WINDOW_START_SENSOR,
-                    default=self._config_entry.data.get(CONF_SELL_WINDOW_START_SENSOR),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
-                ),
-                vol.Optional(
-                    CONF_SELL_WINDOW_PRICE_SENSOR,
-                    default=self._config_entry.data.get(CONF_SELL_WINDOW_PRICE_SENSOR),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor")
-                ),
                 vol.Optional(
                     CONF_EVENING_MAX_PRICE_SENSOR,
                     default=self._config_entry.data.get(CONF_EVENING_MAX_PRICE_SENSOR),

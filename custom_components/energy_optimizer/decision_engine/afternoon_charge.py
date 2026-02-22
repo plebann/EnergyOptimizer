@@ -20,11 +20,11 @@ from ..calculations.energy import calculate_needed_reserve
 from ..calculations.utils import build_hourly_usage_array
 from ..const import (
     CONF_CHARGE_CURRENT_ENTITY,
+    CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_PV_FORECAST_REMAINING,
     CONF_PV_FORECAST_TODAY,
     CONF_PV_PRODUCTION_SENSOR,
-    CONF_SELL_WINDOW_PRICE_SENSOR,
 )
 from ..decision_engine.common import (
     build_afternoon_charge_outcome,
@@ -38,7 +38,7 @@ from ..decision_engine.common import (
 )
 from ..helpers import (
     get_required_float_state,
-    resolve_sell_window_start_hour,
+    resolve_evening_max_price_hour,
     resolve_tariff_start_hour,
 )
 from ..controllers.inverter import set_charge_current, set_program_soc
@@ -142,7 +142,7 @@ async def async_run_afternoon_charge(
         config,
         start_hour=start_hour,
         end_hour=end_hour,
-        sell_start_hour=resolve_sell_window_start_hour(hass, config),
+        sell_start_hour=resolve_evening_max_price_hour(hass, config),
         current_soc=current_soc,
         capacity_ah=bc.capacity_ah,
         voltage=bc.voltage,
@@ -153,7 +153,7 @@ async def async_run_afternoon_charge(
         hourly_usage=hourly_usage,
         margin=margin,
         min_arbitrage_price=config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0),
-        sell_price_entity=config.get(CONF_SELL_WINDOW_PRICE_SENSOR),
+        sell_price_entity=config.get(CONF_EVENING_MAX_PRICE_SENSOR),
         pv_forecast_today_entity=config.get(CONF_PV_FORECAST_TODAY),
         pv_forecast_remaining_entity=config.get(CONF_PV_FORECAST_REMAINING),
         pv_production_entity=config.get(CONF_PV_PRODUCTION_SENSOR),

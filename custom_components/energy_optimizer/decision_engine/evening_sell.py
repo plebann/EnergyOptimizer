@@ -13,8 +13,8 @@ from ..calculations.utils import build_hourly_usage_array
 from ..const import (
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_EXPORT_POWER_ENTITY,
+    CONF_MIN_ARBITRAGE_PRICE,
     CONF_PV_PRODUCTION_SENSOR,
-    CONF_SELL_WINDOW_PRICE_SENSOR,
     CONF_WORK_MODE_ENTITY,
 )
 from ..controllers.inverter import set_export_power, set_program_soc, set_work_mode
@@ -46,7 +46,7 @@ def _build_no_action_outcome(
     reason: str,
     current_soc: float,
     evening_price: float | None,
-    reference_price: float | None,
+    threshold_price: float | None,
 ) -> DecisionOutcome:
     """Build no-action outcome for evening sell routine."""
     summary = "No evening peak sell action"
@@ -56,8 +56,8 @@ def _build_no_action_outcome(
     }
     if evening_price is not None:
         key_metrics["evening_price"] = f"{evening_price:.1f} PLN/MWh"
-    if reference_price is not None:
-        key_metrics["reference_price"] = f"{reference_price:.1f} PLN/MWh"
+    if threshold_price is not None:
+        key_metrics["threshold_price"] = f"{threshold_price:.1f} PLN/MWh"
 
     return DecisionOutcome(
         scenario="Evening Peak Sell",
@@ -68,8 +68,8 @@ def _build_no_action_outcome(
         full_details={
             "current_soc": round(current_soc, 1),
             "evening_price": round(evening_price, 2) if evening_price is not None else None,
-            "reference_price": (
-                round(reference_price, 2) if reference_price is not None else None
+            "threshold_price": (
+                round(threshold_price, 2) if threshold_price is not None else None
             ),
             "reason": reason,
         },
@@ -105,31 +105,29 @@ async def async_run_evening_sell(
         config.get(CONF_EVENING_MAX_PRICE_SENSOR),
         entity_name="Evening max price sensor",
     )
-    reference_price = get_required_float_state(
-        hass,
-        config.get(CONF_SELL_WINDOW_PRICE_SENSOR),
-        entity_name="Sell window price sensor",
-    )
+    threshold_price = float(config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0)
 
-    if evening_price is None or reference_price is None:
+    if evening_price is None:
         outcome = _build_no_action_outcome(
-            reason="Missing evening or reference price",
+            reason="Missing evening max price",
             current_soc=current_soc,
             evening_price=evening_price,
-            reference_price=reference_price,
+            threshold_price=threshold_price,
         )
         await log_decision_unified(
             hass, entry, outcome, context=integration_context, logger=_LOGGER
         )
         return
 
-    if evening_price <= reference_price:
+    if evening_price <= threshold_price:
         outcome = _build_no_action_outcome(
-            reason="Evening price is not above reference price",
+            reason="Evening price is not above minimum arbitrage price",
             current_soc=current_soc,
             evening_price=evening_price,
-            reference_price=reference_price,
+            threshold_price=threshold_price,
         )
+        outcome.full_details["min_arbitrage_price"] = round(threshold_price, 2)
+        outcome.key_metrics["min_arbitrage_price"] = f"{threshold_price:.1f} PLN/MWh"
         await log_decision_unified(
             hass, entry, outcome, context=integration_context, logger=_LOGGER
         )
@@ -191,7 +189,7 @@ async def async_run_evening_sell(
             reason="No surplus energy available for selling",
             current_soc=current_soc,
             evening_price=evening_price,
-            reference_price=reference_price,
+            threshold_price=threshold_price,
         )
         await log_decision_unified(
             hass, entry, outcome, context=integration_context, logger=_LOGGER
@@ -222,7 +220,7 @@ async def async_run_evening_sell(
             reason="Calculated target SOC does not require discharge",
             current_soc=current_soc,
             evening_price=evening_price,
-            reference_price=reference_price,
+            threshold_price=threshold_price,
         )
         await log_decision_unified(
             hass, entry, outcome, context=integration_context, logger=_LOGGER
@@ -278,7 +276,7 @@ async def async_run_evening_sell(
         end_hour=end_hour,
         export_power_w=export_power_w,
         evening_price=evening_price,
-        reference_price=reference_price,
+        threshold_price=threshold_price,
     )
     outcome.full_details["test_sell_mode"] = sell_test_mode
     if not sell_test_mode:

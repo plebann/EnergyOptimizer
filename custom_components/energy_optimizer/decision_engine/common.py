@@ -450,7 +450,7 @@ def build_evening_sell_outcome(
     end_hour: int,
     export_power_w: float,
     evening_price: float,
-    reference_price: float,
+    threshold_price: float,
 ) -> DecisionOutcome:
     """Build an evening sell decision outcome."""
     summary = f"Battery scheduled to sell down to {target_soc:.0f}%"
@@ -469,7 +469,7 @@ def build_evening_sell_outcome(
             "surplus": f"{surplus_kwh:.1f} kWh",
             "export_power": f"{export_power_w:.0f} W",
             "evening_price": f"{evening_price:.1f} PLN/MWh",
-            "reference_price": f"{reference_price:.1f} PLN/MWh",
+            "threshold_price": f"{threshold_price:.1f} PLN/MWh",
             "window": f"{start_hour:02d}:00-{end_hour:02d}:00",
         },
         full_details={
@@ -483,7 +483,7 @@ def build_evening_sell_outcome(
             "losses_kwh": round(losses_kwh, 2),
             "export_power_w": round(export_power_w, 0),
             "evening_price": round(evening_price, 2),
-            "reference_price": round(reference_price, 2),
+            "threshold_price": round(threshold_price, 2),
             "start_hour": start_hour,
             "end_hour": end_hour,
         },
