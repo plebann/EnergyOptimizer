@@ -24,7 +24,11 @@ from .const import (
     CONF_DAILY_LOAD_SENSOR,
     CONF_DAILY_LOSSES_SENSOR,
     CONF_DISCHARGE_CURRENT_ENTITY,
+    CONF_DAYTIME_MIN_PRICE_SENSOR,
+    CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
+    CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_ENABLE_HEAT_PUMP,
+    CONF_EXPORT_POWER_ENTITY,
     CONF_GRID_CHARGE_SWITCH,
     CONF_HEAT_PUMP_FORECAST_DOMAIN,
     CONF_HEAT_PUMP_FORECAST_SERVICE,
@@ -38,6 +42,8 @@ from .const import (
     CONF_MAX_SOC,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MIN_SOC,
+    CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
+    CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_PROG1_SOC_ENTITY,
     CONF_PROG1_TIME_START_ENTITY,
@@ -140,6 +146,21 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_SELL_WINDOW_PRICE_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_EVENING_MAX_PRICE_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_EVENING_MAX_PRICE_HOUR_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(CONF_MORNING_MAX_PRICE_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_MORNING_MAX_PRICE_HOUR_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(CONF_DAYTIME_MIN_PRICE_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
             }
@@ -260,6 +281,9 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_DISCHARGE_CURRENT_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(CONF_EXPORT_POWER_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_MAX_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
@@ -721,6 +745,36 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
+                vol.Optional(
+                    CONF_EVENING_MAX_PRICE_SENSOR,
+                    default=self._config_entry.data.get(CONF_EVENING_MAX_PRICE_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
+                    default=self._config_entry.data.get(CONF_EVENING_MAX_PRICE_HOUR_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(
+                    CONF_MORNING_MAX_PRICE_SENSOR,
+                    default=self._config_entry.data.get(CONF_MORNING_MAX_PRICE_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
+                    default=self._config_entry.data.get(CONF_MORNING_MAX_PRICE_HOUR_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(
+                    CONF_DAYTIME_MIN_PRICE_SENSOR,
+                    default=self._config_entry.data.get(CONF_DAYTIME_MIN_PRICE_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
             }
         )
 
@@ -856,6 +910,12 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_DISCHARGE_CURRENT_ENTITY,
                     default=self._config_entry.data.get(CONF_DISCHARGE_CURRENT_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_EXPORT_POWER_ENTITY,
+                    default=self._config_entry.data.get(CONF_EXPORT_POWER_ENTITY),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),

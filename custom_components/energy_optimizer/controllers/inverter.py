@@ -138,3 +138,108 @@ async def set_charge_current(
         logger.debug("Set %s to %sA", entity_id, value)
     else:
         _LOGGER.debug("Set %s to %sA", entity_id, value)
+
+
+async def set_discharge_current(
+    hass: HomeAssistant,
+    entity_id: str | None,
+    value: float,
+    *,
+    entry: ConfigEntry | None = None,
+    logger: logging.Logger | None = None,
+    context: Context | None = None,
+) -> None:
+    """Set discharge current entity if provided."""
+    if not entity_id:
+        return
+
+    if entry is not None:
+        if is_test_mode(hass, entry):
+            if logger:
+                logger.info("Test mode enabled - skipping set_value for %s", entity_id)
+            else:
+                _LOGGER.info("Test mode enabled - skipping set_value for %s", entity_id)
+            return
+
+    await _call_service(
+        hass,
+        "number",
+        "set_value",
+        {"entity_id": entity_id, "value": value},
+        context=context,
+    )
+
+    if logger:
+        logger.debug("Set %s to %sA", entity_id, value)
+    else:
+        _LOGGER.debug("Set %s to %sA", entity_id, value)
+
+
+async def set_export_power(
+    hass: HomeAssistant,
+    entity_id: str | None,
+    value: float,
+    *,
+    entry: ConfigEntry | None = None,
+    logger: logging.Logger | None = None,
+    context: Context | None = None,
+) -> None:
+    """Set export power entity if provided."""
+    if not entity_id:
+        return
+
+    if entry is not None:
+        if is_test_mode(hass, entry):
+            if logger:
+                logger.info("Test mode enabled - skipping set_value for %s", entity_id)
+            else:
+                _LOGGER.info("Test mode enabled - skipping set_value for %s", entity_id)
+            return
+
+    await _call_service(
+        hass,
+        "number",
+        "set_value",
+        {"entity_id": entity_id, "value": value},
+        context=context,
+    )
+
+    if logger:
+        logger.debug("Set %s to %sW", entity_id, value)
+    else:
+        _LOGGER.debug("Set %s to %sW", entity_id, value)
+
+
+async def set_work_mode(
+    hass: HomeAssistant,
+    entity_id: str | None,
+    option: str,
+    *,
+    entry: ConfigEntry | None = None,
+    logger: logging.Logger | None = None,
+    context: Context | None = None,
+) -> None:
+    """Set inverter work mode option if provided."""
+    if not entity_id:
+        return
+
+    if entry is not None:
+        if is_test_mode(hass, entry):
+            if logger:
+                logger.info("Test mode enabled - skipping select_option for %s", entity_id)
+            else:
+                _LOGGER.info("Test mode enabled - skipping select_option for %s", entity_id)
+            return
+
+    await _call_service(
+        hass,
+        "select",
+        "select_option",
+        {"entity_id": entity_id, "option": option},
+        context=context,
+    )
+
+    if logger:
+        logger.debug("Set %s to %s", entity_id, option)
+    else:
+        _LOGGER.debug("Set %s to %s", entity_id, option)

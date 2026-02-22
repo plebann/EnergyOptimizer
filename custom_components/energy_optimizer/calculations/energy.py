@@ -56,6 +56,18 @@ def calculate_surplus_energy(
     return max(0.0, surplus)
 
 
+def calculate_export_power(surplus_kwh: float, *, base_watts: float = 250.0) -> float:
+    """Calculate export power limit from surplus energy.
+
+    Mirrors legacy formula used in old automations:
+    100 * (surplus_kwh * 10 + 2.5), which is equivalent to
+    surplus_kwh * 1000 + 250, rounded to the nearest 100 W.
+    """
+    raw_power = (surplus_kwh * 1000.0) + base_watts
+    rounded_power = round(raw_power / 100.0) * 100.0
+    return max(rounded_power, 100.0)
+
+
 def calculate_needed_reserve(
     required_kwh: float,
     pv_forecast_kwh: float,

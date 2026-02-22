@@ -28,6 +28,21 @@ def is_test_mode(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return bool(entry.options.get(CONF_TEST_MODE, False))
 
 
+def is_test_sell_mode(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Return True when test sell mode is enabled for the config entry."""
+    from .const import CONF_TEST_SELL_MODE, DOMAIN
+
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if isinstance(entry_data, dict):
+        test_sell_mode_switch = entry_data.get("test_sell_mode_switch")
+        if test_sell_mode_switch is not None:
+            return bool(test_sell_mode_switch.is_on)
+
+    if CONF_TEST_SELL_MODE in entry.data:
+        return bool(entry.data.get(CONF_TEST_SELL_MODE))
+    return bool(entry.options.get(CONF_TEST_SELL_MODE, False))
+
+
 def is_balancing_ongoing(hass: HomeAssistant, entry_id: str) -> bool:
     """Return True when balancing ongoing binary sensor is on."""
     from .const import DOMAIN
@@ -452,3 +467,68 @@ def resolve_sell_window_start_hour(
         sell_start_hour = default_hour
 
     return sell_start_hour
+
+
+def resolve_evening_max_price_hour(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    default_hour: int = 17,
+) -> int:
+    """Resolve evening max price hour from configured sensor with fallback."""
+    from .const import CONF_EVENING_MAX_PRICE_HOUR_SENSOR
+
+    evening_peak_hour = default_hour
+    evening_peak_entity = config.get(CONF_EVENING_MAX_PRICE_HOUR_SENSOR)
+    if evening_peak_entity:
+        if str(evening_peak_entity).startswith("input_datetime."):
+            evening_peak_state = hass.states.get(str(evening_peak_entity))
+            if evening_peak_state is None:
+                _LOGGER.warning(
+                    "Evening max price hour input_datetime %s unavailable, using default %s",
+                    evening_peak_entity,
+                    default_hour,
+                )
+            else:
+                state_value = evening_peak_state.state
+                dt_value = dt_util.parse_datetime(state_value)
+                if dt_value is not None:
+                    evening_peak_hour = dt_util.as_local(dt_value).hour
+                else:
+                    time_value = dt_util.parse_time(state_value)
+                    if time_value is not None:
+                        evening_peak_hour = time_value.hour
+                    else:
+                        _LOGGER.warning(
+                            "Evening max price hour input_datetime %s has invalid value %s, using default %s",
+                            evening_peak_entity,
+                            state_value,
+                            default_hour,
+                        )
+        else:
+            evening_peak_value = get_float_value(
+                hass, evening_peak_entity, default=evening_peak_hour
+            )
+            if evening_peak_value is not None:
+                evening_peak_hour = int(evening_peak_value)
+            else:
+                _LOGGER.warning(
+                    "Evening max price hour sensor %s unavailable, using default %s",
+                    evening_peak_entity,
+                    default_hour,
+                )
+    else:
+        _LOGGER.warning(
+            "Evening max price hour sensor not configured, using default %s",
+            default_hour,
+        )
+
+    if evening_peak_hour < 0 or evening_peak_hour > 23:
+        _LOGGER.warning(
+            "Evening max price hour %s out of range, using default %s",
+            evening_peak_hour,
+            default_hour,
+        )
+        evening_peak_hour = default_hour
+
+    return evening_peak_hour

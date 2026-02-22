@@ -14,8 +14,10 @@ from ..const import (
     CONF_BATTERY_VOLTAGE,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
+    CONF_PROG3_SOC_ENTITY,
     CONF_PROG2_SOC_ENTITY,
     CONF_PROG4_SOC_ENTITY,
+    CONF_PROG5_SOC_ENTITY,
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
@@ -157,6 +159,21 @@ def get_required_prog2_soc_state(
     return str(prog2_soc_entity), prog2_soc_value
 
 
+def get_required_prog3_soc_state(
+    hass: HomeAssistant, config: dict[str, object]
+) -> tuple[str, float] | None:
+    """Return Program 3 SOC entity id and value when available."""
+    prog3_soc_entity = config.get(CONF_PROG3_SOC_ENTITY)
+    prog3_soc_value = get_required_float_state(
+        hass,
+        prog3_soc_entity,
+        entity_name="Program 3 SOC entity",
+    )
+    if prog3_soc_value is None:
+        return None
+    return str(prog3_soc_entity), prog3_soc_value
+
+
 def get_required_prog4_soc_state(
     hass: HomeAssistant, config: dict[str, object]
 ) -> tuple[str, float] | None:
@@ -170,6 +187,21 @@ def get_required_prog4_soc_state(
     if prog4_soc_value is None:
         return None
     return str(prog4_soc_entity), prog4_soc_value
+
+
+def get_required_prog5_soc_state(
+    hass: HomeAssistant, config: dict[str, object]
+) -> tuple[str, float] | None:
+    """Return Program 5 SOC entity id and value when available."""
+    prog5_soc_entity = config.get(CONF_PROG5_SOC_ENTITY)
+    prog5_soc_value = get_required_float_state(
+        hass,
+        prog5_soc_entity,
+        entity_name="Program 5 SOC entity",
+    )
+    if prog5_soc_value is None:
+        return None
+    return str(prog5_soc_entity), prog5_soc_value
 
 
 def get_required_current_soc_state(
@@ -401,6 +433,60 @@ def build_afternoon_charge_outcome(
         arbitrage_kwh=arbitrage_kwh,
         usage_kwh=usage_kwh,
         full_details_extra=full_details_extra,
+    )
+
+
+def build_evening_sell_outcome(
+    *,
+    target_soc: float,
+    current_soc: float,
+    surplus_kwh: float,
+    reserve_kwh: float,
+    required_kwh: float,
+    pv_forecast_kwh: float,
+    heat_pump_kwh: float,
+    losses_kwh: float,
+    start_hour: int,
+    end_hour: int,
+    export_power_w: float,
+    evening_price: float,
+    reference_price: float,
+) -> DecisionOutcome:
+    """Build an evening sell decision outcome."""
+    summary = f"Battery scheduled to sell down to {target_soc:.0f}%"
+    return DecisionOutcome(
+        scenario="Evening Peak Sell",
+        action_type="sell_scheduled",
+        summary=summary,
+        reason=(
+            f"Surplus {surplus_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
+            f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh"
+        ),
+        key_metrics={
+            "result": summary,
+            "current_soc": f"{current_soc:.0f}%",
+            "target_soc": f"{target_soc:.0f}%",
+            "surplus": f"{surplus_kwh:.1f} kWh",
+            "export_power": f"{export_power_w:.0f} W",
+            "evening_price": f"{evening_price:.1f} PLN/MWh",
+            "reference_price": f"{reference_price:.1f} PLN/MWh",
+            "window": f"{start_hour:02d}:00-{end_hour:02d}:00",
+        },
+        full_details={
+            "current_soc": round(current_soc, 1),
+            "target_soc": round(target_soc, 1),
+            "surplus_kwh": round(surplus_kwh, 2),
+            "reserve_kwh": round(reserve_kwh, 2),
+            "required_kwh": round(required_kwh, 2),
+            "pv_forecast_kwh": round(pv_forecast_kwh, 2),
+            "heat_pump_kwh": round(heat_pump_kwh, 2),
+            "losses_kwh": round(losses_kwh, 2),
+            "export_power_w": round(export_power_w, 0),
+            "evening_price": round(evening_price, 2),
+            "reference_price": round(reference_price, 2),
+            "start_hour": start_hour,
+            "end_hour": end_hour,
+        },
     )
 
 

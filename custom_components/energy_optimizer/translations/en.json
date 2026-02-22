@@ -13,14 +13,24 @@
           "tomorrow_price_sensor": "Tomorrow Price Sensor (Optional)",
           "min_arbitrage_price": "Minimum Arbitrage Price (PLN/MWh)",
           "sell_window_start_sensor": "Sell Window Start (Optional)",
-          "sell_window_price_sensor": "Sell Window Price (Optional)"
+          "sell_window_price_sensor": "Sell Window Price (Optional)",
+          "evening_max_price_sensor": "Evening Max Price Sensor (Optional)",
+          "evening_max_price_hour_sensor": "Evening Max Price Hour Sensor (Optional)",
+          "morning_max_price_sensor": "Morning Max Price Sensor (Optional)",
+          "morning_max_price_hour_sensor": "Morning Max Price Hour Sensor (Optional)",
+          "daytime_min_price_sensor": "Daytime Min Price Sensor (Optional)"
         },
         "data_description": {
           "price_sensor": "Sensor providing current electricity price (PLN/MWh)",
           "tomorrow_price_sensor": "Sensor providing tomorrow's price data (PLN/MWh)",
           "min_arbitrage_price": "Do not perform arbitrage below this price (PLN/MWh)",
           "sell_window_start_sensor": "Start time of the selling window (input_datetime or time sensor)",
-          "sell_window_price_sensor": "Price at the selling window peak (PLN/MWh)"
+          "sell_window_price_sensor": "Price at the selling window peak (PLN/MWh)",
+          "evening_max_price_sensor": "Sensor with evening peak price from external price analysis",
+          "evening_max_price_hour_sensor": "Entity with evening peak hour (input_datetime or time sensor)",
+          "morning_max_price_sensor": "Sensor with morning peak price from external price analysis",
+          "morning_max_price_hour_sensor": "Entity with morning peak hour (input_datetime or time sensor)",
+          "daytime_min_price_sensor": "Sensor with daytime minimum price from external price analysis"
         }
       },
       "battery_sensors": {
@@ -70,6 +80,7 @@
           "work_mode_entity": "Work Mode Control (Optional)",
           "charge_current_entity": "Charge Current Control (Optional)",
           "discharge_current_entity": "Discharge Current Control (Optional)",
+          "export_power_entity": "Export Power Control (Optional)",
           "max_charge_current_entity": "Max Charge Current (Optional)",
           "grid_charge_switch": "Grid Charge Switch (Optional)"
         },
@@ -77,6 +88,7 @@
           "work_mode_entity": "Entity to switch inverter work modes",
           "charge_current_entity": "Entity to control charge current limit",
           "discharge_current_entity": "Entity to control discharge current limit",
+          "export_power_entity": "Entity to control export power limit during selling",
           "max_charge_current_entity": "Entity to cap charge current (set to default 23A during balancing)",
           "grid_charge_switch": "Switch to enable/disable grid charging"
         }
@@ -182,14 +194,24 @@
           "tomorrow_price_sensor": "Tomorrow Price Sensor (Optional)",
           "min_arbitrage_price": "Minimum Arbitrage Price (PLN/MWh)",
           "sell_window_start_sensor": "Sell Window Start (Optional)",
-          "sell_window_price_sensor": "Sell Window Price (Optional)"
+          "sell_window_price_sensor": "Sell Window Price (Optional)",
+          "evening_max_price_sensor": "Evening Max Price Sensor (Optional)",
+          "evening_max_price_hour_sensor": "Evening Max Price Hour Sensor (Optional)",
+          "morning_max_price_sensor": "Morning Max Price Sensor (Optional)",
+          "morning_max_price_hour_sensor": "Morning Max Price Hour Sensor (Optional)",
+          "daytime_min_price_sensor": "Daytime Min Price Sensor (Optional)"
         },
         "data_description": {
           "price_sensor": "Sensor providing current electricity price (PLN/MWh)",
           "tomorrow_price_sensor": "Sensor providing tomorrow's price data (PLN/MWh)",
           "min_arbitrage_price": "Do not perform arbitrage below this price (PLN/MWh)",
           "sell_window_start_sensor": "Start time of the selling window (input_datetime or time sensor)",
-          "sell_window_price_sensor": "Price at the selling window peak (PLN/MWh)"
+          "sell_window_price_sensor": "Price at the selling window peak (PLN/MWh)",
+          "evening_max_price_sensor": "Sensor with evening peak price from external price analysis",
+          "evening_max_price_hour_sensor": "Entity with evening peak hour (input_datetime or time sensor)",
+          "morning_max_price_sensor": "Sensor with morning peak price from external price analysis",
+          "morning_max_price_hour_sensor": "Entity with morning peak hour (input_datetime or time sensor)",
+          "daytime_min_price_sensor": "Sensor with daytime minimum price from external price analysis"
         }
       },
       "init": {
@@ -238,6 +260,9 @@
     "switch": {
       "test_mode": {
         "name": "Test mode"
+      },
+      "test_sell_mode": {
+        "name": "Test sell mode"
       }
     }
   }

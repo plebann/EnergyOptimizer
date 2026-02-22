@@ -8,6 +8,11 @@ CONF_TOMORROW_PRICE_SENSOR = "tomorrow_price_sensor"
 CONF_MIN_ARBITRAGE_PRICE = "min_arbitrage_price"
 CONF_SELL_WINDOW_START_SENSOR = "sell_window_start_sensor"
 CONF_SELL_WINDOW_PRICE_SENSOR = "sell_window_price_sensor"
+CONF_EVENING_MAX_PRICE_SENSOR = "evening_max_price_sensor"
+CONF_EVENING_MAX_PRICE_HOUR_SENSOR = "evening_max_price_hour_sensor"
+CONF_MORNING_MAX_PRICE_SENSOR = "morning_max_price_sensor"
+CONF_MORNING_MAX_PRICE_HOUR_SENSOR = "morning_max_price_hour_sensor"
+CONF_DAYTIME_MIN_PRICE_SENSOR = "daytime_min_price_sensor"
 
 CONF_BATTERY_SOC_SENSOR = "battery_soc_sensor"
 CONF_BATTERY_POWER_SENSOR = "battery_power_sensor"
@@ -24,6 +29,7 @@ CONF_BATTERY_CAPACITY_ENTITY = "battery_capacity_entity"
 CONF_WORK_MODE_ENTITY = "work_mode_entity"
 CONF_CHARGE_CURRENT_ENTITY = "charge_current_entity"
 CONF_DISCHARGE_CURRENT_ENTITY = "discharge_current_entity"
+CONF_EXPORT_POWER_ENTITY = "export_power_entity"
 CONF_GRID_CHARGE_SWITCH = "grid_charge_switch"
 
 # Time-based program SOC entities (for Solarman inverters with multiple time slots)
@@ -77,6 +83,7 @@ CONF_BALANCING_INTERVAL_DAYS = "balancing_interval_days"
 CONF_BALANCING_PV_THRESHOLD = "balancing_pv_threshold_kwh"
 CONF_MAX_CHARGE_CURRENT_ENTITY = "max_charge_current_entity"
 CONF_TEST_MODE = "test_mode"
+CONF_TEST_SELL_MODE = "test_sell_mode"
 
 # Default values
 DEFAULT_BATTERY_CAPACITY_AH = 37
@@ -96,6 +103,10 @@ DEFAULT_HEAT_PUMP_FORECAST_SERVICE = "calculate_forecast_energy"
 SERVICE_OVERNIGHT_SCHEDULE = "overnight_schedule"
 SERVICE_MORNING_GRID_CHARGE = "morning_grid_charge"
 SERVICE_AFTERNOON_GRID_CHARGE = "afternoon_grid_charge"
+SERVICE_EVENING_PEAK_SELL = "evening_peak_sell"
+
+DEFAULT_EXPORT_POWER_RESET = 12000
+DEFAULT_DISCHARGE_CURRENT_RESET = 12
 
 # Update intervals (seconds)
 UPDATE_INTERVAL_FAST = 60  # For battery-related sensors
