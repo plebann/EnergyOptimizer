@@ -13,14 +13,19 @@ from ..calculations.battery import (
     calculate_soc_delta,
     calculate_target_soc,
 )
-from ..calculations.energy import calculate_losses, calculate_sufficiency_window
+from ..calculations.energy import (
+    calculate_losses,
+    calculate_needed_reserve,
+    calculate_needed_reserve_sufficiency,
+    calculate_sufficiency_window,
+)
 from ..calculations.utils import build_hourly_usage_array
 from ..const import (
     CONF_CHARGE_CURRENT_ENTITY,
 )
 from ..decision_engine.common import (
     build_morning_charge_outcome,
-    calculate_no_action_target_soc,
+    calculate_target_soc_from_needed_reserve,
     get_battery_config,
     get_required_current_soc_state,
     get_required_prog2_soc_state,
@@ -125,17 +130,19 @@ async def async_run_morning_charge(
 
     pv_compensation_factor = get_pv_compensation_factor(hass, entry.entry_id)
 
-    deficit_kwh = required_kwh - reserve_kwh - pv_forecast_kwh
-    deficit_sufficiency_kwh = (
-        required_sufficiency_kwh - reserve_kwh - pv_sufficiency_kwh
+    needed_reserve_kwh = calculate_needed_reserve(required_kwh, pv_forecast_kwh)
+    needed_reserve_sufficiency_kwh = calculate_needed_reserve_sufficiency(
+        required_sufficiency_kwh, pv_sufficiency_kwh
     )
-    deficit_all_kwh = max(deficit_kwh, deficit_sufficiency_kwh)
+    needed_reserve_all_kwh = max(needed_reserve_kwh, needed_reserve_sufficiency_kwh)
 
-    if deficit_all_kwh <= 0.0:
-        target_soc = calculate_no_action_target_soc(
-            reserve_kwh=reserve_kwh,
-            deficit_kwh=deficit_all_kwh,
-            current_soc=current_soc,
+    gap_kwh = needed_reserve_kwh - reserve_kwh
+    gap_sufficiency_kwh = needed_reserve_sufficiency_kwh - reserve_kwh
+    gap_all_kwh = max(gap_kwh, gap_sufficiency_kwh)
+
+    if gap_all_kwh <= 0.0:
+        target_soc = calculate_target_soc_from_needed_reserve(
+            needed_reserve_kwh=needed_reserve_all_kwh,
             min_soc=bc.min_soc,
             max_soc=bc.max_soc,
             capacity_ah=bc.capacity_ah,
@@ -151,23 +158,25 @@ async def async_run_morning_charge(
             reserve_kwh=reserve_kwh,
             required_kwh=required_kwh,
             required_sufficiency_kwh=required_sufficiency_kwh,
+            needed_reserve_kwh=needed_reserve_kwh,
+            needed_reserve_sufficiency_kwh=needed_reserve_sufficiency_kwh,
             pv_forecast_kwh=pv_forecast_kwh,
             pv_sufficiency_kwh=pv_sufficiency_kwh,
             heat_pump_kwh=heat_pump_kwh,
-            deficit_kwh=deficit_kwh,
-            deficit_sufficiency_kwh=deficit_sufficiency_kwh,
+            gap_kwh=gap_kwh,
+            gap_sufficiency_kwh=gap_sufficiency_kwh,
             sufficiency_hour=sufficiency_hour,
             sufficiency_reached=sufficiency_reached,
             pv_compensation_factor=pv_compensation_factor,
         )
         return
 
-    deficit_to_charge_kwh = apply_efficiency_compensation(
-        deficit_all_kwh,
+    gap_to_charge_kwh = apply_efficiency_compensation(
+        gap_all_kwh,
         bc.efficiency,
     )
     soc_delta = calculate_soc_delta(
-        deficit_to_charge_kwh,
+        gap_to_charge_kwh,
         capacity_ah=bc.capacity_ah,
         voltage=bc.voltage,
     )
@@ -177,7 +186,7 @@ async def async_run_morning_charge(
 
     charge_current_entity = config.get(CONF_CHARGE_CURRENT_ENTITY)
     charge_current = calculate_charge_current(
-        deficit_to_charge_kwh,
+        gap_to_charge_kwh,
         current_soc=current_soc,
         capacity_ah=bc.capacity_ah,
         voltage=bc.voltage,
@@ -205,11 +214,13 @@ async def async_run_morning_charge(
         target_soc=target_soc,
         required_kwh=required_kwh,
         required_sufficiency_kwh=required_sufficiency_kwh,
+        needed_reserve_kwh=needed_reserve_kwh,
+        needed_reserve_sufficiency_kwh=needed_reserve_sufficiency_kwh,
         reserve_kwh=reserve_kwh,
-        deficit_to_charge_kwh=deficit_to_charge_kwh,
-        deficit_all_kwh=deficit_all_kwh,
-        deficit_kwh=deficit_kwh,
-        deficit_sufficiency_kwh=deficit_sufficiency_kwh,
+        gap_to_charge_kwh=gap_to_charge_kwh,
+        gap_all_kwh=gap_all_kwh,
+        gap_kwh=gap_kwh,
+        gap_sufficiency_kwh=gap_sufficiency_kwh,
         pv_forecast_kwh=pv_forecast_kwh,
         pv_sufficiency_kwh=pv_sufficiency_kwh,
         heat_pump_kwh=heat_pump_kwh,
@@ -238,11 +249,13 @@ def _build_no_action_outcome(
     reserve_kwh: float,
     required_kwh: float,
     required_sufficiency_kwh: float,
+    needed_reserve_kwh: float,
+    needed_reserve_sufficiency_kwh: float,
     pv_forecast_kwh: float,
     pv_sufficiency_kwh: float,
     heat_pump_kwh: float,
-    deficit_kwh: float,
-    deficit_sufficiency_kwh: float,
+    gap_kwh: float,
+    gap_sufficiency_kwh: float,
     sufficiency_hour: int,
     sufficiency_reached: bool,
     pv_compensation_factor: float | None,
@@ -256,13 +269,15 @@ def _build_no_action_outcome(
         action_type="no_action",
         summary=summary,
         reason=(
-            f"Deficit {deficit_kwh:.1f} kWh, "
-            f"deficit sufficiency {deficit_sufficiency_kwh:.1f} kWh"
+            f"Gap {gap_kwh:.1f} kWh, "
+            f"gap sufficiency {gap_sufficiency_kwh:.1f} kWh"
         ),
         key_metrics={
             "result": summary,
             "reserve": f"{reserve_kwh:.1f} kWh",
             "required": f"{required_kwh:.1f} kWh",
+            "needed_reserve": f"{needed_reserve_kwh:.1f} kWh",
+            "needed_reserve_sufficiency": f"{needed_reserve_sufficiency_kwh:.1f} kWh",
             "required_sufficiency": f"{required_sufficiency_kwh:.1f} kWh",
             "pv": f"{pv_forecast_kwh:.1f} kWh",
             "pv_sufficiency": f"{pv_sufficiency_kwh:.1f} kWh",
@@ -272,6 +287,8 @@ def _build_no_action_outcome(
         full_details={
             "reserve_kwh": round(reserve_kwh, 2),
             "required_kwh": round(required_kwh, 2),
+            "needed_reserve_kwh": round(needed_reserve_kwh, 2),
+            "needed_reserve_sufficiency_kwh": round(needed_reserve_sufficiency_kwh, 2),
             "required_sufficiency_kwh": round(required_sufficiency_kwh, 2),
             "pv_sufficiency_kwh": round(pv_sufficiency_kwh, 2),
             "pv_forecast_kwh": round(pv_forecast_kwh, 2),
@@ -281,8 +298,8 @@ def _build_no_action_outcome(
                 else None
             ),
             "heat_pump_kwh": round(heat_pump_kwh, 2),
-            "deficit_kwh": round(deficit_kwh, 2),
-            "deficit_sufficiency_kwh": round(deficit_sufficiency_kwh, 2),
+            "gap_kwh": round(gap_kwh, 2),
+            "gap_sufficiency_kwh": round(gap_sufficiency_kwh, 2),
             "sufficiency_hour": sufficiency_hour,
             "sufficiency_reached": sufficiency_reached,
         },
@@ -336,11 +353,13 @@ async def _handle_no_action(
     reserve_kwh: float,
     required_kwh: float,
     required_sufficiency_kwh: float,
+    needed_reserve_kwh: float,
+    needed_reserve_sufficiency_kwh: float,
     pv_forecast_kwh: float,
     pv_sufficiency_kwh: float,
     heat_pump_kwh: float,
-    deficit_kwh: float,
-    deficit_sufficiency_kwh: float,
+    gap_kwh: float,
+    gap_sufficiency_kwh: float,
     sufficiency_hour: int,
     sufficiency_reached: bool,
     pv_compensation_factor: float | None,
@@ -350,11 +369,13 @@ async def _handle_no_action(
         reserve_kwh=reserve_kwh,
         required_kwh=required_kwh,
         required_sufficiency_kwh=required_sufficiency_kwh,
+        needed_reserve_kwh=needed_reserve_kwh,
+        needed_reserve_sufficiency_kwh=needed_reserve_sufficiency_kwh,
         pv_forecast_kwh=pv_forecast_kwh,
         pv_sufficiency_kwh=pv_sufficiency_kwh,
         heat_pump_kwh=heat_pump_kwh,
-        deficit_kwh=deficit_kwh,
-        deficit_sufficiency_kwh=deficit_sufficiency_kwh,
+        gap_kwh=gap_kwh,
+        gap_sufficiency_kwh=gap_sufficiency_kwh,
         sufficiency_hour=sufficiency_hour,
         sufficiency_reached=sufficiency_reached,
         pv_compensation_factor=pv_compensation_factor,

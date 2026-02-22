@@ -5,7 +5,7 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ..calculations.battery import calculate_soc_delta, calculate_target_soc
+from ..calculations.battery import calculate_target_soc_from_reserve
 from ..controllers.inverter import set_program_soc
 from ..const import (
     CONF_BATTERY_CAPACITY_AH,
@@ -55,27 +55,22 @@ def get_battery_config(config: dict[str, Any]) -> BatteryConfig:
     )
 
 
-def calculate_no_action_target_soc(
+def calculate_target_soc_from_needed_reserve(
     *,
-    reserve_kwh: float,
-    deficit_kwh: float,
-    current_soc: float,
+    needed_reserve_kwh: float,
     min_soc: float,
     max_soc: float,
     capacity_ah: float,
     voltage: float,
 ) -> float:
-    """Calculate target SOC for no-action paths used by decision engines."""
-    target_soc = min_soc
-    if reserve_kwh + deficit_kwh > 0:
-        soc_delta = calculate_soc_delta(
-            deficit_kwh,
-            capacity_ah=capacity_ah,
-            voltage=voltage,
-        )
-        target_soc = calculate_target_soc(current_soc, soc_delta, max_soc=max_soc)
-        target_soc = max(target_soc, min_soc)
-    return target_soc
+    """Calculate absolute target SOC from needed reserve for no-action paths."""
+    return calculate_target_soc_from_reserve(
+        needed_reserve_kwh=needed_reserve_kwh,
+        min_soc=min_soc,
+        max_soc=max_soc,
+        capacity_ah=capacity_ah,
+        voltage=voltage,
+    )
 
 
 async def handle_no_action_soc_update(
@@ -197,9 +192,10 @@ def build_charge_outcome_base(
     scenario: str,
     target_soc: float,
     required_kwh: float,
+    needed_reserve_kwh: float,
     reserve_kwh: float,
-    deficit_to_charge_kwh: float,
-    deficit_all_kwh: float,
+    gap_to_charge_kwh: float,
+    gap_all_kwh: float,
     pv_forecast_kwh: float,
     heat_pump_kwh: float,
     charge_current: float,
@@ -219,13 +215,13 @@ def build_charge_outcome_base(
     summary = f"Battery scheduled to charge to {target_soc:.0f}%"
     if arbitrage_kwh is None:
         reason = (
-            f"Deficit {deficit_to_charge_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
+            f"Gap {gap_to_charge_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
             f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh, "
             f"current {charge_current:.0f} A"
         )
     else:
         reason = (
-            f"Deficit {deficit_to_charge_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
+            f"Gap {gap_to_charge_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
             f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh, "
             f"arbitrage {arbitrage_kwh:.1f} kWh, current {charge_current:.0f} A"
         )
@@ -234,8 +230,9 @@ def build_charge_outcome_base(
         "result": summary,
         "target": f"{target_soc:.0f}%",
         "required": f"{required_kwh:.1f} kWh",
+        "needed_reserve": f"{needed_reserve_kwh:.1f} kWh",
         "reserve": f"{reserve_kwh:.1f} kWh",
-        "to_charge": f"{deficit_to_charge_kwh:.1f} kWh",
+        "to_charge": f"{gap_to_charge_kwh:.1f} kWh",
         "pv": f"{pv_forecast_kwh:.1f} kWh",
         "heat_pump": f"{heat_pump_kwh:.1f} kWh",
         "charge_current": f"{charge_current:.0f} A",
@@ -249,10 +246,11 @@ def build_charge_outcome_base(
     full_details = {
         "target_soc": round(target_soc, 1),
         "current_soc": round(current_soc, 1),
+        "needed_reserve": round(needed_reserve_kwh, 2),
         "reserve": round(reserve_kwh, 2),
         "required": round(required_kwh, 2),
-        "to_charge": round(deficit_to_charge_kwh, 2),
-        "deficit": round(deficit_all_kwh, 2),
+        "to_charge": round(gap_to_charge_kwh, 2),
+        "gap": round(gap_all_kwh, 2),
         "losses": round(losses_kwh, 2),
         "pv_forecast": round(pv_forecast_kwh, 2),
         "pv_compensation_factor": (
@@ -288,11 +286,13 @@ def build_morning_charge_outcome(
     target_soc: float,
     required_kwh: float,
     required_sufficiency_kwh: float,
+    needed_reserve_kwh: float,
+    needed_reserve_sufficiency_kwh: float,
     reserve_kwh: float,
-    deficit_to_charge_kwh: float,
-    deficit_all_kwh: float,
-    deficit_kwh: float,
-    deficit_sufficiency_kwh: float,
+    gap_to_charge_kwh: float,
+    gap_all_kwh: float,
+    gap_kwh: float,
+    gap_sufficiency_kwh: float,
     pv_forecast_kwh: float,
     pv_sufficiency_kwh: float,
     heat_pump_kwh: float,
@@ -309,10 +309,11 @@ def build_morning_charge_outcome(
 ) -> DecisionOutcome:
     """Build a morning charge decision outcome."""
     key_metrics_extra = {
-        "deficit": f"{deficit_kwh:.1f} kWh",
+        "gap": f"{gap_kwh:.1f} kWh",
+        "needed_reserve_sufficiency": f"{needed_reserve_sufficiency_kwh:.1f} kWh",
         "required_sufficiency": f"{required_sufficiency_kwh:.1f} kWh",
         "pv_sufficiency": f"{pv_sufficiency_kwh:.1f} kWh",
-        "deficit_sufficiency": f"{deficit_sufficiency_kwh:.1f} kWh",
+        "gap_sufficiency": f"{gap_sufficiency_kwh:.1f} kWh",
         "sufficiency_hour": format_sufficiency_hour(
             sufficiency_hour, sufficiency_reached=bool(sufficiency_reached)
         ),
@@ -320,8 +321,9 @@ def build_morning_charge_outcome(
     full_details_extra = {
         "required_sufficiency": round(required_sufficiency_kwh, 2),
         "pv_sufficiency": round(pv_sufficiency_kwh, 2),
-        "deficit_full": round(deficit_kwh, 2),
-        "deficit_sufficiency": round(deficit_sufficiency_kwh, 2),
+        "needed_reserve_sufficiency": round(needed_reserve_sufficiency_kwh, 2),
+        "gap_full": round(gap_kwh, 2),
+        "gap_sufficiency": round(gap_sufficiency_kwh, 2),
         "sufficiency_hour": sufficiency_hour,
         "sufficiency_reached": sufficiency_reached,
     }
@@ -330,9 +332,10 @@ def build_morning_charge_outcome(
         scenario=scenario,
         target_soc=target_soc,
         required_kwh=required_kwh,
+        needed_reserve_kwh=needed_reserve_kwh,
         reserve_kwh=reserve_kwh,
-        deficit_to_charge_kwh=deficit_to_charge_kwh,
-        deficit_all_kwh=deficit_all_kwh,
+        gap_to_charge_kwh=gap_to_charge_kwh,
+        gap_all_kwh=gap_all_kwh,
         pv_forecast_kwh=pv_forecast_kwh,
         heat_pump_kwh=heat_pump_kwh,
         charge_current=charge_current,
@@ -353,9 +356,10 @@ def build_afternoon_charge_outcome(
     scenario: str,
     target_soc: float,
     required_kwh: float,
+    needed_reserve_kwh: float,
     reserve_kwh: float,
-    deficit_to_charge_kwh: float,
-    deficit_all_kwh: float,
+    gap_to_charge_kwh: float,
+    gap_all_kwh: float,
     arbitrage_kwh: float,
     arbitrage_details: dict[str, float | str] | None,
     pv_forecast_kwh: float,
@@ -380,9 +384,10 @@ def build_afternoon_charge_outcome(
         scenario=scenario,
         target_soc=target_soc,
         required_kwh=required_kwh,
+        needed_reserve_kwh=needed_reserve_kwh,
         reserve_kwh=reserve_kwh,
-        deficit_to_charge_kwh=deficit_to_charge_kwh,
-        deficit_all_kwh=deficit_all_kwh,
+        gap_to_charge_kwh=gap_to_charge_kwh,
+        gap_all_kwh=gap_all_kwh,
         pv_forecast_kwh=pv_forecast_kwh,
         heat_pump_kwh=heat_pump_kwh,
         charge_current=charge_current,

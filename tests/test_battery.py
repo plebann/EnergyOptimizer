@@ -4,6 +4,7 @@ import pytest
 from custom_components.energy_optimizer.calculations.battery import (
     calculate_battery_reserve,
     calculate_battery_space,
+    calculate_target_soc_from_reserve,
     calculate_total_capacity,
     calculate_usable_capacity,
     kwh_to_soc,
@@ -92,3 +93,24 @@ def test_calculate_total_capacity():
     
     # 100Ah * 24V / 1000 = 2.4 kWh
     assert calculate_total_capacity(100, 24) == pytest.approx(2.4, rel=0.01)
+
+
+def test_calculate_target_soc_from_reserve():
+    """Test absolute target SOC calculation from needed reserve."""
+    target = calculate_target_soc_from_reserve(
+        needed_reserve_kwh=2.4,
+        min_soc=10,
+        max_soc=100,
+        capacity_ah=200,
+        voltage=48,
+    )
+    assert target == pytest.approx(35.0, rel=0.01)
+
+    capped_target = calculate_target_soc_from_reserve(
+        needed_reserve_kwh=20.0,
+        min_soc=20,
+        max_soc=80,
+        capacity_ah=200,
+        voltage=48,
+    )
+    assert capped_target == 80.0

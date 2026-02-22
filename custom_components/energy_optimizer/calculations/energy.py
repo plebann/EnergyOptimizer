@@ -56,6 +56,32 @@ def calculate_surplus_energy(
     return max(0.0, surplus)
 
 
+def calculate_needed_reserve(
+    required_kwh: float,
+    pv_forecast_kwh: float,
+) -> float:
+    """Calculate needed battery reserve for a period.
+
+    This calculation is demand-first and does not use current battery reserve.
+
+    Args:
+        required_kwh: Total demand in the window (kWh).
+        pv_forecast_kwh: Forecast PV generation in the window (kWh).
+
+    Returns:
+        Required reserve that battery must provide (kWh).
+    """
+    return max(required_kwh - pv_forecast_kwh, 0.0)
+
+
+def calculate_needed_reserve_sufficiency(
+    required_sufficiency_kwh: float,
+    pv_sufficiency_kwh: float,
+) -> float:
+    """Calculate needed reserve until PV sufficiency point."""
+    return max(required_sufficiency_kwh - pv_sufficiency_kwh, 0.0)
+
+
 def calculate_losses(
     hass: Any,
     config: dict[str, object],

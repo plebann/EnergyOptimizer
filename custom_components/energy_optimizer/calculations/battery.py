@@ -238,6 +238,20 @@ def calculate_target_soc(
     return float(ceil(target_soc))
 
 
+def calculate_target_soc_from_reserve(
+    *,
+    needed_reserve_kwh: float,
+    min_soc: float,
+    max_soc: float,
+    capacity_ah: float,
+    voltage: float,
+) -> float:
+    """Calculate absolute target SOC from needed reserve above minimum SOC."""
+    reserve_soc = kwh_to_soc(needed_reserve_kwh, capacity_ah, voltage)
+    target_soc = min_soc + reserve_soc
+    return float(min(ceil(target_soc), max_soc))
+
+
 def calculate_charge_current(
     energy_to_charge_kwh: float,
     *,

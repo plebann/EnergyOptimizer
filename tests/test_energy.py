@@ -2,6 +2,8 @@
 import pytest
 
 from custom_components.energy_optimizer.calculations.energy import (
+    calculate_needed_reserve,
+    calculate_needed_reserve_sufficiency,
     calculate_required_energy,
     calculate_surplus_energy,
 )
@@ -38,3 +40,15 @@ def test_calculate_surplus_energy():
     # Negative surplus should return 0
     surplus = calculate_surplus_energy(3, 10, 2)
     assert surplus == 0.0
+
+
+def test_calculate_needed_reserve():
+    """Test demand-first needed reserve calculation."""
+    assert calculate_needed_reserve(10.0, 3.0) == pytest.approx(7.0, rel=0.01)
+    assert calculate_needed_reserve(5.0, 10.0) == 0.0
+
+
+def test_calculate_needed_reserve_sufficiency():
+    """Test needed reserve calculation for sufficiency window."""
+    assert calculate_needed_reserve_sufficiency(8.0, 2.5) == pytest.approx(5.5, rel=0.01)
+    assert calculate_needed_reserve_sufficiency(3.0, 4.0) == 0.0

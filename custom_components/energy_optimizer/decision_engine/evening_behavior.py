@@ -12,7 +12,11 @@ from custom_components.energy_optimizer.utils.pv_forecast import (
 )
 
 from ..calculations.battery import calculate_battery_reserve, calculate_battery_space
-from ..calculations.energy import calculate_losses, calculate_sufficiency_window
+from ..calculations.energy import (
+    calculate_losses,
+    calculate_needed_reserve_sufficiency,
+    calculate_sufficiency_window,
+)
 from ..calculations.utils import build_hourly_usage_array
 from ..const import (
     CONF_BALANCING_INTERVAL_DAYS,
@@ -553,8 +557,11 @@ async def _calculate_preservation_context(
         margin=margin,
         pv_forecast_hourly=pv_forecast_hourly,
     )
-    required_net_sufficiency_kwh = max(required_sufficiency_kwh - pv_sufficiency_kwh, 0.0)
-    reserve_insufficient = reserve_kwh < required_net_sufficiency_kwh
+    needed_reserve_sufficiency_kwh = calculate_needed_reserve_sufficiency(
+        required_sufficiency_kwh,
+        pv_sufficiency_kwh,
+    )
+    reserve_insufficient = reserve_kwh < needed_reserve_sufficiency_kwh
     grid_assist_on = bool(afternoon_grid_assist_sensor and afternoon_grid_assist_sensor.is_on)
     battery_space = calculate_battery_space(
         current_soc,
@@ -569,10 +576,10 @@ async def _calculate_preservation_context(
         pv_with_efficiency,
     )
     _LOGGER.debug(
-        "Reserve until sufficiency: reserve=%.2f kWh, required_net=%.2f kWh, "
+        "Reserve until sufficiency: reserve=%.2f kWh, needed_reserve=%.2f kWh, "
         "pv_to_sufficiency=%.2f kWh, sufficiency=%s, grid_assist=%s",
         reserve_kwh,
-        required_net_sufficiency_kwh,
+        needed_reserve_sufficiency_kwh,
         pv_sufficiency_kwh,
         format_sufficiency_hour(
             sufficiency_hour,
@@ -586,9 +593,10 @@ async def _calculate_preservation_context(
         "required_kwh": required_kwh,
         "required_sufficiency_kwh": required_sufficiency_kwh,
         "pv_sufficiency_kwh": pv_sufficiency_kwh,
+        "needed_reserve_sufficiency_kwh": needed_reserve_sufficiency_kwh,
+        "required_net_sufficiency_kwh": needed_reserve_sufficiency_kwh,
         "sufficiency_hour": sufficiency_hour,
         "sufficiency_reached": sufficiency_reached,
-        "required_net_sufficiency_kwh": required_net_sufficiency_kwh,
         "reserve_insufficient": reserve_insufficient,
         "grid_assist_on": grid_assist_on,
         "battery_space": battery_space,
