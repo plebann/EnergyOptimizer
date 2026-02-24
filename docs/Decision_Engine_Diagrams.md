@@ -35,15 +35,27 @@ flowchart LR
     EveningBehavior --> EveningBehavior_note
   end
 
+  subgraph EveningSellGroup[ ]
+    direction TB
+    EveningSell[Evening Peak Sell action]
+    EveningSell_note[Note: runs at evening peak hour]
+    EveningSell --> EveningSell_note
+  end
+
   EveningBehavior --> EveningBehavior_outcomes(( ))
   EveningBehavior_outcomes --> EveningBehavior_balancing[Balancing mode]
   EveningBehavior_outcomes --> EveningBehavior_preservation[Preservation mode]
   EveningBehavior_outcomes --> EveningBehavior_normal[Normal behavior]
   EveningBehavior_outcomes --> EveningBehavior_no_action[No action]
 
+  EveningSell --> EveningSell_outcomes(( ))
+  EveningSell_outcomes --> EveningSell_no_action[No action]
+  EveningSell_outcomes --> EveningSell_sell[Sell scheduled]
+
   style MorningChargeGroup fill:transparent,stroke:transparent
   style AfternoonChargeGroup fill:transparent,stroke:transparent
   style EveningBehaviorGroup fill:transparent,stroke:transparent
+  style EveningSellGroup fill:transparent,stroke:transparent
 ```
 
 ## Detailed Diagrams
@@ -51,3 +63,4 @@ flowchart LR
 - Morning: [docs/Morning_Charge_Action.md](docs/Morning_Charge_Action.md)
 - Afternoon: [docs/Afternoon_Charge_Action.md](docs/Afternoon_Charge_Action.md)
 - Evening: [docs/Evening_Behavior_Action.md](docs/Evening_Behavior_Action.md)
+- Evening Sell: [docs/Evening_Peak_Sell_Action.md](docs/Evening_Peak_Sell_Action.md)

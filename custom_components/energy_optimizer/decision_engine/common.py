@@ -456,7 +456,7 @@ def build_evening_sell_outcome(
     summary = f"Battery scheduled to sell down to {target_soc:.0f}%"
     return DecisionOutcome(
         scenario="Evening Peak Sell",
-        action_type="sell_scheduled",
+        action_type="high_sell",
         summary=summary,
         reason=(
             f"Surplus {surplus_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
@@ -486,6 +486,69 @@ def build_evening_sell_outcome(
             "threshold_price": round(threshold_price, 2),
             "start_hour": start_hour,
             "end_hour": end_hour,
+        },
+    )
+
+
+def build_surplus_sell_outcome(
+    *,
+    target_soc: float,
+    current_soc: float,
+    surplus_kwh: float,
+    reserve_kwh: float,
+    today_net_kwh: float,
+    tomorrow_net_kwh: float,
+    total_needed_kwh: float,
+    pv_today_kwh: float,
+    pv_tomorrow_kwh: float,
+    heat_pump_today_kwh: float,
+    heat_pump_tomorrow_kwh: float,
+    sufficiency_hour: int,
+    sufficiency_reached: bool,
+    export_power_w: float,
+    evening_price: float,
+    threshold_price: float,
+) -> DecisionOutcome:
+    """Build a surplus-sell decision outcome."""
+    summary = f"Surplus sell: battery scheduled to sell down to {target_soc:.0f}%"
+    return DecisionOutcome(
+        scenario="Evening Peak Sell",
+        action_type="sell",
+        summary=summary,
+        reason=(
+            f"Surplus {surplus_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
+            f"today net {today_net_kwh:.1f} kWh, tomorrow net {tomorrow_net_kwh:.1f} kWh"
+        ),
+        key_metrics={
+            "result": summary,
+            "current_soc": f"{current_soc:.0f}%",
+            "target_soc": f"{target_soc:.0f}%",
+            "surplus": f"{surplus_kwh:.1f} kWh",
+            "sufficiency_hour": format_sufficiency_hour(
+                sufficiency_hour,
+                sufficiency_reached=sufficiency_reached,
+            ),
+            "export_power": f"{export_power_w:.0f} W",
+            "evening_price": f"{evening_price:.1f} PLN/MWh",
+            "threshold_price": f"{threshold_price:.1f} PLN/MWh",
+        },
+        full_details={
+            "current_soc": round(current_soc, 1),
+            "target_soc": round(target_soc, 1),
+            "surplus_kwh": round(surplus_kwh, 2),
+            "reserve_kwh": round(reserve_kwh, 2),
+            "today_net_kwh": round(today_net_kwh, 2),
+            "tomorrow_net_kwh": round(tomorrow_net_kwh, 2),
+            "total_needed_kwh": round(total_needed_kwh, 2),
+            "pv_today_kwh": round(pv_today_kwh, 2),
+            "pv_tomorrow_kwh": round(pv_tomorrow_kwh, 2),
+            "heat_pump_today_kwh": round(heat_pump_today_kwh, 2),
+            "heat_pump_tomorrow_kwh": round(heat_pump_tomorrow_kwh, 2),
+            "sufficiency_hour": sufficiency_hour,
+            "sufficiency_reached": sufficiency_reached,
+            "export_power_w": round(export_power_w, 0),
+            "evening_price": round(evening_price, 2),
+            "threshold_price": round(threshold_price, 2),
         },
     )
 
