@@ -25,6 +25,7 @@ from ..const import (
 )
 from ..controllers.inverter import set_export_power, set_program_soc, set_work_mode
 from ..decision_engine.common import (
+    build_no_action_outcome,
     build_evening_sell_outcome,
     build_surplus_sell_outcome,
     get_battery_config,
@@ -40,7 +41,7 @@ from ..helpers import (
     resolve_tariff_start_hour,
 )
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
-from ..utils.logging import DecisionOutcome, format_sufficiency_hour, log_decision_unified
+from ..utils.logging import DecisionOutcome, log_decision_unified
 from ..utils.time_window import build_hour_window
 
 if TYPE_CHECKING:
@@ -48,67 +49,6 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _build_no_action_outcome(
-    *,
-    reason: str,
-    current_soc: float,
-    evening_price: float | None = None,
-    threshold_price: float | None = None,
-    sufficiency_hour: int | None = None,
-    sufficiency_reached: bool | None = None,
-    surplus_kwh: float | None = None,
-    total_needed_kwh: float | None = None,
-) -> DecisionOutcome:
-    """Build no-action outcome for evening sell routine."""
-    summary = (
-        "No surplus sell action"
-        if sufficiency_hour is not None
-        else "No evening peak sell action"
-    )
-    key_metrics: dict[str, str] = {
-        "result": summary,
-        "current_soc": f"{current_soc:.0f}%",
-    }
-    full_details: dict[str, Any] = {
-        "current_soc": round(current_soc, 1),
-        "evening_price": round(evening_price, 2) if evening_price is not None else None,
-        "threshold_price": (
-            round(threshold_price, 2) if threshold_price is not None else None
-        ),
-        "reason": reason,
-    }
-
-    if evening_price is not None:
-        key_metrics["evening_price"] = f"{evening_price:.1f} PLN/MWh"
-    if threshold_price is not None:
-        key_metrics["threshold_price"] = f"{threshold_price:.1f} PLN/MWh"
-
-    if sufficiency_hour is not None and sufficiency_reached is not None:
-        key_metrics["sufficiency_hour"] = format_sufficiency_hour(
-            sufficiency_hour,
-            sufficiency_reached=sufficiency_reached,
-        )
-        full_details["sufficiency_hour"] = sufficiency_hour
-        full_details["sufficiency_reached"] = sufficiency_reached
-
-    if surplus_kwh is not None:
-        key_metrics["surplus"] = f"{surplus_kwh:.1f} kWh"
-        full_details["surplus_kwh"] = round(surplus_kwh, 2)
-
-    if total_needed_kwh is not None:
-        key_metrics["total_needed"] = f"{total_needed_kwh:.1f} kWh"
-        full_details["total_needed_kwh"] = round(total_needed_kwh, 2)
-
-    return DecisionOutcome(
-        scenario="Evening Peak Sell",
-        action_type="no_action",
-        summary=summary,
-        reason=reason,
-        key_metrics=key_metrics,
-        full_details=full_details,
-    )
 
 
 async def _execute_sell(
@@ -235,19 +175,10 @@ async def async_run_evening_sell(
         config.get(CONF_EVENING_MAX_PRICE_SENSOR),
         entity_name="Evening max price sensor",
     )
-    threshold_price = float(config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0)
-
     if evening_price is None:
-        outcome = _build_no_action_outcome(
-            reason="Missing evening max price",
-            current_soc=current_soc,
-            evening_price=evening_price,
-            threshold_price=threshold_price,
-        )
-        await log_decision_unified(
-            hass, entry, outcome, context=integration_context, logger=_LOGGER
-        )
         return
+
+    threshold_price = float(config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0)
 
     effective_margin = margin if margin is not None else 1.1
 
@@ -342,11 +273,22 @@ async def _run_high_price_sell(
     )
 
     if surplus_kwh <= 0.0:
-        outcome = _build_no_action_outcome(
+        outcome = build_no_action_outcome(
+            scenario="Evening Peak Sell",
+            summary="No evening peak sell action",
             reason="No surplus energy available for selling",
             current_soc=current_soc,
-            evening_price=evening_price,
-            threshold_price=threshold_price,
+            reserve_kwh=reserve_kwh,
+            required_kwh=required_kwh,
+            pv_forecast_kwh=pv_forecast_kwh,
+            key_metrics_extra={
+                "evening_price": f"{evening_price:.1f} PLN/MWh",
+                "threshold_price": f"{threshold_price:.1f} PLN/MWh",
+            },
+            full_details_extra={
+                "evening_price": round(evening_price, 2),
+                "threshold_price": round(threshold_price, 2),
+            },
         )
         await log_decision_unified(
             hass, entry, outcome, context=integration_context, logger=_LOGGER
@@ -371,11 +313,22 @@ async def _run_high_price_sell(
         )
 
     def _make_no_action(_surplus: float) -> DecisionOutcome:
-        return _build_no_action_outcome(
+        return build_no_action_outcome(
+            scenario="Evening Peak Sell",
+            summary="No evening peak sell action",
             reason="Calculated target SOC does not require discharge",
             current_soc=current_soc,
-            evening_price=evening_price,
-            threshold_price=threshold_price,
+            reserve_kwh=reserve_kwh,
+            required_kwh=required_kwh,
+            pv_forecast_kwh=pv_forecast_kwh,
+            key_metrics_extra={
+                "evening_price": f"{evening_price:.1f} PLN/MWh",
+                "threshold_price": f"{threshold_price:.1f} PLN/MWh",
+            },
+            full_details_extra={
+                "evening_price": round(evening_price, 2),
+                "threshold_price": round(threshold_price, 2),
+            },
         )
 
     await _execute_sell(
@@ -445,7 +398,7 @@ async def _run_surplus_sell(
     )
 
     (
-        _required_tomorrow_kwh,
+        required_tomorrow_kwh,
         required_sufficiency_kwh,
         pv_sufficiency_kwh,
         sufficiency_hour,
@@ -459,26 +412,6 @@ async def _run_surplus_sell(
         margin=margin,
         pv_forecast_hourly=tomorrow_pv_hourly,
     )
-
-    if not sufficiency_reached:
-        outcome = _build_no_action_outcome(
-            reason="Tomorrow PV does not reach sufficiency hour",
-            current_soc=current_soc,
-            evening_price=evening_price,
-            threshold_price=threshold_price,
-            sufficiency_hour=sufficiency_hour,
-            sufficiency_reached=sufficiency_reached,
-        )
-        await log_decision_unified(
-            hass,
-            entry,
-            outcome,
-            context=integration_context,
-            logger=_LOGGER,
-        )
-        return
-
-    tomorrow_net_kwh = max(0.0, required_sufficiency_kwh - pv_sufficiency_kwh)
 
     today_start = (now_hour + 1) % 24
     today_end = 24
@@ -509,20 +442,66 @@ async def _run_surplus_sell(
     )
 
     today_required_kwh = (today_usage_kwh + today_hp_kwh + today_losses_kwh) * margin
+    required_kwh = today_required_kwh + required_tomorrow_kwh
+    pv_forecast_kwh = today_pv_kwh + tomorrow_pv_kwh
+
+    if not sufficiency_reached:
+        outcome = build_no_action_outcome(
+            scenario="Evening Peak Sell",
+            summary="No surplus sell action",
+            reason="Tomorrow PV does not reach sufficiency hour",
+            current_soc=current_soc,
+            reserve_kwh=reserve_kwh,
+            required_kwh=required_kwh,
+            pv_forecast_kwh=pv_forecast_kwh,
+            sufficiency_hour=sufficiency_hour,
+            sufficiency_reached=sufficiency_reached,
+            key_metrics_extra={
+                "evening_price": f"{evening_price:.1f} PLN/MWh",
+                "threshold_price": f"{threshold_price:.1f} PLN/MWh",
+            },
+            full_details_extra={
+                "evening_price": round(evening_price, 2),
+                "threshold_price": round(threshold_price, 2),
+            },
+        )
+        await log_decision_unified(
+            hass,
+            entry,
+            outcome,
+            context=integration_context,
+            logger=_LOGGER,
+        )
+        return
+
+    tomorrow_net_kwh = max(0.0, required_sufficiency_kwh - pv_sufficiency_kwh)
     today_net_kwh = max(0.0, today_required_kwh - today_pv_kwh)
 
     total_needed_kwh = today_net_kwh + tomorrow_net_kwh
     surplus_kwh = max(0.0, reserve_kwh - total_needed_kwh)
     if surplus_kwh <= 0.0:
-        outcome = _build_no_action_outcome(
+        outcome = build_no_action_outcome(
+            scenario="Evening Peak Sell",
+            summary="No surplus sell action",
             reason="No surplus energy available for surplus sell",
             current_soc=current_soc,
-            evening_price=evening_price,
-            threshold_price=threshold_price,
+            reserve_kwh=reserve_kwh,
+            required_kwh=required_kwh,
+            pv_forecast_kwh=pv_forecast_kwh,
             sufficiency_hour=sufficiency_hour,
             sufficiency_reached=sufficiency_reached,
-            surplus_kwh=surplus_kwh,
-            total_needed_kwh=total_needed_kwh,
+            key_metrics_extra={
+                "evening_price": f"{evening_price:.1f} PLN/MWh",
+                "threshold_price": f"{threshold_price:.1f} PLN/MWh",
+                "surplus": f"{surplus_kwh:.1f} kWh",
+                "total_needed": f"{total_needed_kwh:.1f} kWh",
+            },
+            full_details_extra={
+                "evening_price": round(evening_price, 2),
+                "threshold_price": round(threshold_price, 2),
+                "surplus_kwh": round(surplus_kwh, 2),
+                "total_needed_kwh": round(total_needed_kwh, 2),
+            },
         )
         await log_decision_unified(
             hass,
@@ -554,15 +533,28 @@ async def _run_surplus_sell(
         )
 
     def _make_no_action(current_surplus_kwh: float) -> DecisionOutcome:
-        return _build_no_action_outcome(
+        return build_no_action_outcome(
+            scenario="Evening Peak Sell",
+            summary="No surplus sell action",
             reason="Calculated target SOC does not require discharge",
             current_soc=current_soc,
-            evening_price=evening_price,
-            threshold_price=threshold_price,
+            reserve_kwh=reserve_kwh,
+            required_kwh=required_kwh,
+            pv_forecast_kwh=pv_forecast_kwh,
             sufficiency_hour=sufficiency_hour,
             sufficiency_reached=sufficiency_reached,
-            surplus_kwh=current_surplus_kwh,
-            total_needed_kwh=total_needed_kwh,
+            key_metrics_extra={
+                "evening_price": f"{evening_price:.1f} PLN/MWh",
+                "threshold_price": f"{threshold_price:.1f} PLN/MWh",
+                "surplus": f"{current_surplus_kwh:.1f} kWh",
+                "total_needed": f"{total_needed_kwh:.1f} kWh",
+            },
+            full_details_extra={
+                "evening_price": round(evening_price, 2),
+                "threshold_price": round(threshold_price, 2),
+                "surplus_kwh": round(current_surplus_kwh, 2),
+                "total_needed_kwh": round(total_needed_kwh, 2),
+            },
         )
 
     await _execute_sell(

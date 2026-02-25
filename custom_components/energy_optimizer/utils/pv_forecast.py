@@ -212,7 +212,7 @@ def _apply_pv_compensation(
     if reason is not None:
         return hourly_kwh
 
-    _forecast_adjusted, factor_today, reason = _calculate_forecast_adjustment(
+    _, factor_today, reason = _calculate_forecast_adjustment(
         today_kwh,
         remaining_kwh,
         production_kwh,
@@ -225,7 +225,7 @@ def _apply_pv_compensation(
     if factor_combined is None:
         return hourly_kwh
 
-    factor_combined = min(factor_combined, 1.5)
+    factor_combined = min(factor_combined, 1.3)
     return {hour: value * factor_combined for hour, value in hourly_kwh.items()}
 
 

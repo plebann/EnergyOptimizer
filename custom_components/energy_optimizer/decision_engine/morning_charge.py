@@ -24,6 +24,7 @@ from ..const import (
     CONF_CHARGE_CURRENT_ENTITY,
 )
 from ..decision_engine.common import (
+    build_no_action_outcome,
     build_morning_charge_outcome,
     calculate_target_soc_from_needed_reserve,
     get_battery_config,
@@ -40,7 +41,7 @@ from ..helpers import (
 from ..controllers.inverter import set_charge_current, set_program_soc
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.pv_forecast import get_pv_compensation_factor
-from ..utils.logging import DecisionOutcome, format_sufficiency_hour, log_decision_unified
+from ..utils.logging import DecisionOutcome, log_decision_unified
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -94,6 +95,9 @@ async def async_run_morning_charge(
 
     start_hour = 6
     hours = max(tariff_end_hour - start_hour, 1)
+
+    usage_kwh = sum(hourly_usage[hour] for hour in range(start_hour, tariff_end_hour))
+
     heat_pump_kwh, heat_pump_hourly = await get_heat_pump_forecast_window(
         hass, config, start_hour=start_hour, end_hour=tariff_end_hour
     )
@@ -154,6 +158,7 @@ async def async_run_morning_charge(
             integration_context=integration_context,
             prog2_soc_entity=prog2_soc_entity,
             prog2_soc_value=prog2_soc_value,
+            current_soc=current_soc,
             target_soc=target_soc,
             reserve_kwh=reserve_kwh,
             required_kwh=required_kwh,
@@ -163,6 +168,8 @@ async def async_run_morning_charge(
             pv_forecast_kwh=pv_forecast_kwh,
             pv_sufficiency_kwh=pv_sufficiency_kwh,
             heat_pump_kwh=heat_pump_kwh,
+            usage_kwh=usage_kwh,
+            losses_kwh=losses_kwh,
             gap_kwh=gap_kwh,
             gap_sufficiency_kwh=gap_sufficiency_kwh,
             sufficiency_hour=sufficiency_hour,
@@ -244,68 +251,6 @@ async def async_run_morning_charge(
     )
 
 
-def _build_no_action_outcome(
-    *,
-    reserve_kwh: float,
-    required_kwh: float,
-    required_sufficiency_kwh: float,
-    needed_reserve_kwh: float,
-    needed_reserve_sufficiency_kwh: float,
-    pv_forecast_kwh: float,
-    pv_sufficiency_kwh: float,
-    heat_pump_kwh: float,
-    gap_kwh: float,
-    gap_sufficiency_kwh: float,
-    sufficiency_hour: int,
-    sufficiency_reached: bool,
-    pv_compensation_factor: float | None,
-) -> DecisionOutcome:
-    sufficiency_label = format_sufficiency_hour(
-        sufficiency_hour, sufficiency_reached=sufficiency_reached
-    )
-    summary = "No action needed"
-    return DecisionOutcome(
-        scenario="Morning Grid Charge",
-        action_type="no_action",
-        summary=summary,
-        reason=(
-            f"Gap {gap_kwh:.1f} kWh, "
-            f"gap sufficiency {gap_sufficiency_kwh:.1f} kWh"
-        ),
-        key_metrics={
-            "result": summary,
-            "reserve": f"{reserve_kwh:.1f} kWh",
-            "required": f"{required_kwh:.1f} kWh",
-            "needed_reserve": f"{needed_reserve_kwh:.1f} kWh",
-            "needed_reserve_sufficiency": f"{needed_reserve_sufficiency_kwh:.1f} kWh",
-            "required_sufficiency": f"{required_sufficiency_kwh:.1f} kWh",
-            "pv": f"{pv_forecast_kwh:.1f} kWh",
-            "pv_sufficiency": f"{pv_sufficiency_kwh:.1f} kWh",
-            "heat_pump": f"{heat_pump_kwh:.1f} kWh",
-            "sufficiency_hour": sufficiency_label,
-        },
-        full_details={
-            "reserve_kwh": round(reserve_kwh, 2),
-            "required_kwh": round(required_kwh, 2),
-            "needed_reserve_kwh": round(needed_reserve_kwh, 2),
-            "needed_reserve_sufficiency_kwh": round(needed_reserve_sufficiency_kwh, 2),
-            "required_sufficiency_kwh": round(required_sufficiency_kwh, 2),
-            "pv_sufficiency_kwh": round(pv_sufficiency_kwh, 2),
-            "pv_forecast_kwh": round(pv_forecast_kwh, 2),
-            "pv_compensation_factor": (
-                round(pv_compensation_factor, 4)
-                if pv_compensation_factor is not None
-                else None
-            ),
-            "heat_pump_kwh": round(heat_pump_kwh, 2),
-            "gap_kwh": round(gap_kwh, 2),
-            "gap_sufficiency_kwh": round(gap_sufficiency_kwh, 2),
-            "sufficiency_hour": sufficiency_hour,
-            "sufficiency_reached": sufficiency_reached,
-        },
-    )
-
-
 def _build_balancing_ongoing_outcome() -> DecisionOutcome:
     """Build outcome for balancing ongoing skip."""
     summary = "Battery balancing ongoing"
@@ -349,6 +294,7 @@ async def _handle_no_action(
     integration_context: Context,
     prog2_soc_entity: str,
     prog2_soc_value: float,
+    current_soc: float,
     target_soc: float,
     reserve_kwh: float,
     required_kwh: float,
@@ -358,6 +304,8 @@ async def _handle_no_action(
     pv_forecast_kwh: float,
     pv_sufficiency_kwh: float,
     heat_pump_kwh: float,
+    usage_kwh: float,
+    losses_kwh: float,
     gap_kwh: float,
     gap_sufficiency_kwh: float,
     sufficiency_hour: int,
@@ -365,20 +313,42 @@ async def _handle_no_action(
     pv_compensation_factor: float | None,
 ) -> None:
     """Handle no-action path."""
-    outcome = _build_no_action_outcome(
+    outcome = build_no_action_outcome(
+        scenario="Morning Grid Charge",
+        reason=(
+            f"Gap {gap_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
+            f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh, "
+            f"gap sufficiency {gap_sufficiency_kwh:.1f} kWh"
+        ),
+        current_soc=current_soc,
         reserve_kwh=reserve_kwh,
         required_kwh=required_kwh,
-        required_sufficiency_kwh=required_sufficiency_kwh,
-        needed_reserve_kwh=needed_reserve_kwh,
-        needed_reserve_sufficiency_kwh=needed_reserve_sufficiency_kwh,
         pv_forecast_kwh=pv_forecast_kwh,
-        pv_sufficiency_kwh=pv_sufficiency_kwh,
-        heat_pump_kwh=heat_pump_kwh,
-        gap_kwh=gap_kwh,
-        gap_sufficiency_kwh=gap_sufficiency_kwh,
         sufficiency_hour=sufficiency_hour,
         sufficiency_reached=sufficiency_reached,
-        pv_compensation_factor=pv_compensation_factor,
+        key_metrics_extra={
+            "needed_reserve": f"{needed_reserve_kwh:.1f} kWh",
+            "needed_reserve_sufficiency": f"{needed_reserve_sufficiency_kwh:.1f} kWh",
+            "required_sufficiency": f"{required_sufficiency_kwh:.1f} kWh",
+            "pv_sufficiency": f"{pv_sufficiency_kwh:.1f} kWh",
+            "heat_pump": f"{heat_pump_kwh:.1f} kWh",
+        },
+        full_details_extra={
+            "needed_reserve_kwh": round(needed_reserve_kwh, 2),
+            "needed_reserve_sufficiency_kwh": round(needed_reserve_sufficiency_kwh, 2),
+            "required_sufficiency_kwh": round(required_sufficiency_kwh, 2),
+            "usage_kwh": round(usage_kwh, 2),
+            "pv_sufficiency_kwh": round(pv_sufficiency_kwh, 2),
+            "pv_compensation_factor": (
+                round(pv_compensation_factor, 4)
+                if pv_compensation_factor is not None
+                else None
+            ),
+            "heat_pump_kwh": round(heat_pump_kwh, 2),
+            "losses_kwh": round(losses_kwh, 2),
+            "gap_kwh": round(gap_kwh, 2),
+            "gap_sufficiency_kwh": round(gap_sufficiency_kwh, 2),
+        },
     )
     await handle_no_action_soc_update(
         hass,

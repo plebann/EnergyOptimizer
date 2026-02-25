@@ -75,6 +75,58 @@ def calculate_target_soc_from_needed_reserve(
     )
 
 
+def build_no_action_outcome(
+    *,
+    scenario: str,
+    reason: str,
+    summary: str = "No action needed",
+    current_soc: float,
+    reserve_kwh: float,
+    required_kwh: float,
+    pv_forecast_kwh: float,
+    sufficiency_hour: int | None = None,
+    sufficiency_reached: bool | None = None,
+    key_metrics_extra: dict[str, str] | None = None,
+    full_details_extra: dict[str, Any] | None = None,
+) -> DecisionOutcome:
+    """Build a shared no-action decision outcome payload."""
+    key_metrics: dict[str, str] = {
+        "result": summary,
+        "current_soc": f"{current_soc:.0f}%",
+        "reserve": f"{reserve_kwh:.1f} kWh",
+        "required": f"{required_kwh:.1f} kWh",
+        "pv": f"{pv_forecast_kwh:.1f} kWh",
+    }
+    full_details: dict[str, Any] = {
+        "current_soc": round(current_soc, 1),
+        "reserve_kwh": round(reserve_kwh, 2),
+        "required_kwh": round(required_kwh, 2),
+        "pv_forecast_kwh": round(pv_forecast_kwh, 2),
+    }
+
+    if sufficiency_hour is not None and sufficiency_reached is not None:
+        key_metrics["sufficiency_hour"] = format_sufficiency_hour(
+            sufficiency_hour,
+            sufficiency_reached=sufficiency_reached,
+        )
+        full_details["sufficiency_hour"] = sufficiency_hour
+        full_details["sufficiency_reached"] = sufficiency_reached
+
+    if key_metrics_extra:
+        key_metrics.update(key_metrics_extra)
+    if full_details_extra:
+        full_details.update(full_details_extra)
+
+    return DecisionOutcome(
+        scenario=scenario,
+        action_type="no_action",
+        summary=summary,
+        reason=reason,
+        key_metrics=key_metrics,
+        full_details=full_details,
+    )
+
+
 async def handle_no_action_soc_update(
     hass: HomeAssistant,
     entry: ConfigEntry,

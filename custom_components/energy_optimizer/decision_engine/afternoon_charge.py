@@ -28,6 +28,7 @@ from ..const import (
 )
 from ..decision_engine.common import (
     build_afternoon_charge_outcome,
+    build_no_action_outcome,
     calculate_target_soc_from_needed_reserve,
     get_battery_config,
     get_entry_data,
@@ -44,7 +45,7 @@ from ..helpers import (
 from ..controllers.inverter import set_charge_current, set_program_soc
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.pv_forecast import get_forecast_adjusted_kwh, get_pv_compensation_factor
-from ..utils.logging import DecisionOutcome, log_decision_unified
+from ..utils.logging import log_decision_unified
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -179,6 +180,7 @@ async def async_run_afternoon_charge(
             integration_context=integration_context,
             prog4_soc_entity=prog4_soc_entity,
             prog4_soc_value=prog4_soc_value,
+            current_soc=current_soc,
             target_soc=target_soc,
             reserve_kwh=reserve_kwh,
             required_kwh=required_kwh,
@@ -187,8 +189,6 @@ async def async_run_afternoon_charge(
             pv_forecast_kwh=pv_forecast_kwh,
             heat_pump_kwh=heat_pump_kwh,
             losses_kwh=losses_kwh,
-            start_hour=start_hour,
-            end_hour=end_hour,
             arbitrage_details=arbitrage_details,
             usage_kwh=usage_kwh,
             pv_compensation_factor=pv_compensation_factor,
@@ -262,60 +262,6 @@ async def async_run_afternoon_charge(
     )
 
 
-def _build_no_action_outcome(
-    *,
-    reserve_kwh: float,
-    required_kwh: float,
-    needed_reserve_kwh: float,
-    pv_forecast_kwh: float,
-    heat_pump_kwh: float,
-    gap_kwh: float,
-    losses_kwh: float,
-    start_hour: int,
-    end_hour: int,
-    usage_kwh: float,
-    pv_compensation_factor: float | None,
-    arbitrage_details: dict[str, float | str] | None = None,
-) -> DecisionOutcome:
-    summary = "No action needed"
-    return DecisionOutcome(
-        scenario="Afternoon Grid Charge",
-        action_type="no_action",
-        summary=summary,
-        reason=(
-            f"Gap {gap_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
-            f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh"
-        ),
-        key_metrics={
-            "result": summary,
-            "reserve": f"{reserve_kwh:.1f} kWh",
-            "required": f"{required_kwh:.1f} kWh",
-            "needed_reserve": f"{needed_reserve_kwh:.1f} kWh",
-            "pv": f"{pv_forecast_kwh:.1f} kWh",
-            "heat_pump": f"{heat_pump_kwh:.1f} kWh",
-            "window": f"{start_hour:02d}:00-{end_hour:02d}:00",
-        },
-        full_details={
-            "reserve_kwh": round(reserve_kwh, 2),
-            "required_kwh": round(required_kwh, 2),
-            "needed_reserve_kwh": round(needed_reserve_kwh, 2),
-            "gap_kwh": round(gap_kwh, 2),
-            "usage_kwh": round(usage_kwh, 2),
-            "pv_forecast_kwh": round(pv_forecast_kwh, 2),
-            "pv_compensation_factor": (
-                round(pv_compensation_factor, 4)
-                if pv_compensation_factor is not None
-                else None
-            ),
-            "heat_pump_kwh": round(heat_pump_kwh, 2),
-            "losses_kwh": round(losses_kwh, 2),
-            "start_hour": start_hour,
-            "end_hour": end_hour,
-            **(arbitrage_details or {}),
-        },
-    )
-
-
 async def _handle_no_action(
     hass: HomeAssistant,
     entry,
@@ -323,6 +269,7 @@ async def _handle_no_action(
     integration_context: Context,
     prog4_soc_entity: str,
     prog4_soc_value: float,
+    current_soc: float,
     target_soc: float,
     reserve_kwh: float,
     required_kwh: float,
@@ -331,26 +278,38 @@ async def _handle_no_action(
     pv_forecast_kwh: float,
     heat_pump_kwh: float,
     losses_kwh: float,
-    start_hour: int,
-    end_hour: int,
     usage_kwh: float,
     pv_compensation_factor: float | None,
     arbitrage_details: dict[str, float | str] | None = None,
 ) -> None:
     """Handle no-action path."""
-    outcome = _build_no_action_outcome(
+    outcome = build_no_action_outcome(
+        scenario="Afternoon Grid Charge",
+        reason=(
+            f"Gap {gap_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
+            f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh"
+        ),
+        current_soc=current_soc,
         reserve_kwh=reserve_kwh,
         required_kwh=required_kwh,
-        needed_reserve_kwh=needed_reserve_kwh,
         pv_forecast_kwh=pv_forecast_kwh,
-        gap_kwh=gap_kwh,
-        heat_pump_kwh=heat_pump_kwh,
-        losses_kwh=losses_kwh,
-        start_hour=start_hour,
-        end_hour=end_hour,
-        usage_kwh=usage_kwh,
-        pv_compensation_factor=pv_compensation_factor,
-        arbitrage_details=arbitrage_details,
+        key_metrics_extra={
+            "needed_reserve": f"{needed_reserve_kwh:.1f} kWh",
+            "heat_pump": f"{heat_pump_kwh:.1f} kWh",
+        },
+        full_details_extra={
+            "needed_reserve_kwh": round(needed_reserve_kwh, 2),
+            "usage_kwh": round(usage_kwh, 2),
+            "pv_compensation_factor": (
+                round(pv_compensation_factor, 4)
+                if pv_compensation_factor is not None
+                else None
+            ),
+            "heat_pump_kwh": round(heat_pump_kwh, 2),
+            "losses_kwh": round(losses_kwh, 2),
+            "gap_kwh": round(gap_kwh, 2),
+            **(arbitrage_details or {}),
+        },
     )
     await handle_no_action_soc_update(
         hass,

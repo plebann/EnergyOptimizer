@@ -134,23 +134,34 @@ Ensure:
 ## Useful Commands
 
 ```bash
-# Run tests (pytest, if configured in repo)
-pytest tests/ -v
+# Preferred: run tests from Ubuntu WSL for this workspace
+# (use explicit distro/user to avoid shell translation issues)
+wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/ -q'
 
-# Run a single test file (adjust path)
-pytest tests/test_helpers.py -v
+# First-time WSL setup for tests (create local venv + install pytest)
+wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; python3 -m venv .venv-wsl; ./.venv-wsl/bin/python -m pip install pytest'
 
-# Run matching tests by keyword
-pytest tests/ -k "test_name" -v
+# Run tests (full suite) in WSL
+wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/ -v'
 
-# Run with coverage
-pytest tests/ --cov=custom_components.energy_optimizer --cov-report=term-missing
+# Run a single test file in WSL (adjust path)
+wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/test_helpers.py -v'
 
-# Update snapshots (syrupy, if configured in repo)
-pytest tests/ --snapshot-update
+# Run matching tests by keyword in WSL
+wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/ -k "test_name" -v'
+
+# Run with coverage in WSL
+wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/ --cov=custom_components.energy_optimizer --cov-report=term-missing'
+
+# Update snapshots (syrupy, if configured in repo) in WSL
+wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/ --snapshot-update'
+
+# Fast smoke set used during decision engine refactors
+wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/test_decision_engine_morning.py tests/test_decision_engine_evening_sell.py tests/test_decision_engine_evening.py -q'
 
 # Note: Tests may emit DEBUG/WARNING/INFO logs from the integration; this is normal if tests still pass.
 # Note: Full test run can take several seconds; allow it to complete before interrupting.
+# Note: If `wsl -e bash -lc ...` fails on this machine, use explicit `-d Ubuntu-24.04 -u mpleb` as above.
 
 # Lint code (if configured in repo)
 pre-commit run --all-files
