@@ -21,6 +21,7 @@ from ..const import (
     CONF_EXPORT_POWER_ENTITY,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_PV_PRODUCTION_SENSOR,
+    CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
     CONF_WORK_MODE_ENTITY,
 )
 from ..controllers.inverter import set_export_power, set_program_soc, set_work_mode
@@ -178,6 +179,40 @@ async def async_run_evening_sell(
         entity_name="Evening max price sensor",
     )
     if evening_price is None:
+        return
+
+    tomorrow_morning_price: float | None = None
+    tomorrow_morning_price = get_required_float_state(
+        hass,
+        config.get(CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR),
+        entity_name="Tomorrow morning max price sensor",
+    )
+
+    if tomorrow_morning_price is not None and evening_price <= tomorrow_morning_price:
+        outcome = build_no_action_outcome(
+            scenario="Evening Peak Sell",
+            summary="No evening peak sell action",
+            reason="Evening price is not higher than tomorrow morning price",
+            current_soc=current_soc,
+            reserve_kwh=0.0,
+            required_kwh=0.0,
+            pv_forecast_kwh=0.0,
+            key_metrics_extra={
+                "evening_price": f"{evening_price:.1f} PLN/MWh",
+                "tomorrow_morning_price": f"{tomorrow_morning_price:.1f} PLN/MWh",
+            },
+            full_details_extra={
+                "evening_price": round(evening_price, 2),
+                "tomorrow_morning_price": round(tomorrow_morning_price, 2),
+            },
+        )
+        await log_decision_unified(
+            hass,
+            entry,
+            outcome,
+            context=integration_context,
+            logger=_LOGGER,
+        )
         return
 
     threshold_price = float(config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0)

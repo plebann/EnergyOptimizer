@@ -18,6 +18,7 @@ from custom_components.energy_optimizer.const import (
     CONF_PROG5_SOC_ENTITY,
     CONF_PV_PRODUCTION_SENSOR,
     CONF_TEST_MODE,
+    CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
     CONF_WORK_MODE_ENTITY,
     DOMAIN,
 )
@@ -257,6 +258,45 @@ async def test_evening_sell_surplus_sell_no_sufficiency(
     assert outcomes
     assert outcomes[-1].action_type == "no_action"
     assert "sufficiency" in (outcomes[-1].reason or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_evening_sell_skips_when_tomorrow_morning_price_is_higher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    config[CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR] = "sensor.tomorrow_morning_price"
+    states = _base_states()
+    states["sensor.evening_price"] = "700"
+    states["sensor.tomorrow_morning_price"] = "750"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    set_work_mode_mock = AsyncMock()
+    set_program_soc_mock = AsyncMock()
+    set_export_power_mock = AsyncMock()
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.evening_sell.set_work_mode",
+        set_work_mode_mock,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.evening_sell.set_program_soc",
+        set_program_soc_mock,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.evening_sell.set_export_power",
+        set_export_power_mock,
+    )
+
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes
+    assert outcomes[-1].action_type == "no_action"
+    assert "not higher than tomorrow morning" in (outcomes[-1].reason or "").lower()
+    set_work_mode_mock.assert_not_awaited()
+    set_program_soc_mock.assert_not_awaited()
+    set_export_power_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio

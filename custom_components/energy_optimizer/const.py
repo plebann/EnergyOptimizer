@@ -9,6 +9,7 @@ CONF_MIN_ARBITRAGE_PRICE = "min_arbitrage_price"
 CONF_EVENING_MAX_PRICE_SENSOR = "evening_max_price_sensor"
 CONF_EVENING_MAX_PRICE_HOUR_SENSOR = "evening_max_price_hour_sensor"
 CONF_MORNING_MAX_PRICE_SENSOR = "morning_max_price_sensor"
+CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR = "tomorrow_morning_max_price_sensor"
 CONF_MORNING_MAX_PRICE_HOUR_SENSOR = "morning_max_price_hour_sensor"
 CONF_DAYTIME_MIN_PRICE_SENSOR = "daytime_min_price_sensor"
 

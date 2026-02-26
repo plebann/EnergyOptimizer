@@ -15,6 +15,7 @@
           "evening_max_price_sensor": "Evening Max Price Sensor (Optional)",
           "evening_max_price_hour_sensor": "Evening Max Price Hour Sensor (Optional)",
           "morning_max_price_sensor": "Morning Max Price Sensor (Optional)",
+          "tomorrow_morning_max_price_sensor": "Tomorrow Morning Max Price Sensor (Optional)",
           "morning_max_price_hour_sensor": "Morning Max Price Hour Sensor (Optional)",
           "daytime_min_price_sensor": "Daytime Min Price Sensor (Optional)"
         },
@@ -25,6 +26,7 @@
           "evening_max_price_sensor": "Sensor with evening peak price from external price analysis",
           "evening_max_price_hour_sensor": "Entity with evening peak hour (input_datetime or time sensor)",
           "morning_max_price_sensor": "Sensor with morning peak price from external price analysis",
+          "tomorrow_morning_max_price_sensor": "Sensor with tomorrow morning peak price from external price analysis",
           "morning_max_price_hour_sensor": "Entity with morning peak hour (input_datetime or time sensor)",
           "daytime_min_price_sensor": "Sensor with daytime minimum price from external price analysis"
         }
@@ -192,6 +194,7 @@
           "evening_max_price_sensor": "Evening Max Price Sensor (Optional)",
           "evening_max_price_hour_sensor": "Evening Max Price Hour Sensor (Optional)",
           "morning_max_price_sensor": "Morning Max Price Sensor (Optional)",
+          "tomorrow_morning_max_price_sensor": "Tomorrow Morning Max Price Sensor (Optional)",
           "morning_max_price_hour_sensor": "Morning Max Price Hour Sensor (Optional)",
           "daytime_min_price_sensor": "Daytime Min Price Sensor (Optional)"
         },
@@ -202,6 +205,7 @@
           "evening_max_price_sensor": "Sensor with evening peak price from external price analysis",
           "evening_max_price_hour_sensor": "Entity with evening peak hour (input_datetime or time sensor)",
           "morning_max_price_sensor": "Sensor with morning peak price from external price analysis",
+          "tomorrow_morning_max_price_sensor": "Sensor with tomorrow morning peak price from external price analysis",
           "morning_max_price_hour_sensor": "Entity with morning peak hour (input_datetime or time sensor)",
           "daytime_min_price_sensor": "Sensor with daytime minimum price from external price analysis"
         }
