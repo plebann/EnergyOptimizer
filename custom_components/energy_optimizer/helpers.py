@@ -274,6 +274,23 @@ def get_float_value(
     return value
 
 
+def _parse_hour_from_state_value(state_value: object) -> int | None:
+    """Parse hour from datetime, time, or numeric state value."""
+    raw_value = str(state_value)
+    dt_value = dt_util.parse_datetime(raw_value)
+    if dt_value is not None:
+        return dt_util.as_local(dt_value).hour
+
+    time_value = dt_util.parse_time(raw_value)
+    if time_value is not None:
+        return time_value.hour
+
+    try:
+        return int(float(raw_value))
+    except (TypeError, ValueError):
+        return None
+
+
 def resolve_tariff_end_hour(
     hass: HomeAssistant,
     config: dict[str, object],
@@ -286,40 +303,23 @@ def resolve_tariff_end_hour(
     tariff_end_hour = default_hour
     tariff_end_entity = config.get(CONF_TARIFF_END_HOUR_SENSOR)
     if tariff_end_entity:
-        if str(tariff_end_entity).startswith("input_datetime."):
-            tariff_end_state = hass.states.get(str(tariff_end_entity))
-            if tariff_end_state is None:
-                _LOGGER.warning(
-                    "Tariff end hour input_datetime %s unavailable, using default %s",
-                    tariff_end_entity,
-                    default_hour,
-                )
-            else:
-                state_value = tariff_end_state.state
-                dt_value = dt_util.parse_datetime(state_value)
-                if dt_value is not None:
-                    tariff_end_hour = dt_util.as_local(dt_value).hour
-                else:
-                    time_value = dt_util.parse_time(state_value)
-                    if time_value is not None:
-                        tariff_end_hour = time_value.hour
-                    else:
-                        _LOGGER.warning(
-                            "Tariff end hour input_datetime %s has invalid value %s, using default %s",
-                            tariff_end_entity,
-                            state_value,
-                            default_hour,
-                        )
-        else:
-            tariff_end_value = get_float_value(
-                hass, tariff_end_entity, default=tariff_end_hour
+        tariff_end_state = hass.states.get(str(tariff_end_entity))
+        if tariff_end_state is None:
+            _LOGGER.warning(
+                "Tariff end hour entity %s unavailable, using default %s",
+                tariff_end_entity,
+                default_hour,
             )
-            if tariff_end_value is not None:
-                tariff_end_hour = int(tariff_end_value)
+        else:
+            state_value = tariff_end_state.state
+            parsed_hour = _parse_hour_from_state_value(state_value)
+            if parsed_hour is not None:
+                tariff_end_hour = parsed_hour
             else:
                 _LOGGER.warning(
-                    "Tariff end hour sensor %s unavailable, using default %s",
+                    "Tariff end hour entity %s has invalid value %s, using default %s",
                     tariff_end_entity,
+                    state_value,
                     default_hour,
                 )
     else:
@@ -351,40 +351,23 @@ def resolve_tariff_start_hour(
     tariff_start_hour = default_hour
     tariff_start_entity = config.get(CONF_TARIFF_START_HOUR_SENSOR)
     if tariff_start_entity:
-        if str(tariff_start_entity).startswith("input_datetime."):
-            tariff_start_state = hass.states.get(str(tariff_start_entity))
-            if tariff_start_state is None:
-                _LOGGER.warning(
-                    "Tariff start hour input_datetime %s unavailable, using default %s",
-                    tariff_start_entity,
-                    default_hour,
-                )
-            else:
-                state_value = tariff_start_state.state
-                dt_value = dt_util.parse_datetime(state_value)
-                if dt_value is not None:
-                    tariff_start_hour = dt_util.as_local(dt_value).hour
-                else:
-                    time_value = dt_util.parse_time(state_value)
-                    if time_value is not None:
-                        tariff_start_hour = time_value.hour
-                    else:
-                        _LOGGER.warning(
-                            "Tariff start hour input_datetime %s has invalid value %s, using default %s",
-                            tariff_start_entity,
-                            state_value,
-                            default_hour,
-                        )
-        else:
-            tariff_start_value = get_float_value(
-                hass, tariff_start_entity, default=tariff_start_hour
+        tariff_start_state = hass.states.get(str(tariff_start_entity))
+        if tariff_start_state is None:
+            _LOGGER.warning(
+                "Tariff start hour entity %s unavailable, using default %s",
+                tariff_start_entity,
+                default_hour,
             )
-            if tariff_start_value is not None:
-                tariff_start_hour = int(tariff_start_value)
+        else:
+            state_value = tariff_start_state.state
+            parsed_hour = _parse_hour_from_state_value(state_value)
+            if parsed_hour is not None:
+                tariff_start_hour = parsed_hour
             else:
                 _LOGGER.warning(
-                    "Tariff start hour sensor %s unavailable, using default %s",
+                    "Tariff start hour entity %s has invalid value %s, using default %s",
                     tariff_start_entity,
+                    state_value,
                     default_hour,
                 )
     else:
@@ -416,40 +399,23 @@ def resolve_evening_max_price_hour(
     evening_peak_hour = default_hour
     evening_peak_entity = config.get(CONF_EVENING_MAX_PRICE_HOUR_SENSOR)
     if evening_peak_entity:
-        if str(evening_peak_entity).startswith("input_datetime."):
-            evening_peak_state = hass.states.get(str(evening_peak_entity))
-            if evening_peak_state is None:
-                _LOGGER.warning(
-                    "Evening max price hour input_datetime %s unavailable, using default %s",
-                    evening_peak_entity,
-                    default_hour,
-                )
-            else:
-                state_value = evening_peak_state.state
-                dt_value = dt_util.parse_datetime(state_value)
-                if dt_value is not None:
-                    evening_peak_hour = dt_util.as_local(dt_value).hour
-                else:
-                    time_value = dt_util.parse_time(state_value)
-                    if time_value is not None:
-                        evening_peak_hour = time_value.hour
-                    else:
-                        _LOGGER.warning(
-                            "Evening max price hour input_datetime %s has invalid value %s, using default %s",
-                            evening_peak_entity,
-                            state_value,
-                            default_hour,
-                        )
-        else:
-            evening_peak_value = get_float_value(
-                hass, evening_peak_entity, default=evening_peak_hour
+        evening_peak_state = hass.states.get(str(evening_peak_entity))
+        if evening_peak_state is None:
+            _LOGGER.warning(
+                "Evening max price hour entity %s unavailable, using default %s",
+                evening_peak_entity,
+                default_hour,
             )
-            if evening_peak_value is not None:
-                evening_peak_hour = int(evening_peak_value)
+        else:
+            state_value = evening_peak_state.state
+            parsed_hour = _parse_hour_from_state_value(state_value)
+            if parsed_hour is not None:
+                evening_peak_hour = parsed_hour
             else:
                 _LOGGER.warning(
-                    "Evening max price hour sensor %s unavailable, using default %s",
+                    "Evening max price hour entity %s has invalid value %s, using default %s",
                     evening_peak_entity,
+                    state_value,
                     default_hour,
                 )
     else:
