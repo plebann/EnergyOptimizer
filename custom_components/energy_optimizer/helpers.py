@@ -433,3 +433,51 @@ def resolve_evening_max_price_hour(
         evening_peak_hour = default_hour
 
     return evening_peak_hour
+
+
+def resolve_morning_max_price_hour(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    default_hour: int = 7,
+) -> int:
+    """Resolve morning max price hour from configured sensor with fallback."""
+    from .const import CONF_MORNING_MAX_PRICE_HOUR_SENSOR
+
+    morning_peak_hour = default_hour
+    morning_peak_entity = config.get(CONF_MORNING_MAX_PRICE_HOUR_SENSOR)
+    if morning_peak_entity:
+        morning_peak_state = hass.states.get(str(morning_peak_entity))
+        if morning_peak_state is None:
+            _LOGGER.warning(
+                "Morning max price hour entity %s unavailable, using default %s",
+                morning_peak_entity,
+                default_hour,
+            )
+        else:
+            state_value = morning_peak_state.state
+            parsed_hour = _parse_hour_from_state_value(state_value)
+            if parsed_hour is not None:
+                morning_peak_hour = parsed_hour
+            else:
+                _LOGGER.warning(
+                    "Morning max price hour entity %s has invalid value %s, using default %s",
+                    morning_peak_entity,
+                    state_value,
+                    default_hour,
+                )
+    else:
+        _LOGGER.warning(
+            "Morning max price hour sensor not configured, using default %s",
+            default_hour,
+        )
+
+    if morning_peak_hour < 0 or morning_peak_hour > 23:
+        _LOGGER.warning(
+            "Morning max price hour %s out of range, using default %s",
+            morning_peak_hour,
+            default_hour,
+        )
+        morning_peak_hour = default_hour
+
+    return morning_peak_hour

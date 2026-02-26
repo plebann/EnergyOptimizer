@@ -14,6 +14,7 @@ from .const import (
     SERVICE_AFTERNOON_GRID_CHARGE,
     SERVICE_EVENING_PEAK_SELL,
     SERVICE_MORNING_GRID_CHARGE,
+    SERVICE_MORNING_PEAK_SELL,
     SERVICE_OVERNIGHT_SCHEDULE,
 )
 from .helpers import get_float_state_info
@@ -21,6 +22,7 @@ from .decision_engine.morning_charge import async_run_morning_charge
 from .decision_engine.afternoon_charge import async_run_afternoon_charge
 from .decision_engine.evening_behavior import async_run_evening_behavior
 from .decision_engine.evening_sell import async_run_evening_sell
+from .decision_engine.morning_sell import async_run_morning_sell
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -55,6 +57,15 @@ SERVICE_SCHEMA_AFTERNOON_CHARGE = vol.Schema(
 )
 
 SERVICE_SCHEMA_EVENING_PEAK_SELL = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_ENTRY_ID): vol.Coerce(str),
+        vol.Optional("margin", default=1.1): vol.All(
+            vol.Coerce(float), vol.Range(min=1.0, max=1.5)
+        ),
+    }
+)
+
+SERVICE_SCHEMA_MORNING_PEAK_SELL = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_ENTRY_ID): vol.Coerce(str),
         vol.Optional("margin", default=1.1): vol.All(
@@ -201,6 +212,13 @@ async def async_register_services(hass: HomeAssistant) -> None:
             margin=call.data.get("margin"),
         )
 
+    async def _handle_morning_peak_sell(call: ServiceCall) -> None:
+        await async_run_morning_sell(
+            hass,
+            entry_id=call.data.get(SERVICE_FIELD_ENTRY_ID),
+            margin=call.data.get("margin"),
+        )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_MORNING_GRID_CHARGE,
@@ -224,6 +242,12 @@ async def async_register_services(hass: HomeAssistant) -> None:
         SERVICE_EVENING_PEAK_SELL,
         _handle_evening_peak_sell,
         schema=SERVICE_SCHEMA_EVENING_PEAK_SELL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_MORNING_PEAK_SELL,
+        _handle_morning_peak_sell,
+        schema=SERVICE_SCHEMA_MORNING_PEAK_SELL,
     )
 
     _LOGGER.info("Energy Optimizer services registered")

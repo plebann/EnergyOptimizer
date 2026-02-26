@@ -101,6 +101,7 @@ DEFAULT_HEAT_PUMP_FORECAST_SERVICE = "calculate_forecast_energy"
 SERVICE_OVERNIGHT_SCHEDULE = "overnight_schedule"
 SERVICE_MORNING_GRID_CHARGE = "morning_grid_charge"
 SERVICE_AFTERNOON_GRID_CHARGE = "afternoon_grid_charge"
+SERVICE_MORNING_PEAK_SELL = "morning_peak_sell"
 SERVICE_EVENING_PEAK_SELL = "evening_peak_sell"
 
 DEFAULT_EXPORT_POWER_RESET = 12000

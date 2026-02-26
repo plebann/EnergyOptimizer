@@ -606,6 +606,10 @@ def build_afternoon_charge_outcome(
 
 def build_evening_sell_outcome(
     *,
+    scenario: str = "Evening Peak Sell",
+    action_type: str = "high_sell",
+    price_metric_key: str = "evening_price",
+    threshold_metric_key: str = "threshold_price",
     target_soc: float,
     current_soc: float,
     surplus_kwh: float,
@@ -623,8 +627,8 @@ def build_evening_sell_outcome(
     """Build an evening sell decision outcome."""
     summary = f"Battery scheduled to sell down to {target_soc:.0f}%"
     return DecisionOutcome(
-        scenario="Evening Peak Sell",
-        action_type="high_sell",
+        scenario=scenario,
+        action_type=action_type,
         summary=summary,
         reason=(
             f"Surplus {surplus_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
@@ -636,8 +640,8 @@ def build_evening_sell_outcome(
             "target_soc": f"{target_soc:.0f}%",
             "surplus": f"{surplus_kwh:.1f} kWh",
             "export_power": f"{export_power_w:.0f} W",
-            "evening_price": f"{evening_price:.1f} PLN/MWh",
-            "threshold_price": f"{threshold_price:.1f} PLN/MWh",
+            price_metric_key: f"{evening_price:.1f} PLN/MWh",
+            threshold_metric_key: f"{threshold_price:.1f} PLN/MWh",
             "window": f"{start_hour:02d}:00-{end_hour:02d}:00",
         },
         full_details={
@@ -650,8 +654,8 @@ def build_evening_sell_outcome(
             "heat_pump_kwh": round(heat_pump_kwh, 2),
             "losses_kwh": round(losses_kwh, 2),
             "export_power_w": round(export_power_w, 0),
-            "evening_price": round(evening_price, 2),
-            "threshold_price": round(threshold_price, 2),
+            price_metric_key: round(evening_price, 2),
+            threshold_metric_key: round(threshold_price, 2),
             "start_hour": start_hour,
             "end_hour": end_hour,
         },
@@ -660,6 +664,10 @@ def build_evening_sell_outcome(
 
 def build_surplus_sell_outcome(
     *,
+    scenario: str = "Evening Peak Sell",
+    action_type: str = "sell",
+    price_metric_key: str = "evening_price",
+    threshold_metric_key: str = "threshold_price",
     target_soc: float,
     current_soc: float,
     surplus_kwh: float,
@@ -680,8 +688,8 @@ def build_surplus_sell_outcome(
     """Build a surplus-sell decision outcome."""
     summary = f"Surplus sell: battery scheduled to sell down to {target_soc:.0f}%"
     return DecisionOutcome(
-        scenario="Evening Peak Sell",
-        action_type="sell",
+        scenario=scenario,
+        action_type=action_type,
         summary=summary,
         reason=(
             f"Surplus {surplus_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
@@ -697,8 +705,8 @@ def build_surplus_sell_outcome(
                 sufficiency_reached=sufficiency_reached,
             ),
             "export_power": f"{export_power_w:.0f} W",
-            "evening_price": f"{evening_price:.1f} PLN/MWh",
-            "threshold_price": f"{threshold_price:.1f} PLN/MWh",
+            price_metric_key: f"{evening_price:.1f} PLN/MWh",
+            threshold_metric_key: f"{threshold_price:.1f} PLN/MWh",
         },
         full_details={
             "current_soc": round(current_soc, 1),
@@ -715,8 +723,8 @@ def build_surplus_sell_outcome(
             "sufficiency_hour": sufficiency_hour,
             "sufficiency_reached": sufficiency_reached,
             "export_power_w": round(export_power_w, 0),
-            "evening_price": round(evening_price, 2),
-            "threshold_price": round(threshold_price, 2),
+            price_metric_key: round(evening_price, 2),
+            threshold_metric_key: round(threshold_price, 2),
         },
     )
 
