@@ -8,16 +8,11 @@ from homeassistant.core import Context
 from homeassistant.util import dt as dt_util
 
 from ..calculations.battery import (
-    apply_efficiency_compensation,
     calculate_battery_reserve,
-    calculate_charge_current,
-    calculate_soc_delta,
-    calculate_target_soc,
     soc_to_kwh,
 )
-from ..calculations.energy import calculate_losses, hourly_demand
+from ..calculations.energy import hourly_demand
 from ..calculations.energy import calculate_needed_reserve
-from ..calculations.utils import build_hourly_usage_array
 from ..const import (
     CONF_CHARGE_CURRENT_ENTITY,
     CONF_EVENING_MAX_PRICE_SENSOR,
@@ -27,9 +22,14 @@ from ..const import (
     CONF_PV_PRODUCTION_SENSOR,
 )
 from ..decision_engine.common import (
+    BatteryConfig,
+    EnergyBalance,
+    ForecastData,
     build_afternoon_charge_outcome,
     build_no_action_outcome,
+    calculate_charge_action,
     calculate_target_soc_from_needed_reserve,
+    gather_forecasts,
     get_battery_config,
     get_entry_data,
     get_required_current_soc_state,
@@ -43,7 +43,6 @@ from ..helpers import (
     resolve_tariff_start_hour,
 )
 from ..controllers.inverter import set_charge_current, set_program_soc
-from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.pv_forecast import get_forecast_adjusted_kwh, get_pv_compensation_factor
 from ..utils.logging import log_decision_unified
 
@@ -90,42 +89,22 @@ async def async_run_afternoon_charge(
     bc = get_battery_config(config)
     margin = margin if margin is not None else 1.1
 
-    reserve_kwh = calculate_battery_reserve(
-        current_soc,
-        bc.min_soc,
-        bc.capacity_ah,
-        bc.voltage,
-        efficiency=bc.efficiency,
-    )
-
-    hourly_usage = build_hourly_usage_array(
-        config, hass.states.get, daily_load_fallback=None
-    )
-
     start_hour = resolve_tariff_start_hour(hass, config)
     end_hour = 22
-    hours = max(end_hour - start_hour, 1)
 
-    usage_kwh = sum(hourly_usage[hour] for hour in range(start_hour, end_hour))
-    
-    heat_pump_kwh, heat_pump_hourly = await get_heat_pump_forecast_window(
-        hass, config, start_hour=start_hour, end_hour=end_hour
-    )
-    pv_forecast_kwh, pv_forecast_hourly = get_pv_forecast_window(
+    forecasts = await gather_forecasts(
         hass,
         config,
         start_hour=start_hour,
         end_hour=end_hour,
-        apply_efficiency=False,
-        compensate=True,
+        margin=margin,
         entry_id=entry.entry_id,
+        apply_efficiency=False,
     )
 
-    losses_hourly, losses_kwh = calculate_losses(
-        hass, config, hours=hours, margin=margin
-    )
-
-    required_kwh = (usage_kwh + heat_pump_kwh + losses_kwh) * margin
+    required_kwh = (
+        forecasts.usage_kwh + forecasts.heat_pump_kwh + forecasts.losses_kwh
+    ) * forecasts.margin
 
     if required_kwh <= 0.0:
         _LOGGER.info(
@@ -135,40 +114,33 @@ async def async_run_afternoon_charge(
 
     pv_compensation_factor = get_pv_compensation_factor(hass, entry.entry_id)
 
-    needed_reserve_kwh = calculate_needed_reserve(required_kwh, pv_forecast_kwh)
-    gap_kwh = needed_reserve_kwh - reserve_kwh
+    balance = _calculate_afternoon_balance(
+        bc,
+        current_soc=current_soc,
+        required_kwh=required_kwh,
+        pv_forecast_kwh=forecasts.pv_forecast_kwh,
+        pv_compensation_factor=pv_compensation_factor,
+    )
 
     arbitrage_kwh, arbitrage_details = _calculate_arbitrage_kwh(
         hass,
         config,
-        start_hour=start_hour,
-        end_hour=end_hour,
+        forecasts=forecasts,
+        bc=bc,
         sell_start_hour=resolve_evening_max_price_hour(hass, config),
         current_soc=current_soc,
-        capacity_ah=bc.capacity_ah,
-        voltage=bc.voltage,
         required_kwh=required_kwh,
-        pv_forecast_hourly=pv_forecast_hourly,
-        heat_pump_hourly=heat_pump_hourly,
-        losses_hourly=losses_hourly,
-        hourly_usage=hourly_usage,
-        margin=margin,
-        min_arbitrage_price=config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0),
-        sell_price_entity=config.get(CONF_EVENING_MAX_PRICE_SENSOR),
-        pv_forecast_today_entity=config.get(CONF_PV_FORECAST_TODAY),
-        pv_forecast_remaining_entity=config.get(CONF_PV_FORECAST_REMAINING),
-        pv_production_entity=config.get(CONF_PV_PRODUCTION_SENSOR),
         entry_id=entry.entry_id,
     )
 
-    base_gap_kwh = max(gap_kwh, 0.0)
+    base_gap_kwh = max(balance.gap_kwh, 0.0)
     total_gap_kwh = base_gap_kwh + arbitrage_kwh
 
     _set_grid_assist(base_gap_kwh > 0.0)
 
     if total_gap_kwh <= 0.0:
         target_soc = calculate_target_soc_from_needed_reserve(
-            needed_reserve_kwh=needed_reserve_kwh,
+            needed_reserve_kwh=balance.needed_reserve_kwh,
             min_soc=bc.min_soc,
             max_soc=bc.max_soc,
             capacity_ah=bc.capacity_ah,
@@ -182,42 +154,26 @@ async def async_run_afternoon_charge(
             prog4_soc_value=prog4_soc_value,
             current_soc=current_soc,
             target_soc=target_soc,
-            reserve_kwh=reserve_kwh,
-            required_kwh=required_kwh,
-            needed_reserve_kwh=needed_reserve_kwh,
+            forecasts=forecasts,
+            balance=balance,
             gap_kwh=total_gap_kwh,
-            pv_forecast_kwh=pv_forecast_kwh,
-            heat_pump_kwh=heat_pump_kwh,
-            losses_kwh=losses_kwh,
             arbitrage_details=arbitrage_details,
-            usage_kwh=usage_kwh,
             pv_compensation_factor=pv_compensation_factor,
         )
         return
 
-    gap_to_charge_kwh = apply_efficiency_compensation(
-        total_gap_kwh,
-        bc.efficiency,
+    action = calculate_charge_action(
+        bc,
+        gap_kwh=total_gap_kwh,
+        current_soc=current_soc,
     )
-    soc_delta = calculate_soc_delta(
-        gap_to_charge_kwh,
-        capacity_ah=bc.capacity_ah,
-        voltage=bc.voltage,
-    )
-    target_soc = calculate_target_soc(current_soc, soc_delta, max_soc=bc.max_soc)
 
     charge_current_entity = config.get(CONF_CHARGE_CURRENT_ENTITY)
-    charge_current = calculate_charge_current(
-        gap_to_charge_kwh,
-        current_soc=current_soc,
-        capacity_ah=bc.capacity_ah,
-        voltage=bc.voltage,
-    )
 
     await set_program_soc(
         hass,
         prog4_soc_entity,
-        target_soc,
+        action.target_soc,
         entry=entry,
         logger=_LOGGER,
         context=integration_context,
@@ -225,7 +181,7 @@ async def async_run_afternoon_charge(
     await set_charge_current(
         hass,
         charge_current_entity,
-        charge_current,
+        action.charge_current,
         entry=entry,
         logger=_LOGGER,
         context=integration_context,
@@ -233,29 +189,18 @@ async def async_run_afternoon_charge(
 
     outcome = build_afternoon_charge_outcome(
         scenario="Afternoon Grid Charge",
-        target_soc=target_soc,
-        required_kwh=required_kwh,
-        needed_reserve_kwh=needed_reserve_kwh,
-        reserve_kwh=reserve_kwh,
-        gap_to_charge_kwh=gap_to_charge_kwh,
-        gap_all_kwh=gap_kwh,
+        action=action,
+        balance=balance,
+        forecasts=forecasts,
         arbitrage_kwh=arbitrage_kwh,
         arbitrage_details=arbitrage_details,
-        pv_forecast_kwh=pv_forecast_kwh,
-        heat_pump_kwh=heat_pump_kwh,
-        charge_current=charge_current,
         current_soc=current_soc,
-        losses_kwh=losses_kwh,
         efficiency=bc.efficiency,
-        margin=margin,
-        start_hour=start_hour,
-        end_hour=end_hour,
-        usage_kwh=usage_kwh,
         pv_compensation_factor=pv_compensation_factor,
     )
     outcome.entities_changed = [
-        {"entity_id": prog4_soc_entity, "value": target_soc},
-        {"entity_id": charge_current_entity, "value": charge_current},
+        {"entity_id": prog4_soc_entity, "value": action.target_soc},
+        {"entity_id": charge_current_entity, "value": action.charge_current},
     ]
     await log_decision_unified(
         hass, entry, outcome, context=integration_context, logger=_LOGGER
@@ -271,14 +216,9 @@ async def _handle_no_action(
     prog4_soc_value: float,
     current_soc: float,
     target_soc: float,
-    reserve_kwh: float,
-    required_kwh: float,
-    needed_reserve_kwh: float,
+    forecasts: ForecastData,
+    balance: EnergyBalance,
     gap_kwh: float,
-    pv_forecast_kwh: float,
-    heat_pump_kwh: float,
-    losses_kwh: float,
-    usage_kwh: float,
     pv_compensation_factor: float | None,
     arbitrage_details: dict[str, float | str] | None = None,
 ) -> None:
@@ -286,27 +226,27 @@ async def _handle_no_action(
     outcome = build_no_action_outcome(
         scenario="Afternoon Grid Charge",
         reason=(
-            f"Gap {gap_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
-            f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh"
+            f"Gap {gap_kwh:.1f} kWh, reserve {balance.reserve_kwh:.1f} kWh, "
+            f"required {balance.required_kwh:.1f} kWh, PV {forecasts.pv_forecast_kwh:.1f} kWh"
         ),
         current_soc=current_soc,
-        reserve_kwh=reserve_kwh,
-        required_kwh=required_kwh,
-        pv_forecast_kwh=pv_forecast_kwh,
+        reserve_kwh=balance.reserve_kwh,
+        required_kwh=balance.required_kwh,
+        pv_forecast_kwh=forecasts.pv_forecast_kwh,
         key_metrics_extra={
-            "needed_reserve": f"{needed_reserve_kwh:.1f} kWh",
-            "heat_pump": f"{heat_pump_kwh:.1f} kWh",
+            "needed_reserve": f"{balance.needed_reserve_kwh:.1f} kWh",
+            "heat_pump": f"{forecasts.heat_pump_kwh:.1f} kWh",
         },
         full_details_extra={
-            "needed_reserve_kwh": round(needed_reserve_kwh, 2),
-            "usage_kwh": round(usage_kwh, 2),
+            "needed_reserve_kwh": round(balance.needed_reserve_kwh, 2),
+            "usage_kwh": round(forecasts.usage_kwh, 2),
             "pv_compensation_factor": (
                 round(pv_compensation_factor, 4)
                 if pv_compensation_factor is not None
                 else None
             ),
-            "heat_pump_kwh": round(heat_pump_kwh, 2),
-            "losses_kwh": round(losses_kwh, 2),
+            "heat_pump_kwh": round(forecasts.heat_pump_kwh, 2),
+            "losses_kwh": round(forecasts.losses_kwh, 2),
             "gap_kwh": round(gap_kwh, 2),
             **(arbitrage_details or {}),
         },
@@ -322,38 +262,55 @@ async def _handle_no_action(
     )
 
 
+def _calculate_afternoon_balance(
+    bc: BatteryConfig,
+    *,
+    current_soc: float,
+    required_kwh: float,
+    pv_forecast_kwh: float,
+    pv_compensation_factor: float | None,
+) -> EnergyBalance:
+    """Calculate afternoon reserve/gap values."""
+    reserve_kwh = calculate_battery_reserve(
+        current_soc,
+        bc.min_soc,
+        bc.capacity_ah,
+        bc.voltage,
+        efficiency=bc.efficiency,
+    )
+    needed_reserve_kwh = calculate_needed_reserve(required_kwh, pv_forecast_kwh)
+    gap_kwh = needed_reserve_kwh - reserve_kwh
+    return EnergyBalance(
+        reserve_kwh=reserve_kwh,
+        required_kwh=required_kwh,
+        needed_reserve_kwh=needed_reserve_kwh,
+        gap_kwh=gap_kwh,
+        pv_compensation_factor=pv_compensation_factor,
+    )
 
 
 def _calculate_arbitrage_kwh(
     hass: HomeAssistant,
     config: dict[str, object],
     *,
-    start_hour: int,
-    end_hour: int,
+    forecasts: ForecastData,
+    bc: BatteryConfig,
     sell_start_hour: int,
     current_soc: float,
-    capacity_ah: float,
-    voltage: float,
     required_kwh: float,
-    pv_forecast_hourly: dict[int, float],
-    heat_pump_hourly: dict[int, float],
-    losses_hourly: dict[int, float],
-    hourly_usage: dict[int, float],
-    margin: float,
-    min_arbitrage_price: float,
-    sell_price_entity: str | None,
-    pv_forecast_today_entity: str | None,
-    pv_forecast_remaining_entity: str | None,
-    pv_production_entity: str | None,
     entry_id: str | None = None,
 ) -> tuple[float, dict[str, float | str]]:
     details: dict[str, float | str] = {
         "arbitrage_reason": "not_applicable",
     }
 
-    sell_price = get_required_float_state(
-        hass, sell_price_entity, entity_name="Sell window price"
-    )
+    min_arbitrage_price = float(config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0)
+    sell_price_entity = config.get(CONF_EVENING_MAX_PRICE_SENSOR)
+    pv_forecast_today_entity = config.get(CONF_PV_FORECAST_TODAY)
+    pv_forecast_remaining_entity = config.get(CONF_PV_FORECAST_REMAINING)
+    pv_production_entity = config.get(CONF_PV_PRODUCTION_SENSOR)
+
+    sell_price = get_required_float_state(hass, sell_price_entity, entity_name="Sell window price")
     if sell_price is None:
         details["arbitrage_reason"] = "missing_sell_price"
         return 0.0, details
@@ -376,25 +333,25 @@ def _calculate_arbitrage_kwh(
         details["arbitrage_reason"] = forecast_reason or "invalid_forecast_adjustment"
         return 0.0, details
 
-    capacity_kwh = soc_to_kwh(100.0, capacity_ah, voltage)
-    current_energy_kwh = soc_to_kwh(current_soc, capacity_ah, voltage)
+    capacity_kwh = soc_to_kwh(100.0, bc.capacity_ah, bc.voltage)
+    current_energy_kwh = soc_to_kwh(current_soc, bc.capacity_ah, bc.voltage)
     free_after = capacity_kwh - (current_energy_kwh + required_kwh)
 
     now_hour = dt_util.as_local(dt_util.utcnow()).hour
-    surplus_start = max(start_hour, now_hour)
-    surplus_end = min(sell_start_hour, end_hour)
+    surplus_start = max(forecasts.start_hour, now_hour)
+    surplus_end = min(sell_start_hour, forecasts.end_hour)
     if surplus_end <= surplus_start:
         surplus_kwh = 0.0
     else:
         surplus_kwh = sum(
             max(
-                pv_forecast_hourly.get(hour, 0.0)
+                forecasts.pv_forecast_hourly.get(hour, 0.0)
                 - hourly_demand(
                     hour,
-                    hourly_usage=hourly_usage,
-                    heat_pump_hourly=heat_pump_hourly,
-                    losses_hourly=losses_hourly,
-                    margin=margin,
+                    hourly_usage=forecasts.hourly_usage,
+                    heat_pump_hourly=forecasts.heat_pump_hourly,
+                    losses_hourly=forecasts.losses_hourly,
+                    margin=forecasts.margin,
                 ),
                 0.0,
             )

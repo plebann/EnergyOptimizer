@@ -1,6 +1,7 @@
 """Evening behavior decision logic (overnight schedule)."""
 from __future__ import annotations
 
+import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -51,6 +52,34 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class BalancingData:
+    """Balancing timing and PV forecast context."""
+
+    balancing_due: bool
+    days_since_balancing: int | None
+    balancing_pv_threshold: float
+    pv_forecast: float
+    pv_with_efficiency: float
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class PreservationContext:
+    """Energy context for preservation and restoration decisions."""
+
+    reserve_kwh: float
+    required_kwh: float
+    required_sufficiency_kwh: float
+    pv_sufficiency_kwh: float
+    needed_reserve_sufficiency_kwh: float
+    sufficiency_hour: int
+    sufficiency_reached: bool
+    reserve_insufficient: bool
+    grid_assist_on: bool
+    battery_space: float
+    pv_forecast_window_kwh: float
 
 
 def _coerce_float(value: object | None) -> float | None:
@@ -242,7 +271,7 @@ async def _handle_preservation(
     required_kwh: float,
     required_sufficiency_kwh: float,
     pv_sufficiency_kwh: float,
-    required_net_sufficiency_kwh: float,
+    needed_reserve_sufficiency_kwh: float,
     sufficiency_hour: int,
     sufficiency_reached: bool,
     pv_forecast_window_kwh: float,
@@ -298,7 +327,7 @@ async def _handle_preservation(
             "pv_forecast": f"{pv_forecast:.1f} kWh",
             "battery_space": f"{battery_space:.1f} kWh",
             "reserve": f"{reserve_kwh:.1f} kWh",
-            "required_to_sufficiency": f"{required_net_sufficiency_kwh:.1f} kWh",
+            "required_to_sufficiency": f"{needed_reserve_sufficiency_kwh:.1f} kWh",
             "sufficiency_hour": format_sufficiency_hour(
                 sufficiency_hour, sufficiency_reached=sufficiency_reached
             ),
@@ -313,7 +342,7 @@ async def _handle_preservation(
             "required_kwh": round(required_kwh, 2),
             "required_to_sufficiency_kwh": round(required_sufficiency_kwh, 2),
             "pv_to_sufficiency_kwh": round(pv_sufficiency_kwh, 2),
-            "required_net_to_sufficiency_kwh": round(required_net_sufficiency_kwh, 2),
+            "required_net_to_sufficiency_kwh": round(needed_reserve_sufficiency_kwh, 2),
             "sufficiency_hour": sufficiency_hour,
             "sufficiency_reached": sufficiency_reached,
             "reserve_insufficient": reserve_insufficient,
@@ -349,7 +378,7 @@ async def _handle_normal_restoration(
     reserve_kwh: float,
     required_sufficiency_kwh: float,
     pv_sufficiency_kwh: float,
-    required_net_sufficiency_kwh: float,
+    needed_reserve_sufficiency_kwh: float,
     required_kwh: float,
     reserve_insufficient: bool,
     grid_assist_on: bool,
@@ -413,7 +442,7 @@ async def _handle_normal_restoration(
             "battery_space": f"{battery_space:.1f} kWh",
             "pv_with_efficiency": f"{pv_with_efficiency:.1f} kWh",
             "reserve": f"{reserve_kwh:.1f} kWh",
-            "required_to_sufficiency": f"{required_net_sufficiency_kwh:.1f} kWh",
+            "required_to_sufficiency": f"{needed_reserve_sufficiency_kwh:.1f} kWh",
             "sufficiency_hour": format_sufficiency_hour(
                 sufficiency_hour, sufficiency_reached=sufficiency_reached
             ),
@@ -426,7 +455,7 @@ async def _handle_normal_restoration(
             "required_kwh": round(required_kwh, 2),
             "required_to_sufficiency_kwh": round(required_sufficiency_kwh, 2),
             "pv_to_sufficiency_kwh": round(pv_sufficiency_kwh, 2),
-            "required_net_to_sufficiency_kwh": round(required_net_sufficiency_kwh, 2),
+            "required_net_to_sufficiency_kwh": round(needed_reserve_sufficiency_kwh, 2),
             "sufficiency_hour": sufficiency_hour,
             "sufficiency_reached": sufficiency_reached,
             "reserve_insufficient": reserve_insufficient,
@@ -451,7 +480,7 @@ def _collect_balancing_data(
     *,
     entry_id: str,
     last_balancing_sensor,
-) -> dict[str, float | int | bool | None]:
+) -> BalancingData:
     """Collect balancing timing and forecast inputs."""
     balancing_interval_days = config.get(
         CONF_BALANCING_INTERVAL_DAYS, DEFAULT_BALANCING_INTERVAL_DAYS
@@ -497,13 +526,13 @@ def _collect_balancing_data(
         balancing_pv_threshold,
     )
 
-    return {
-        "balancing_due": balancing_due,
-        "days_since_balancing": days_since_balancing,
-        "balancing_pv_threshold": balancing_pv_threshold,
-        "pv_forecast": pv_forecast,
-        "pv_with_efficiency": pv_with_efficiency,
-    }
+    return BalancingData(
+        balancing_due=balancing_due,
+        days_since_balancing=days_since_balancing,
+        balancing_pv_threshold=balancing_pv_threshold,
+        pv_forecast=pv_forecast,
+        pv_with_efficiency=pv_with_efficiency,
+    )
 
 
 async def _calculate_preservation_context(
@@ -516,7 +545,7 @@ async def _calculate_preservation_context(
     margin: float,
     pv_with_efficiency: float,
     afternoon_grid_assist_sensor,
-) -> dict[str, Any]:
+) -> PreservationContext:
     """Calculate energy context for preservation/restoration scenarios."""
     reserve_kwh = calculate_battery_reserve(
         current_soc,
@@ -588,20 +617,19 @@ async def _calculate_preservation_context(
         grid_assist_on,
     )
 
-    return {
-        "reserve_kwh": reserve_kwh,
-        "required_kwh": required_kwh,
-        "required_sufficiency_kwh": required_sufficiency_kwh,
-        "pv_sufficiency_kwh": pv_sufficiency_kwh,
-        "needed_reserve_sufficiency_kwh": needed_reserve_sufficiency_kwh,
-        "required_net_sufficiency_kwh": needed_reserve_sufficiency_kwh,
-        "sufficiency_hour": sufficiency_hour,
-        "sufficiency_reached": sufficiency_reached,
-        "reserve_insufficient": reserve_insufficient,
-        "grid_assist_on": grid_assist_on,
-        "battery_space": battery_space,
-        "pv_forecast_window_kwh": pv_forecast_window_kwh,
-    }
+    return PreservationContext(
+        reserve_kwh=reserve_kwh,
+        required_kwh=required_kwh,
+        required_sufficiency_kwh=required_sufficiency_kwh,
+        pv_sufficiency_kwh=pv_sufficiency_kwh,
+        needed_reserve_sufficiency_kwh=needed_reserve_sufficiency_kwh,
+        sufficiency_hour=sufficiency_hour,
+        sufficiency_reached=sufficiency_reached,
+        reserve_insufficient=reserve_insufficient,
+        grid_assist_on=grid_assist_on,
+        battery_space=battery_space,
+        pv_forecast_window_kwh=pv_forecast_window_kwh,
+    )
 
 
 async def _run_non_balancing_flow(
@@ -614,7 +642,7 @@ async def _run_non_balancing_flow(
     prog1_soc: str | None,
     prog2_soc: str | None,
     prog6_soc: str | None,
-    balancing_data: dict[str, float | int | bool | None],
+    balancing_data: BalancingData,
     pv_compensation_details: dict[str, float | None],
     afternoon_grid_assist_sensor,
 ) -> None:
@@ -641,7 +669,7 @@ async def _run_non_balancing_flow(
         current_soc=current_soc,
         battery_config=battery_config,
         margin=1.1,
-        pv_with_efficiency=float(balancing_data["pv_with_efficiency"]),
+        pv_with_efficiency=balancing_data.pv_with_efficiency,
         afternoon_grid_assist_sensor=afternoon_grid_assist_sensor,
     )
 
@@ -649,22 +677,22 @@ async def _run_non_balancing_flow(
         hass,
         entry,
         integration_context=integration_context,
-        grid_assist_on=bool(preservation["grid_assist_on"]),
-        reserve_insufficient=bool(preservation["reserve_insufficient"]),
-        pv_with_efficiency=float(balancing_data["pv_with_efficiency"]),
-        battery_space=float(preservation["battery_space"]),
+        grid_assist_on=preservation.grid_assist_on,
+        reserve_insufficient=preservation.reserve_insufficient,
+        pv_with_efficiency=balancing_data.pv_with_efficiency,
+        battery_space=preservation.battery_space,
         prog1_soc=prog1_soc,
         prog6_soc=prog6_soc,
         current_soc=current_soc,
-        pv_forecast=float(balancing_data["pv_forecast"]),
-        reserve_kwh=float(preservation["reserve_kwh"]),
-        required_kwh=float(preservation["required_kwh"]),
-        required_sufficiency_kwh=float(preservation["required_sufficiency_kwh"]),
-        pv_sufficiency_kwh=float(preservation["pv_sufficiency_kwh"]),
-        required_net_sufficiency_kwh=float(preservation["required_net_sufficiency_kwh"]),
-        sufficiency_hour=int(preservation["sufficiency_hour"]),
-        sufficiency_reached=bool(preservation["sufficiency_reached"]),
-        pv_forecast_window_kwh=float(preservation["pv_forecast_window_kwh"]),
+        pv_forecast=balancing_data.pv_forecast,
+        reserve_kwh=preservation.reserve_kwh,
+        required_kwh=preservation.required_kwh,
+        required_sufficiency_kwh=preservation.required_sufficiency_kwh,
+        pv_sufficiency_kwh=preservation.pv_sufficiency_kwh,
+        needed_reserve_sufficiency_kwh=preservation.needed_reserve_sufficiency_kwh,
+        sufficiency_hour=preservation.sufficiency_hour,
+        sufficiency_reached=preservation.sufficiency_reached,
+        pv_forecast_window_kwh=preservation.pv_forecast_window_kwh,
         pv_compensation_details=pv_compensation_details,
     ):
         return
@@ -677,18 +705,18 @@ async def _run_non_balancing_flow(
         prog2_soc=prog2_soc,
         prog6_soc=prog6_soc,
         min_soc=battery_config.min_soc,
-        pv_forecast=float(balancing_data["pv_forecast"]),
-        battery_space=float(preservation["battery_space"]),
-        pv_with_efficiency=float(balancing_data["pv_with_efficiency"]),
-        reserve_kwh=float(preservation["reserve_kwh"]),
-        required_sufficiency_kwh=float(preservation["required_sufficiency_kwh"]),
-        pv_sufficiency_kwh=float(preservation["pv_sufficiency_kwh"]),
-        required_net_sufficiency_kwh=float(preservation["required_net_sufficiency_kwh"]),
-        required_kwh=float(preservation["required_kwh"]),
-        reserve_insufficient=bool(preservation["reserve_insufficient"]),
-        grid_assist_on=bool(preservation["grid_assist_on"]),
-        sufficiency_hour=int(preservation["sufficiency_hour"]),
-        sufficiency_reached=bool(preservation["sufficiency_reached"]),
+        pv_forecast=balancing_data.pv_forecast,
+        battery_space=preservation.battery_space,
+        pv_with_efficiency=balancing_data.pv_with_efficiency,
+        reserve_kwh=preservation.reserve_kwh,
+        required_sufficiency_kwh=preservation.required_sufficiency_kwh,
+        pv_sufficiency_kwh=preservation.pv_sufficiency_kwh,
+        needed_reserve_sufficiency_kwh=preservation.needed_reserve_sufficiency_kwh,
+        required_kwh=preservation.required_kwh,
+        reserve_insufficient=preservation.reserve_insufficient,
+        grid_assist_on=preservation.grid_assist_on,
+        sufficiency_hour=preservation.sufficiency_hour,
+        sufficiency_reached=preservation.sufficiency_reached,
     ):
         return
 
@@ -699,24 +727,24 @@ async def _run_non_balancing_flow(
         reason="Battery state within acceptable parameters",
         key_metrics={"result": "No action"},
         full_details={
-            "pv_forecast_kwh": round(float(balancing_data["pv_forecast"]), 2),
-            "battery_space_kwh": round(float(preservation["battery_space"]), 2),
+            "pv_forecast_kwh": round(balancing_data.pv_forecast, 2),
+            "battery_space_kwh": round(preservation.battery_space, 2),
             "target_soc": round(current_soc, 1) if current_soc else 0,
-            "reserve_kwh": round(float(preservation["reserve_kwh"]), 2),
-            "required_kwh": round(float(preservation["required_kwh"]), 2),
+            "reserve_kwh": round(preservation.reserve_kwh, 2),
+            "required_kwh": round(preservation.required_kwh, 2),
             "required_to_sufficiency_kwh": round(
-                float(preservation["required_sufficiency_kwh"]),
+                preservation.required_sufficiency_kwh,
                 2,
             ),
-            "pv_to_sufficiency_kwh": round(float(preservation["pv_sufficiency_kwh"]), 2),
+            "pv_to_sufficiency_kwh": round(preservation.pv_sufficiency_kwh, 2),
             "required_net_to_sufficiency_kwh": round(
-                float(preservation["required_net_sufficiency_kwh"]),
+                preservation.needed_reserve_sufficiency_kwh,
                 2,
             ),
-            "sufficiency_hour": int(preservation["sufficiency_hour"]),
-            "sufficiency_reached": bool(preservation["sufficiency_reached"]),
-            "reserve_insufficient": bool(preservation["reserve_insufficient"]),
-            "afternoon_grid_assist": bool(preservation["grid_assist_on"]),
+            "sufficiency_hour": preservation.sufficiency_hour,
+            "sufficiency_reached": preservation.sufficiency_reached,
+            "reserve_insufficient": preservation.reserve_insufficient,
+            "afternoon_grid_assist": preservation.grid_assist_on,
             **pv_compensation_details,
         },
     )
@@ -779,10 +807,10 @@ async def async_run_evening_behavior(
         entry,
         integration_context=integration_context,
         balancing_ongoing_sensor=balancing_ongoing_sensor,
-        balancing_due=bool(balancing_data["balancing_due"]),
-        pv_with_efficiency=float(balancing_data["pv_with_efficiency"]),
-        balancing_pv_threshold=float(balancing_data["balancing_pv_threshold"]),
-        days_since_balancing=balancing_data["days_since_balancing"],
+        balancing_due=balancing_data.balancing_due,
+        pv_with_efficiency=balancing_data.pv_with_efficiency,
+        balancing_pv_threshold=balancing_data.balancing_pv_threshold,
+        days_since_balancing=balancing_data.days_since_balancing,
         prog1_soc=prog1_soc,
         prog2_soc=prog2_soc,
         prog6_soc=prog6_soc,

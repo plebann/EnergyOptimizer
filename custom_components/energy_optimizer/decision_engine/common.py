@@ -3,9 +3,17 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
-from ..calculations.battery import calculate_target_soc_from_reserve
+from ..calculations.battery import (
+    apply_efficiency_compensation,
+    calculate_charge_current,
+    calculate_soc_delta,
+    calculate_target_soc,
+    calculate_target_soc_from_reserve,
+)
+from ..calculations.energy import calculate_losses, calculate_sufficiency_window
+from ..calculations.utils import build_hourly_usage_array
 from ..controllers.inverter import set_program_soc
 from ..const import (
     CONF_BATTERY_CAPACITY_AH,
@@ -26,7 +34,9 @@ from ..const import (
     DOMAIN,
 )
 from ..helpers import get_required_float_state
+from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.logging import DecisionOutcome, format_sufficiency_hour, log_decision_unified
+from ..utils.time_window import build_hour_window
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -46,6 +56,56 @@ class BatteryConfig:
     efficiency: float
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class ForecastData:
+    """PV, heat pump, usage and loss forecast data for a time window."""
+
+    start_hour: int
+    end_hour: int
+    hours: int
+    hourly_usage: list[float]
+    usage_kwh: float
+    heat_pump_kwh: float
+    heat_pump_hourly: dict[int, float]
+    pv_forecast_kwh: float
+    pv_forecast_hourly: dict[int, float]
+    losses_hourly: float
+    losses_kwh: float
+    margin: float
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class SufficiencyResult:
+    """Result of calculate_sufficiency_window for a time window."""
+
+    required_kwh: float
+    required_sufficiency_kwh: float
+    pv_sufficiency_kwh: float
+    sufficiency_hour: int
+    sufficiency_reached: bool
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class EnergyBalance:
+    """Core energy balance for a decision window."""
+
+    reserve_kwh: float
+    required_kwh: float
+    needed_reserve_kwh: float
+    gap_kwh: float
+    pv_compensation_factor: float | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ChargeAction:
+    """Charge calculation result reusable by morning and afternoon."""
+
+    gap_to_charge_kwh: float
+    soc_delta: float
+    target_soc: float
+    charge_current: float
+
+
 def get_battery_config(config: dict[str, Any]) -> BatteryConfig:
     """Extract battery configuration from config entry data."""
     return BatteryConfig(
@@ -54,6 +114,119 @@ def get_battery_config(config: dict[str, Any]) -> BatteryConfig:
         min_soc=config.get(CONF_MIN_SOC, DEFAULT_MIN_SOC),
         max_soc=config.get(CONF_MAX_SOC, DEFAULT_MAX_SOC),
         efficiency=config.get(CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY),
+    )
+
+
+async def gather_forecasts(
+    hass: HomeAssistant,
+    config: dict[str, Any],
+    *,
+    start_hour: int,
+    end_hour: int,
+    margin: float,
+    entry_id: str,
+    apply_efficiency: bool = True,
+    compensate: bool = True,
+) -> ForecastData:
+    """Gather all forecast data for a time window."""
+    hour_window = build_hour_window(start_hour, end_hour)
+    hours = max(len(hour_window), 1)
+
+    hourly_usage = build_hourly_usage_array(
+        config,
+        hass.states.get,
+        daily_load_fallback=None,
+    )
+    usage_kwh = sum(hourly_usage[hour] for hour in hour_window)
+
+    heat_pump_kwh, heat_pump_hourly = await get_heat_pump_forecast_window(
+        hass,
+        config,
+        start_hour=start_hour,
+        end_hour=end_hour,
+    )
+    pv_forecast_kwh, pv_forecast_hourly = get_pv_forecast_window(
+        hass,
+        config,
+        start_hour=start_hour,
+        end_hour=end_hour,
+        apply_efficiency=apply_efficiency,
+        compensate=compensate,
+        entry_id=entry_id,
+    )
+    losses_hourly, losses_kwh = calculate_losses(hass, config, hours=hours, margin=margin)
+
+    return ForecastData(
+        start_hour=start_hour,
+        end_hour=end_hour,
+        hours=hours,
+        hourly_usage=hourly_usage,
+        usage_kwh=usage_kwh,
+        heat_pump_kwh=heat_pump_kwh,
+        heat_pump_hourly=heat_pump_hourly,
+        pv_forecast_kwh=pv_forecast_kwh,
+        pv_forecast_hourly=pv_forecast_hourly,
+        losses_hourly=losses_hourly,
+        losses_kwh=losses_kwh,
+        margin=margin,
+    )
+
+
+def compute_sufficiency(
+    forecasts: ForecastData,
+    *,
+    calculator: Callable[..., tuple[float, float, float, int, bool]] = calculate_sufficiency_window,
+) -> SufficiencyResult:
+    """Compute sufficiency window from gathered forecasts."""
+    (
+        required_kwh,
+        required_sufficiency_kwh,
+        pv_sufficiency_kwh,
+        sufficiency_hour,
+        sufficiency_reached,
+    ) = calculator(
+        start_hour=forecasts.start_hour,
+        end_hour=forecasts.end_hour,
+        hourly_usage=forecasts.hourly_usage,
+        heat_pump_hourly=forecasts.heat_pump_hourly,
+        losses_hourly=forecasts.losses_hourly,
+        margin=forecasts.margin,
+        pv_forecast_hourly=forecasts.pv_forecast_hourly,
+    )
+    return SufficiencyResult(
+        required_kwh=required_kwh,
+        required_sufficiency_kwh=required_sufficiency_kwh,
+        pv_sufficiency_kwh=pv_sufficiency_kwh,
+        sufficiency_hour=sufficiency_hour,
+        sufficiency_reached=sufficiency_reached,
+    )
+
+
+def calculate_charge_action(
+    bc: BatteryConfig,
+    *,
+    gap_kwh: float,
+    current_soc: float,
+) -> ChargeAction:
+    """Calculate charge parameters from energy gap."""
+    gap_to_charge_kwh = apply_efficiency_compensation(gap_kwh, bc.efficiency)
+    soc_delta = calculate_soc_delta(
+        gap_to_charge_kwh,
+        capacity_ah=bc.capacity_ah,
+        voltage=bc.voltage,
+    )
+    target_soc = calculate_target_soc(current_soc, soc_delta, max_soc=bc.max_soc)
+    charge_current = calculate_charge_current(
+        gap_to_charge_kwh,
+        current_soc=current_soc,
+        capacity_ah=bc.capacity_ah,
+        voltage=bc.voltage,
+    )
+    return ChargeAction(
+        gap_to_charge_kwh=gap_to_charge_kwh,
+        soc_delta=soc_delta,
+        target_soc=target_soc,
+        charge_current=charge_current,
     )
 
 
@@ -274,53 +447,42 @@ def get_required_current_soc_state(
 def build_charge_outcome_base(
     *,
     scenario: str,
-    target_soc: float,
-    required_kwh: float,
-    needed_reserve_kwh: float,
-    reserve_kwh: float,
-    gap_to_charge_kwh: float,
-    gap_all_kwh: float,
-    pv_forecast_kwh: float,
-    heat_pump_kwh: float,
-    charge_current: float,
+    action: ChargeAction,
+    balance: EnergyBalance,
+    forecasts: ForecastData,
     current_soc: float,
-    losses_kwh: float,
     efficiency: float,
-    margin: float,
     pv_compensation_factor: float | None,
-    start_hour: int,
-    end_hour: int,
     arbitrage_kwh: float | None = None,
-    usage_kwh: float | None = None,
     key_metrics_extra: dict[str, str] | None = None,
     full_details_extra: dict[str, float | str | int | bool | None] | None = None,
 ) -> DecisionOutcome:
     """Build the shared charge decision outcome payload."""
-    summary = f"Battery scheduled to charge to {target_soc:.0f}%"
+    summary = f"Battery scheduled to charge to {action.target_soc:.0f}%"
     if arbitrage_kwh is None:
         reason = (
-            f"Gap {gap_to_charge_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
-            f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh, "
-            f"current {charge_current:.0f} A"
+            f"Gap {action.gap_to_charge_kwh:.1f} kWh, reserve {balance.reserve_kwh:.1f} kWh, "
+            f"required {balance.required_kwh:.1f} kWh, PV {forecasts.pv_forecast_kwh:.1f} kWh, "
+            f"current {action.charge_current:.0f} A"
         )
     else:
         reason = (
-            f"Gap {gap_to_charge_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
-            f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh, "
-            f"arbitrage {arbitrage_kwh:.1f} kWh, current {charge_current:.0f} A"
+            f"Gap {action.gap_to_charge_kwh:.1f} kWh, reserve {balance.reserve_kwh:.1f} kWh, "
+            f"required {balance.required_kwh:.1f} kWh, PV {forecasts.pv_forecast_kwh:.1f} kWh, "
+            f"arbitrage {arbitrage_kwh:.1f} kWh, current {action.charge_current:.0f} A"
         )
 
     key_metrics = {
         "result": summary,
-        "target": f"{target_soc:.0f}%",
-        "required": f"{required_kwh:.1f} kWh",
-        "needed_reserve": f"{needed_reserve_kwh:.1f} kWh",
-        "reserve": f"{reserve_kwh:.1f} kWh",
-        "to_charge": f"{gap_to_charge_kwh:.1f} kWh",
-        "pv": f"{pv_forecast_kwh:.1f} kWh",
-        "heat_pump": f"{heat_pump_kwh:.1f} kWh",
-        "charge_current": f"{charge_current:.0f} A",
-        "window": f"{start_hour:02d}:00-{end_hour:02d}:00",
+        "target": f"{action.target_soc:.0f}%",
+        "required": f"{balance.required_kwh:.1f} kWh",
+        "needed_reserve": f"{balance.needed_reserve_kwh:.1f} kWh",
+        "reserve": f"{balance.reserve_kwh:.1f} kWh",
+        "to_charge": f"{action.gap_to_charge_kwh:.1f} kWh",
+        "pv": f"{forecasts.pv_forecast_kwh:.1f} kWh",
+        "heat_pump": f"{forecasts.heat_pump_kwh:.1f} kWh",
+        "charge_current": f"{action.charge_current:.0f} A",
+        "window": f"{forecasts.start_hour:02d}:00-{forecasts.end_hour:02d}:00",
     }
     if arbitrage_kwh is not None:
         key_metrics["arbitrage"] = f"{arbitrage_kwh:.1f} kWh"
@@ -328,27 +490,26 @@ def build_charge_outcome_base(
         key_metrics.update(key_metrics_extra)
 
     full_details = {
-        "target_soc": round(target_soc, 1),
+        "target_soc": round(action.target_soc, 1),
         "current_soc": round(current_soc, 1),
-        "needed_reserve": round(needed_reserve_kwh, 2),
-        "reserve": round(reserve_kwh, 2),
-        "required": round(required_kwh, 2),
-        "to_charge": round(gap_to_charge_kwh, 2),
-        "gap": round(gap_all_kwh, 2),
-        "losses": round(losses_kwh, 2),
-        "pv_forecast": round(pv_forecast_kwh, 2),
+        "needed_reserve": round(balance.needed_reserve_kwh, 2),
+        "reserve": round(balance.reserve_kwh, 2),
+        "required": round(balance.required_kwh, 2),
+        "to_charge": round(action.gap_to_charge_kwh, 2),
+        "gap": round(balance.gap_kwh, 2),
+        "losses": round(forecasts.losses_kwh, 2),
+        "pv_forecast": round(forecasts.pv_forecast_kwh, 2),
         "pv_compensation_factor": (
             round(pv_compensation_factor, 4)
             if pv_compensation_factor is not None
             else None
         ),
-        "heat_pump": round(heat_pump_kwh, 2),
-        "charge_current": round(charge_current, 1),
+        "heat_pump": round(forecasts.heat_pump_kwh, 2),
+        "charge_current": round(action.charge_current, 1),
         "efficiency": round(efficiency, 1),
-        "margin": margin,
+        "margin": forecasts.margin,
     }
-    if usage_kwh is not None:
-        full_details["usage"] = round(usage_kwh, 2)
+    full_details["usage"] = round(forecasts.usage_kwh, 2)
     if arbitrage_kwh is not None:
         full_details["arbitrage"] = round(arbitrage_kwh, 2)
     if full_details_extra:
@@ -367,69 +528,46 @@ def build_charge_outcome_base(
 def build_morning_charge_outcome(
     *,
     scenario: str,
-    target_soc: float,
-    required_kwh: float,
-    required_sufficiency_kwh: float,
-    needed_reserve_kwh: float,
+    action: ChargeAction,
+    balance: EnergyBalance,
+    forecasts: ForecastData,
+    sufficiency: SufficiencyResult,
     needed_reserve_sufficiency_kwh: float,
-    reserve_kwh: float,
-    gap_to_charge_kwh: float,
-    gap_all_kwh: float,
-    gap_kwh: float,
     gap_sufficiency_kwh: float,
-    pv_forecast_kwh: float,
-    pv_sufficiency_kwh: float,
-    heat_pump_kwh: float,
-    charge_current: float,
     current_soc: float,
-    losses_kwh: float,
     efficiency: float,
-    margin: float,
-    sufficiency_hour: int,
-    sufficiency_reached: bool,
     pv_compensation_factor: float | None,
-    start_hour: int,
-    end_hour: int,
 ) -> DecisionOutcome:
     """Build a morning charge decision outcome."""
     key_metrics_extra = {
-        "gap": f"{gap_kwh:.1f} kWh",
+        "gap": f"{balance.gap_kwh:.1f} kWh",
         "needed_reserve_sufficiency": f"{needed_reserve_sufficiency_kwh:.1f} kWh",
-        "required_sufficiency": f"{required_sufficiency_kwh:.1f} kWh",
-        "pv_sufficiency": f"{pv_sufficiency_kwh:.1f} kWh",
+        "required_sufficiency": f"{sufficiency.required_sufficiency_kwh:.1f} kWh",
+        "pv_sufficiency": f"{sufficiency.pv_sufficiency_kwh:.1f} kWh",
         "gap_sufficiency": f"{gap_sufficiency_kwh:.1f} kWh",
         "sufficiency_hour": format_sufficiency_hour(
-            sufficiency_hour, sufficiency_reached=bool(sufficiency_reached)
+            sufficiency.sufficiency_hour,
+            sufficiency_reached=sufficiency.sufficiency_reached,
         ),
     }
     full_details_extra = {
-        "required_sufficiency": round(required_sufficiency_kwh, 2),
-        "pv_sufficiency": round(pv_sufficiency_kwh, 2),
+        "required_sufficiency": round(sufficiency.required_sufficiency_kwh, 2),
+        "pv_sufficiency": round(sufficiency.pv_sufficiency_kwh, 2),
         "needed_reserve_sufficiency": round(needed_reserve_sufficiency_kwh, 2),
-        "gap_full": round(gap_kwh, 2),
+        "gap_full": round(balance.gap_kwh, 2),
         "gap_sufficiency": round(gap_sufficiency_kwh, 2),
-        "sufficiency_hour": sufficiency_hour,
-        "sufficiency_reached": sufficiency_reached,
+        "sufficiency_hour": sufficiency.sufficiency_hour,
+        "sufficiency_reached": sufficiency.sufficiency_reached,
     }
 
     return build_charge_outcome_base(
         scenario=scenario,
-        target_soc=target_soc,
-        required_kwh=required_kwh,
-        needed_reserve_kwh=needed_reserve_kwh,
-        reserve_kwh=reserve_kwh,
-        gap_to_charge_kwh=gap_to_charge_kwh,
-        gap_all_kwh=gap_all_kwh,
-        pv_forecast_kwh=pv_forecast_kwh,
-        heat_pump_kwh=heat_pump_kwh,
-        charge_current=charge_current,
+        action=action,
+        balance=balance,
+        forecasts=forecasts,
         current_soc=current_soc,
-        losses_kwh=losses_kwh,
         efficiency=efficiency,
-        margin=margin,
         pv_compensation_factor=pv_compensation_factor,
-        start_hour=start_hour,
-        end_hour=end_hour,
         key_metrics_extra=key_metrics_extra,
         full_details_extra=full_details_extra,
     )
@@ -438,52 +576,30 @@ def build_morning_charge_outcome(
 def build_afternoon_charge_outcome(
     *,
     scenario: str,
-    target_soc: float,
-    required_kwh: float,
-    needed_reserve_kwh: float,
-    reserve_kwh: float,
-    gap_to_charge_kwh: float,
-    gap_all_kwh: float,
+    action: ChargeAction,
+    balance: EnergyBalance,
+    forecasts: ForecastData,
     arbitrage_kwh: float,
     arbitrage_details: dict[str, float | str] | None,
-    pv_forecast_kwh: float,
-    heat_pump_kwh: float,
-    charge_current: float,
     current_soc: float,
-    losses_kwh: float,
     efficiency: float,
-    margin: float,
-    start_hour: int,
-    end_hour: int,
-    usage_kwh: float,
     pv_compensation_factor: float | None,
 ) -> DecisionOutcome:
     """Build an afternoon charge decision outcome."""
     full_details_extra = {
-        "start_hour": start_hour,
-        "end_hour": end_hour,
+        "start_hour": forecasts.start_hour,
+        "end_hour": forecasts.end_hour,
         **(arbitrage_details or {}),
     }
     return build_charge_outcome_base(
         scenario=scenario,
-        target_soc=target_soc,
-        required_kwh=required_kwh,
-        needed_reserve_kwh=needed_reserve_kwh,
-        reserve_kwh=reserve_kwh,
-        gap_to_charge_kwh=gap_to_charge_kwh,
-        gap_all_kwh=gap_all_kwh,
-        pv_forecast_kwh=pv_forecast_kwh,
-        heat_pump_kwh=heat_pump_kwh,
-        charge_current=charge_current,
+        action=action,
+        balance=balance,
+        forecasts=forecasts,
         current_soc=current_soc,
-        losses_kwh=losses_kwh,
         efficiency=efficiency,
-        margin=margin,
         pv_compensation_factor=pv_compensation_factor,
-        start_hour=start_hour,
-        end_hour=end_hour,
         arbitrage_kwh=arbitrage_kwh,
-        usage_kwh=usage_kwh,
         full_details_extra=full_details_extra,
     )
 

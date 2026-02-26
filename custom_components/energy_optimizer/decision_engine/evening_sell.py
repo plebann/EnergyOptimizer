@@ -25,9 +25,11 @@ from ..const import (
 )
 from ..controllers.inverter import set_export_power, set_program_soc, set_work_mode
 from ..decision_engine.common import (
+    ForecastData,
     build_no_action_outcome,
     build_evening_sell_outcome,
     build_surplus_sell_outcome,
+    compute_sufficiency,
     get_battery_config,
     get_required_current_soc_state,
     get_required_prog5_soc_state,
@@ -390,27 +392,31 @@ async def _run_surplus_sell(
         compensate=True,
         entry_id=entry.entry_id,
     )
-    tomorrow_losses_hourly, _ = calculate_losses(
+    tomorrow_losses_hourly, tomorrow_losses_kwh = calculate_losses(
         hass,
         config,
         hours=max(tomorrow_end, 1),
         margin=margin,
     )
-
-    (
-        required_tomorrow_kwh,
-        required_sufficiency_kwh,
-        pv_sufficiency_kwh,
-        sufficiency_hour,
-        sufficiency_reached,
-    ) = calculate_sufficiency_window(
+    tomorrow_hour_window = build_hour_window(0, tomorrow_end)
+    tomorrow_usage_kwh = sum(hourly_usage[hour] for hour in tomorrow_hour_window)
+    tomorrow_forecasts = ForecastData(
         start_hour=0,
         end_hour=tomorrow_end,
+        hours=max(len(tomorrow_hour_window), 1),
         hourly_usage=hourly_usage,
+        usage_kwh=tomorrow_usage_kwh,
+        heat_pump_kwh=tomorrow_hp_kwh,
         heat_pump_hourly=tomorrow_hp_hourly,
-        losses_hourly=tomorrow_losses_hourly,
-        margin=margin,
+        pv_forecast_kwh=tomorrow_pv_kwh,
         pv_forecast_hourly=tomorrow_pv_hourly,
+        losses_hourly=tomorrow_losses_hourly,
+        losses_kwh=tomorrow_losses_kwh,
+        margin=margin,
+    )
+    tomorrow_sufficiency = compute_sufficiency(
+        tomorrow_forecasts,
+        calculator=calculate_sufficiency_window,
     )
 
     today_start = (now_hour + 1) % 24
@@ -442,10 +448,10 @@ async def _run_surplus_sell(
     )
 
     today_required_kwh = (today_usage_kwh + today_hp_kwh + today_losses_kwh) * margin
-    required_kwh = today_required_kwh + required_tomorrow_kwh
+    required_kwh = today_required_kwh + tomorrow_sufficiency.required_kwh
     pv_forecast_kwh = today_pv_kwh + tomorrow_pv_kwh
 
-    if not sufficiency_reached:
+    if not tomorrow_sufficiency.sufficiency_reached:
         outcome = build_no_action_outcome(
             scenario="Evening Peak Sell",
             summary="No surplus sell action",
@@ -454,8 +460,8 @@ async def _run_surplus_sell(
             reserve_kwh=reserve_kwh,
             required_kwh=required_kwh,
             pv_forecast_kwh=pv_forecast_kwh,
-            sufficiency_hour=sufficiency_hour,
-            sufficiency_reached=sufficiency_reached,
+            sufficiency_hour=tomorrow_sufficiency.sufficiency_hour,
+            sufficiency_reached=tomorrow_sufficiency.sufficiency_reached,
             key_metrics_extra={
                 "evening_price": f"{evening_price:.1f} PLN/MWh",
                 "threshold_price": f"{threshold_price:.1f} PLN/MWh",
@@ -474,7 +480,11 @@ async def _run_surplus_sell(
         )
         return
 
-    tomorrow_net_kwh = max(0.0, required_sufficiency_kwh - pv_sufficiency_kwh)
+    tomorrow_net_kwh = max(
+        0.0,
+        tomorrow_sufficiency.required_sufficiency_kwh
+        - tomorrow_sufficiency.pv_sufficiency_kwh,
+    )
     today_net_kwh = max(0.0, today_required_kwh - today_pv_kwh)
 
     total_needed_kwh = today_net_kwh + tomorrow_net_kwh
@@ -488,8 +498,8 @@ async def _run_surplus_sell(
             reserve_kwh=reserve_kwh,
             required_kwh=required_kwh,
             pv_forecast_kwh=pv_forecast_kwh,
-            sufficiency_hour=sufficiency_hour,
-            sufficiency_reached=sufficiency_reached,
+            sufficiency_hour=tomorrow_sufficiency.sufficiency_hour,
+            sufficiency_reached=tomorrow_sufficiency.sufficiency_reached,
             key_metrics_extra={
                 "evening_price": f"{evening_price:.1f} PLN/MWh",
                 "threshold_price": f"{threshold_price:.1f} PLN/MWh",
@@ -525,8 +535,8 @@ async def _run_surplus_sell(
             pv_tomorrow_kwh=tomorrow_pv_kwh,
             heat_pump_today_kwh=today_hp_kwh,
             heat_pump_tomorrow_kwh=tomorrow_hp_kwh,
-            sufficiency_hour=sufficiency_hour,
-            sufficiency_reached=sufficiency_reached,
+            sufficiency_hour=tomorrow_sufficiency.sufficiency_hour,
+            sufficiency_reached=tomorrow_sufficiency.sufficiency_reached,
             export_power_w=export_w,
             evening_price=evening_price,
             threshold_price=threshold_price,
@@ -541,8 +551,8 @@ async def _run_surplus_sell(
             reserve_kwh=reserve_kwh,
             required_kwh=required_kwh,
             pv_forecast_kwh=pv_forecast_kwh,
-            sufficiency_hour=sufficiency_hour,
-            sufficiency_reached=sufficiency_reached,
+            sufficiency_hour=tomorrow_sufficiency.sufficiency_hour,
+            sufficiency_reached=tomorrow_sufficiency.sufficiency_reached,
             key_metrics_extra={
                 "evening_price": f"{evening_price:.1f} PLN/MWh",
                 "threshold_price": f"{threshold_price:.1f} PLN/MWh",
