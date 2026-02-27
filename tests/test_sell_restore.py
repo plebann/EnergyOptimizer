@@ -8,8 +8,33 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from custom_components.energy_optimizer.const import DOMAIN
-from custom_components.energy_optimizer.decision_engine.evening_sell import _execute_sell
+from custom_components.energy_optimizer.decision_engine.sell_base import (
+    BaseSellStrategy,
+    SellRequest,
+)
 from custom_components.energy_optimizer.scheduler.action_scheduler import ActionScheduler
+
+
+class _TestSellStrategy(BaseSellStrategy):
+    @property
+    def scenario_name(self) -> str:
+        return "Evening Peak Sell"
+
+    @property
+    def sell_type(self) -> str:
+        return "evening"
+
+    def _get_prog_soc_state(self) -> tuple[str, float] | None:
+        return None
+
+    def _get_price(self) -> float | None:
+        return None
+
+    def _resolve_sell_hour(self) -> int:
+        return 17
+
+    async def _evaluate_sell(self):
+        raise NotImplementedError
 
 
 class _FakeStore:
@@ -47,31 +72,31 @@ async def test_execute_sell_saves_restore_data(monkeypatch: pytest.MonkeyPatch) 
     entry.entry_id = "entry-1"
 
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.Store",
+        "custom_components.energy_optimizer.decision_engine.sell_base.Store",
         _FakeStore,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.set_work_mode",
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_work_mode",
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.set_program_soc",
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_program_soc",
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.set_export_power",
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_export_power",
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.log_decision_unified",
+        "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_export_power",
+        "custom_components.energy_optimizer.decision_engine.sell_base.calculate_export_power",
         lambda _surplus: 1200.0,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.is_test_sell_mode",
+        "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
         lambda _hass, _entry: False,
     )
 
@@ -80,23 +105,25 @@ async def test_execute_sell_saves_restore_data(monkeypatch: pytest.MonkeyPatch) 
     _FakeStore.removed = False
 
     outcome = SimpleNamespace(full_details={}, entities_changed=[])
-    await _execute_sell(
-        hass,
-        entry=entry,
-        config={
-            "work_mode_entity": "select.work_mode",
-            "export_power_entity": "number.export_power",
-        },
-        bc=SimpleNamespace(min_soc=15.0, capacity_ah=37.0, voltage=640.0),
-        current_soc=90.0,
-        surplus_kwh=3.0,
-        prog5_soc_entity="number.prog5_soc",
-        original_prog_soc=70.0,
-        restore_hour=18,
-        sell_type="evening",
-        integration_context=SimpleNamespace(),
-        build_outcome_fn=lambda _target, _surplus, _export: outcome,
-        build_no_action_fn=lambda _surplus: outcome,
+    strategy = _TestSellStrategy(hass, entry_id="entry-1", margin=1.0)
+    strategy.entry = entry
+    strategy.config = {
+        "work_mode_entity": "select.work_mode",
+        "export_power_entity": "number.export_power",
+    }
+    strategy.bc = SimpleNamespace(min_soc=15.0, capacity_ah=37.0, voltage=640.0)
+    strategy.current_soc = 90.0
+    strategy.prog_soc_entity = "number.prog5_soc"
+    strategy.original_prog_soc = 70.0
+    strategy.restore_hour = 18
+    strategy.integration_context = SimpleNamespace()
+
+    await strategy._execute_sell(
+        SellRequest(
+            surplus_kwh=3.0,
+            build_outcome_fn=lambda _target, _surplus, _export: outcome,
+            build_no_action_fn=lambda _surplus: outcome,
+        )
     )
 
     restore = hass.data[DOMAIN]["entry-1"].get("sell_restore")

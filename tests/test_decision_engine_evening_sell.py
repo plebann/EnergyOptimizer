@@ -28,6 +28,9 @@ from custom_components.energy_optimizer.decision_engine.evening_sell import (
 
 pytestmark = pytest.mark.enable_socket
 
+SELL_BASE = "custom_components.energy_optimizer.decision_engine.sell_base"
+EVENING = "custom_components.energy_optimizer.decision_engine.evening_sell"
+
 
 def _state(value: str) -> MagicMock:
     state = MagicMock()
@@ -98,39 +101,39 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, outcomes: list) -> None:
         outcomes.append(outcome)
 
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.log_decision_unified",
+        f"{SELL_BASE}.log_decision_unified",
         _capture_log,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.set_work_mode",
+        f"{SELL_BASE}.set_work_mode",
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.set_program_soc",
+        f"{SELL_BASE}.set_program_soc",
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.set_export_power",
+        f"{SELL_BASE}.set_export_power",
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.dt_util.utcnow",
+        f"{SELL_BASE}.dt_util.utcnow",
         lambda: datetime(2026, 2, 24, 16, 0, 0),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.dt_util.as_local",
+        f"{SELL_BASE}.dt_util.as_local",
         lambda _dt: SimpleNamespace(hour=17),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.build_hourly_usage_array",
+        f"{EVENING}.build_hourly_usage_array",
         lambda config, get_state, daily_load_fallback=None: [0.0] * 24,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.resolve_tariff_start_hour",
+        f"{EVENING}.resolve_tariff_start_hour",
         lambda hass, config, default_hour=22: 22,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.resolve_tariff_end_hour",
+        f"{EVENING}.resolve_tariff_end_hour",
         lambda hass, config, default_hour=13: 13,
     )
 
@@ -147,27 +150,27 @@ async def test_evening_sell_high_sell_action_type(monkeypatch: pytest.MonkeyPatc
         return 1.0, {}
 
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.get_heat_pump_forecast_window",
+        f"{EVENING}.get_heat_pump_forecast_window",
         _hp,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.get_pv_forecast_window",
+        f"{EVENING}.get_pv_forecast_window",
         lambda *args, **kwargs: (2.0, {}),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_losses",
+        f"{EVENING}.calculate_losses",
         lambda *args, **kwargs: (0.0, 0.0),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_battery_reserve",
+        f"{EVENING}.calculate_battery_reserve",
         lambda *args, **kwargs: 10.0,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_surplus_energy",
+        f"{EVENING}.calculate_surplus_energy",
         lambda reserve, required, pv: 5.0,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_export_power",
+        f"{SELL_BASE}.calculate_export_power",
         lambda *args, **kwargs: 1200.0,
     )
 
@@ -191,23 +194,23 @@ async def test_evening_sell_high_sell_no_surplus_no_action(
         return 1.0, {}
 
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.get_heat_pump_forecast_window",
+        f"{EVENING}.get_heat_pump_forecast_window",
         _hp,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.get_pv_forecast_window",
+        f"{EVENING}.get_pv_forecast_window",
         lambda *args, **kwargs: (2.0, {}),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_losses",
+        f"{EVENING}.calculate_losses",
         lambda *args, **kwargs: (0.0, 0.0),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_battery_reserve",
+        f"{EVENING}.calculate_battery_reserve",
         lambda *args, **kwargs: 2.0,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_surplus_energy",
+        f"{EVENING}.calculate_surplus_energy",
         lambda reserve, required, pv: 0.0,
     )
 
@@ -233,23 +236,23 @@ async def test_evening_sell_surplus_sell_no_sufficiency(
         return 1.0, {}
 
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.get_heat_pump_forecast_window",
+        f"{EVENING}.get_heat_pump_forecast_window",
         _hp,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.get_pv_forecast_window",
+        f"{EVENING}.get_pv_forecast_window",
         lambda *args, **kwargs: (2.0, {}),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_losses",
+        f"{EVENING}.calculate_losses",
         lambda *args, **kwargs: (0.0, 0.0),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_battery_reserve",
+        f"{EVENING}.calculate_battery_reserve",
         lambda *args, **kwargs: 12.0,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_sufficiency_window",
+        f"{EVENING}.calculate_sufficiency_window",
         lambda **kwargs: (9.0, 8.0, 1.0, 13, False),
     )
 
@@ -277,15 +280,15 @@ async def test_evening_sell_skips_when_tomorrow_morning_price_is_higher(
     set_program_soc_mock = AsyncMock()
     set_export_power_mock = AsyncMock()
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.set_work_mode",
+        f"{SELL_BASE}.set_work_mode",
         set_work_mode_mock,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.set_program_soc",
+        f"{SELL_BASE}.set_program_soc",
         set_program_soc_mock,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.set_export_power",
+        f"{SELL_BASE}.set_export_power",
         set_export_power_mock,
     )
 
@@ -319,27 +322,27 @@ async def test_evening_sell_surplus_sell_success(monkeypatch: pytest.MonkeyPatch
         return 1.0, {}
 
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.get_heat_pump_forecast_window",
+        f"{EVENING}.get_heat_pump_forecast_window",
         _hp,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.get_pv_forecast_window",
+        f"{EVENING}.get_pv_forecast_window",
         _pv,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_losses",
+        f"{EVENING}.calculate_losses",
         lambda *args, **kwargs: (0.0, 0.0),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_battery_reserve",
+        f"{EVENING}.calculate_battery_reserve",
         lambda *args, **kwargs: 12.0,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_sufficiency_window",
+        f"{EVENING}.calculate_sufficiency_window",
         lambda **kwargs: (9.0, 8.0, 2.0, 5, True),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_export_power",
+        f"{SELL_BASE}.calculate_export_power",
         lambda *args, **kwargs: 1500.0,
     )
 
@@ -363,23 +366,23 @@ async def test_evening_sell_surplus_sell_no_surplus(monkeypatch: pytest.MonkeyPa
         return 1.0, {}
 
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.get_heat_pump_forecast_window",
+        f"{EVENING}.get_heat_pump_forecast_window",
         _hp,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.get_pv_forecast_window",
+        f"{EVENING}.get_pv_forecast_window",
         lambda *args, **kwargs: (1.0, {}),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_losses",
+        f"{EVENING}.calculate_losses",
         lambda *args, **kwargs: (0.0, 0.0),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_battery_reserve",
+        f"{EVENING}.calculate_battery_reserve",
         lambda *args, **kwargs: 5.0,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.evening_sell.calculate_sufficiency_window",
+        f"{EVENING}.calculate_sufficiency_window",
         lambda **kwargs: (9.0, 8.0, 2.0, 8, True),
     )
 
