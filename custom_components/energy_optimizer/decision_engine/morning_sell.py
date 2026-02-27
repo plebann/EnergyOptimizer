@@ -64,21 +64,7 @@ async def _execute_sell(
     build_outcome_fn: Callable[[float, float, float], DecisionOutcome],
     build_no_action_fn: Callable[[float], DecisionOutcome],
 ) -> None:
-    """Execute shared sell tail: clamp, target, writes, outcome and logging."""
-    pv_production_entity = config.get(CONF_PV_PRODUCTION_SENSOR)
-    pv_today_kwh: float | None = None
-    if pv_production_entity:
-        pv_value, _pv_raw, pv_error = get_float_state_info(hass, str(pv_production_entity))
-        if pv_error is None and pv_value is not None and pv_value >= 0.0:
-            pv_today_kwh = pv_value
-
-    if pv_today_kwh is not None and surplus_kwh > pv_today_kwh:
-        _LOGGER.info(
-            "Clamping morning surplus from %.2f kWh to today's PV production %.2f kWh",
-            surplus_kwh,
-            pv_today_kwh,
-        )
-        surplus_kwh = pv_today_kwh
+    """Execute shared sell tail: target, writes, outcome and logging."""
 
     target_soc = max(
         current_soc - kwh_to_soc(surplus_kwh, bc.capacity_ah, bc.voltage),
@@ -207,40 +193,10 @@ async def _run_morning_surplus_sell(
     integration_context: Context,
 ) -> None:
     """Run morning sell logic using a single surplus branch."""
-    bc = get_battery_config(config)
+    battery_config = get_battery_config(config)
     now_hour = dt_util.as_local(dt_util.utcnow()).hour
     start_hour = (now_hour + 1) % 24
     base_end_hour = resolve_tariff_end_hour(hass, config, default_hour=13)
-
-    if start_hour >= base_end_hour:
-        outcome = build_no_action_outcome(
-            scenario="Morning Peak Sell",
-            summary="No morning peak sell action",
-            reason="Current time is beyond morning sell window",
-            current_soc=current_soc,
-            reserve_kwh=0.0,
-            required_kwh=0.0,
-            pv_forecast_kwh=0.0,
-            key_metrics_extra={
-                "morning_price": f"{morning_price:.1f} PLN/MWh",
-                "threshold_price": f"{threshold_price:.1f} PLN/MWh",
-                "window": f"{start_hour:02d}:00-{base_end_hour:02d}:00",
-            },
-            full_details_extra={
-                "morning_price": round(morning_price, 2),
-                "threshold_price": round(threshold_price, 2),
-                "start_hour": start_hour,
-                "end_hour": base_end_hour,
-            },
-        )
-        await log_decision_unified(
-            hass,
-            entry,
-            outcome,
-            context=integration_context,
-            logger=_LOGGER,
-        )
-        return
 
     hourly_usage = build_hourly_usage_array(
         config,
@@ -306,10 +262,10 @@ async def _run_morning_surplus_sell(
     required_kwh = (usage_kwh + heat_pump_kwh + losses_kwh) * margin
     reserve_kwh = calculate_battery_reserve(
         current_soc,
-        bc.min_soc,
-        bc.capacity_ah,
-        bc.voltage,
-        efficiency=bc.efficiency,
+        battery_config.min_soc,
+        battery_config.capacity_ah,
+        battery_config.voltage,
+        efficiency=battery_config.efficiency,
     )
     surplus_kwh = calculate_surplus_energy(
         reserve_kwh,
@@ -400,7 +356,7 @@ async def _run_morning_surplus_sell(
         hass,
         entry=entry,
         config=config,
-        bc=bc,
+        bc=battery_config,
         current_soc=current_soc,
         surplus_kwh=surplus_kwh,
         prog3_soc_entity=prog3_soc_entity,
