@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from homeassistant.core import Context
 from homeassistant.util import dt as dt_util
 
 from ..calculations.battery import (
@@ -14,7 +13,6 @@ from ..calculations.battery import (
 from ..calculations.energy import hourly_demand
 from ..calculations.energy import calculate_needed_reserve
 from ..const import (
-    CONF_CHARGE_CURRENT_ENTITY,
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_PV_FORECAST_REMAINING,
@@ -23,28 +21,24 @@ from ..const import (
 )
 from ..decision_engine.common import (
     BatteryConfig,
+    ChargeAction,
     EnergyBalance,
     ForecastData,
     build_afternoon_charge_outcome,
     build_no_action_outcome,
-    calculate_charge_action,
     calculate_target_soc_from_needed_reserve,
-    gather_forecasts,
-    get_battery_config,
     get_entry_data,
-    get_required_current_soc_state,
     get_required_prog4_soc_state,
     handle_no_action_soc_update,
-    resolve_entry,
 )
 from ..helpers import (
     get_required_float_state,
     resolve_evening_max_price_hour,
     resolve_tariff_start_hour,
 )
-from ..controllers.inverter import set_charge_current, set_program_soc
-from ..utils.pv_forecast import get_forecast_adjusted_kwh, get_pv_compensation_factor
-from ..utils.logging import log_decision_unified
+from ..utils.pv_forecast import get_forecast_adjusted_kwh
+from ..utils.logging import DecisionOutcome
+from .charge_base import BaseChargeStrategy
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -52,214 +46,154 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_run_afternoon_charge(
-    hass: HomeAssistant, *, entry_id: str | None = None, margin: float | None = None
-) -> None:
-    """Run afternoon grid charge routine."""
+class AfternoonChargeStrategy(BaseChargeStrategy):
+    """Afternoon charge strategy using BaseChargeStrategy template flow."""
 
-    # Create integration context for this decision engine run
-    integration_context = Context()
+    @property
+    def scenario_name(self) -> str:
+        """Scenario display name."""
+        return "Afternoon Grid Charge"
 
-    entry = resolve_entry(hass, entry_id)
-    if entry is None:
-        return
-    config = entry.data
+    def _get_prog_soc_state(self) -> tuple[str, float] | None:
+        """Resolve afternoon Program 4 SOC state."""
+        return get_required_prog4_soc_state(self.hass, self.config)
 
-    entry_data = get_entry_data(hass, entry.entry_id)
-    grid_assist_sensor = (
-        entry_data.get("afternoon_grid_assist_sensor")
-        if entry_data is not None
-        else None
-    )
-
-    def _set_grid_assist(enabled: bool) -> None:
-        if grid_assist_sensor is not None:
-            grid_assist_sensor.set_assist(enabled)
-
-    prog4_soc_state = get_required_prog4_soc_state(hass, config)
-    if prog4_soc_state is None:
-        return
-    prog4_soc_entity, prog4_soc_value = prog4_soc_state
-
-    current_soc_state = get_required_current_soc_state(hass, config)
-    if current_soc_state is None:
-        return
-    _, current_soc = current_soc_state
-
-    bc = get_battery_config(config)
-    margin = margin if margin is not None else 1.1
-
-    start_hour = resolve_tariff_start_hour(hass, config)
-    end_hour = 22
-
-    forecasts = await gather_forecasts(
-        hass,
-        config,
-        start_hour=start_hour,
-        end_hour=end_hour,
-        margin=margin,
-        entry_id=entry.entry_id,
-        apply_efficiency=False,
-    )
-
-    required_kwh = (
-        forecasts.usage_kwh + forecasts.heat_pump_kwh + forecasts.losses_kwh
-    ) * forecasts.margin
-
-    if required_kwh <= 0.0:
-        _LOGGER.info(
-            "Required afternoon energy is zero or negative, proceeding with arbitrage only"
+    def _resolve_forecast_params(self) -> tuple[int, int, dict[str, object]]:
+        """Resolve afternoon forecast time window and kwargs."""
+        return (
+            resolve_tariff_start_hour(self.hass, self.config),
+            22,
+            {"apply_efficiency": False},
         )
-        required_kwh = 0.0
 
-    pv_compensation_factor = get_pv_compensation_factor(hass, entry.entry_id)
+    def _post_forecast_setup(self) -> None:
+        """Prepare afternoon required energy, arbitrage and assist sensor."""
+        entry_data = get_entry_data(self.hass, self.entry.entry_id)
+        self._grid_assist_sensor = (
+            entry_data.get("afternoon_grid_assist_sensor")
+            if entry_data is not None
+            else None
+        )
 
-    balance = _calculate_afternoon_balance(
-        bc,
-        current_soc=current_soc,
-        required_kwh=required_kwh,
-        pv_forecast_kwh=forecasts.pv_forecast_kwh,
-        pv_compensation_factor=pv_compensation_factor,
-    )
+        self._required_kwh = (
+            self.forecasts.usage_kwh
+            + self.forecasts.heat_pump_kwh
+            + self.forecasts.losses_kwh
+        ) * self.forecasts.margin
 
-    arbitrage_kwh, arbitrage_details = _calculate_arbitrage_kwh(
-        hass,
-        config,
-        forecasts=forecasts,
-        bc=bc,
-        sell_start_hour=resolve_evening_max_price_hour(hass, config),
-        current_soc=current_soc,
-        required_kwh=required_kwh,
-        entry_id=entry.entry_id,
-    )
+        if self._required_kwh <= 0.0:
+            _LOGGER.info(
+                "Required afternoon energy is zero or negative, proceeding with arbitrage only"
+            )
+            self._required_kwh = 0.0
 
-    base_gap_kwh = max(balance.gap_kwh, 0.0)
-    total_gap_kwh = base_gap_kwh + arbitrage_kwh
+        self._arbitrage_kwh, self._arbitrage_details = _calculate_arbitrage_kwh(
+            self.hass,
+            self.config,
+            forecasts=self.forecasts,
+            bc=self.bc,
+            sell_start_hour=resolve_evening_max_price_hour(self.hass, self.config),
+            current_soc=self.current_soc,
+            required_kwh=self._required_kwh,
+            entry_id=self.entry.entry_id,
+        )
 
-    _set_grid_assist(base_gap_kwh > 0.0)
+    def _set_grid_assist(self, enabled: bool) -> None:
+        """Toggle afternoon grid-assist flag sensor when available."""
+        if self._grid_assist_sensor is not None:
+            self._grid_assist_sensor.set_assist(enabled)
 
-    if total_gap_kwh <= 0.0:
+    def _evaluate_charge(self) -> tuple[float, EnergyBalance]:
+        """Evaluate afternoon base gap plus optional arbitrage gap."""
+        balance = _calculate_afternoon_balance(
+            self.bc,
+            current_soc=self.current_soc,
+            required_kwh=self._required_kwh,
+            pv_forecast_kwh=self.forecasts.pv_forecast_kwh,
+            pv_compensation_factor=self.pv_compensation_factor,
+        )
+
+        base_gap_kwh = max(balance.gap_kwh, 0.0)
+        self._total_gap_kwh = base_gap_kwh + self._arbitrage_kwh
+        self._set_grid_assist(base_gap_kwh > 0.0)
+        return self._total_gap_kwh, balance
+
+    def _build_charge_outcome(
+        self,
+        action: ChargeAction,
+        balance: EnergyBalance,
+    ) -> DecisionOutcome:
+        """Build afternoon charge outcome payload."""
+        return build_afternoon_charge_outcome(
+            scenario=self.scenario_name,
+            action=action,
+            balance=balance,
+            forecasts=self.forecasts,
+            arbitrage_kwh=self._arbitrage_kwh,
+            arbitrage_details=self._arbitrage_details,
+            current_soc=self.current_soc,
+            efficiency=self.bc.efficiency,
+            pv_compensation_factor=self.pv_compensation_factor,
+        )
+
+    async def _handle_no_action(self, balance: EnergyBalance) -> None:
+        """Handle afternoon no-action path."""
         target_soc = calculate_target_soc_from_needed_reserve(
             needed_reserve_kwh=balance.needed_reserve_kwh,
-            min_soc=bc.min_soc,
-            max_soc=bc.max_soc,
-            capacity_ah=bc.capacity_ah,
-            voltage=bc.voltage,
+            min_soc=self.bc.min_soc,
+            max_soc=self.bc.max_soc,
+            capacity_ah=self.bc.capacity_ah,
+            voltage=self.bc.voltage,
         )
-        await _handle_no_action(
-            hass,
-            entry,
-            integration_context=integration_context,
-            prog4_soc_entity=prog4_soc_entity,
-            prog4_soc_value=prog4_soc_value,
-            current_soc=current_soc,
-            target_soc=target_soc,
-            forecasts=forecasts,
-            balance=balance,
-            gap_kwh=total_gap_kwh,
-            arbitrage_details=arbitrage_details,
-            pv_compensation_factor=pv_compensation_factor,
-        )
-        return
 
-    action = calculate_charge_action(
-        bc,
-        gap_kwh=total_gap_kwh,
-        current_soc=current_soc,
-    )
-
-    charge_current_entity = config.get(CONF_CHARGE_CURRENT_ENTITY)
-
-    await set_program_soc(
-        hass,
-        prog4_soc_entity,
-        action.target_soc,
-        entry=entry,
-        logger=_LOGGER,
-        context=integration_context,
-    )
-    await set_charge_current(
-        hass,
-        charge_current_entity,
-        action.charge_current,
-        entry=entry,
-        logger=_LOGGER,
-        context=integration_context,
-    )
-
-    outcome = build_afternoon_charge_outcome(
-        scenario="Afternoon Grid Charge",
-        action=action,
-        balance=balance,
-        forecasts=forecasts,
-        arbitrage_kwh=arbitrage_kwh,
-        arbitrage_details=arbitrage_details,
-        current_soc=current_soc,
-        efficiency=bc.efficiency,
-        pv_compensation_factor=pv_compensation_factor,
-    )
-    outcome.entities_changed = [
-        {"entity_id": prog4_soc_entity, "value": action.target_soc},
-        {"entity_id": charge_current_entity, "value": action.charge_current},
-    ]
-    await log_decision_unified(
-        hass, entry, outcome, context=integration_context, logger=_LOGGER
-    )
-
-
-async def _handle_no_action(
-    hass: HomeAssistant,
-    entry,
-    *,
-    integration_context: Context,
-    prog4_soc_entity: str,
-    prog4_soc_value: float,
-    current_soc: float,
-    target_soc: float,
-    forecasts: ForecastData,
-    balance: EnergyBalance,
-    gap_kwh: float,
-    pv_compensation_factor: float | None,
-    arbitrage_details: dict[str, float | str] | None = None,
-) -> None:
-    """Handle no-action path."""
-    outcome = build_no_action_outcome(
-        scenario="Afternoon Grid Charge",
-        reason=(
-            f"Gap {gap_kwh:.1f} kWh, reserve {balance.reserve_kwh:.1f} kWh, "
-            f"required {balance.required_kwh:.1f} kWh, PV {forecasts.pv_forecast_kwh:.1f} kWh"
-        ),
-        current_soc=current_soc,
-        reserve_kwh=balance.reserve_kwh,
-        required_kwh=balance.required_kwh,
-        pv_forecast_kwh=forecasts.pv_forecast_kwh,
-        key_metrics_extra={
-            "needed_reserve": f"{balance.needed_reserve_kwh:.1f} kWh",
-            "heat_pump": f"{forecasts.heat_pump_kwh:.1f} kWh",
-        },
-        full_details_extra={
-            "needed_reserve_kwh": round(balance.needed_reserve_kwh, 2),
-            "usage_kwh": round(forecasts.usage_kwh, 2),
-            "pv_compensation_factor": (
-                round(pv_compensation_factor, 4)
-                if pv_compensation_factor is not None
-                else None
+        outcome = build_no_action_outcome(
+            scenario=self.scenario_name,
+            reason=(
+                f"Gap {self._total_gap_kwh:.1f} kWh, reserve {balance.reserve_kwh:.1f} kWh, "
+                f"required {balance.required_kwh:.1f} kWh, PV {self.forecasts.pv_forecast_kwh:.1f} kWh"
             ),
-            "heat_pump_kwh": round(forecasts.heat_pump_kwh, 2),
-            "losses_kwh": round(forecasts.losses_kwh, 2),
-            "gap_kwh": round(gap_kwh, 2),
-            **(arbitrage_details or {}),
-        },
-    )
-    await handle_no_action_soc_update(
-        hass,
-        entry,
-        integration_context=integration_context,
-        prog_soc_entity=prog4_soc_entity,
-        current_prog_soc=prog4_soc_value,
-        target_soc=target_soc,
-        outcome=outcome,
-    )
+            current_soc=self.current_soc,
+            reserve_kwh=balance.reserve_kwh,
+            required_kwh=balance.required_kwh,
+            pv_forecast_kwh=self.forecasts.pv_forecast_kwh,
+            key_metrics_extra={
+                "needed_reserve": f"{balance.needed_reserve_kwh:.1f} kWh",
+                "heat_pump": f"{self.forecasts.heat_pump_kwh:.1f} kWh",
+            },
+            full_details_extra={
+                "needed_reserve_kwh": round(balance.needed_reserve_kwh, 2),
+                "usage_kwh": round(self.forecasts.usage_kwh, 2),
+                "pv_compensation_factor": (
+                    round(self.pv_compensation_factor, 4)
+                    if self.pv_compensation_factor is not None
+                    else None
+                ),
+                "heat_pump_kwh": round(self.forecasts.heat_pump_kwh, 2),
+                "losses_kwh": round(self.forecasts.losses_kwh, 2),
+                "gap_kwh": round(self._total_gap_kwh, 2),
+                **(self._arbitrage_details or {}),
+            },
+        )
+        await handle_no_action_soc_update(
+            self.hass,
+            self.entry,
+            integration_context=self.integration_context,
+            prog_soc_entity=self.prog_soc_entity,
+            current_prog_soc=self.prog_soc_value,
+            target_soc=target_soc,
+            outcome=outcome,
+        )
+
+
+async def async_run_afternoon_charge(
+    hass: HomeAssistant,
+    *,
+    entry_id: str | None = None,
+    margin: float | None = None,
+) -> None:
+    """Run afternoon grid charge routine."""
+    strategy = AfternoonChargeStrategy(hass, entry_id=entry_id, margin=margin)
+    await strategy.run()
 
 
 def _calculate_afternoon_balance(
@@ -300,6 +234,7 @@ def _calculate_arbitrage_kwh(
     required_kwh: float,
     entry_id: str | None = None,
 ) -> tuple[float, dict[str, float | str]]:
+    """Calculate optional arbitrage energy and detail metrics."""
     details: dict[str, float | str] = {
         "arbitrage_reason": "not_applicable",
     }
@@ -310,7 +245,11 @@ def _calculate_arbitrage_kwh(
     pv_forecast_remaining_entity = config.get(CONF_PV_FORECAST_REMAINING)
     pv_production_entity = config.get(CONF_PV_PRODUCTION_SENSOR)
 
-    sell_price = get_required_float_state(hass, sell_price_entity, entity_name="Sell window price")
+    sell_price = get_required_float_state(
+        hass,
+        sell_price_entity,
+        entity_name="Sell window price",
+    )
     if sell_price is None:
         details["arbitrage_reason"] = "missing_sell_price"
         return 0.0, details
