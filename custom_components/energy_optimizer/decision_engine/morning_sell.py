@@ -1,6 +1,7 @@
 """Morning peak sell decision logic."""
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from ..calculations.battery import calculate_battery_reserve
@@ -30,6 +31,9 @@ from .sell_base import BaseSellStrategy, SellRequest
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class MorningSellStrategy(BaseSellStrategy):
@@ -97,6 +101,36 @@ class MorningSellStrategy(BaseSellStrategy):
             margin=self.margin,
         )
 
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            base_usage_hourly = {
+                hour: round(hourly_usage[hour], 3)
+                for hour in base_window
+            }
+            base_heat_pump_hourly_map = {
+                hour: round(base_heat_pump_hourly.get(hour, 0.0), 3)
+                for hour in base_window
+            }
+            base_pv_hourly_map = {
+                hour: round(base_pv_forecast_hourly.get(hour, 0.0), 3)
+                for hour in base_window
+            }
+            _LOGGER.debug(
+                "Morning sell base input window %02d:00-%02d:00 | hours=%d | "
+                "usage_kwh=%.3f heat_pump_kwh=%.3f pv_forecast_kwh=%.3f losses_hourly_kwh=%.3f losses_kwh=%.3f margin=%.3f",
+                start_hour,
+                base_end_hour,
+                base_hours,
+                base_usage_kwh,
+                base_heat_pump_kwh,
+                base_pv_forecast_kwh,
+                base_losses_hourly,
+                base_losses_hourly * base_hours,
+                self.margin,
+            )
+            _LOGGER.debug("Morning sell usage hourly base: %s", base_usage_hourly)
+            _LOGGER.debug("Morning sell heat pump hourly base: %s", base_heat_pump_hourly_map)
+            _LOGGER.debug("Morning sell PV hourly base: %s", base_pv_hourly_map)
+
         base_forecasts = ForecastData(
             start_hour=start_hour,
             end_hour=base_end_hour,
@@ -127,6 +161,38 @@ class MorningSellStrategy(BaseSellStrategy):
         pv_forecast_kwh = sum(base_pv_forecast_hourly.get(hour, 0.0) for hour in effective_window)
         losses_kwh = base_losses_hourly * effective_hours
 
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            effective_usage_hourly = {
+                hour: round(hourly_usage[hour], 3)
+                for hour in effective_window
+            }
+            effective_heat_pump_hourly_map = {
+                hour: round(base_heat_pump_hourly.get(hour, 0.0), 3)
+                for hour in effective_window
+            }
+            effective_pv_hourly_map = {
+                hour: round(base_pv_forecast_hourly.get(hour, 0.0), 3)
+                for hour in effective_window
+            }
+            _LOGGER.debug(
+                "Morning sell sufficiency | reached=%s sufficiency_hour=%s effective_window=%02d:00-%02d:00 hours=%d",
+                sufficiency.sufficiency_reached,
+                sufficiency.sufficiency_hour,
+                start_hour,
+                effective_end_hour,
+                effective_hours,
+            )
+            _LOGGER.debug(
+                "Morning sell effective totals | usage_kwh=%.3f heat_pump_kwh=%.3f pv_forecast_kwh=%.3f losses_kwh=%.3f",
+                usage_kwh,
+                heat_pump_kwh,
+                pv_forecast_kwh,
+                losses_kwh,
+            )
+            _LOGGER.debug("Morning sell usage hourly effective: %s", effective_usage_hourly)
+            _LOGGER.debug("Morning sell heat pump hourly effective: %s", effective_heat_pump_hourly_map)
+            _LOGGER.debug("Morning sell PV hourly effective: %s", effective_pv_hourly_map)
+
         required_kwh = (usage_kwh + heat_pump_kwh + losses_kwh) * self.margin
         reserve_kwh = calculate_battery_reserve(
             self.current_soc,
@@ -139,6 +205,19 @@ class MorningSellStrategy(BaseSellStrategy):
             reserve_kwh,
             required_kwh,
             pv_forecast_kwh,
+        )
+        _LOGGER.debug(
+            "Morning sell calculation | required=(usage %.3f + hp %.3f + losses %.3f) * margin %.3f = %.3f kWh | "
+            "available=(reserve %.3f + pv %.3f)=%.3f kWh | surplus=%.3f kWh",
+            usage_kwh,
+            heat_pump_kwh,
+            losses_kwh,
+            self.margin,
+            required_kwh,
+            reserve_kwh,
+            pv_forecast_kwh,
+            reserve_kwh + pv_forecast_kwh,
+            surplus_kwh,
         )
 
         if surplus_kwh <= 0.0:

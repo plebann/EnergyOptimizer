@@ -1,6 +1,7 @@
 """Evening peak sell decision logic."""
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from ..calculations.battery import calculate_battery_reserve
@@ -32,6 +33,9 @@ from .sell_base import BaseSellStrategy, SellRequest
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class EveningSellStrategy(BaseSellStrategy):
@@ -131,6 +135,29 @@ class EveningSellStrategy(BaseSellStrategy):
             margin=self.margin,
         )
 
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            hourly_breakdown = {
+                hour: {
+                    "usage_kwh": round(hourly_usage[hour], 3),
+                }
+                for hour in hours_window
+            }
+            _LOGGER.debug(
+                "Evening high-price input window %02d:00-%02d:00 | hours=%d | "
+                "usage_kwh=%.3f heat_pump_kwh=%.3f pv_forecast_kwh=%.3f losses_kwh=%.3f "
+                "losses_hourly_kwh=%.3f margin=%.3f",
+                start_hour,
+                end_hour,
+                hours,
+                usage_kwh,
+                heat_pump_kwh,
+                pv_forecast_kwh,
+                losses_kwh,
+                losses_kwh / hours if hours > 0 else 0.0,
+                self.margin,
+            )
+            _LOGGER.debug("Evening high-price usage hourly breakdown: %s", hourly_breakdown)
+
         required_kwh = (usage_kwh + heat_pump_kwh + losses_kwh) * self.margin
         reserve_kwh = calculate_battery_reserve(
             self.current_soc,
@@ -143,6 +170,19 @@ class EveningSellStrategy(BaseSellStrategy):
             reserve_kwh,
             required_kwh,
             pv_forecast_kwh,
+        )
+        _LOGGER.debug(
+            "Evening high-price calculation | required=(usage %.3f + hp %.3f + losses %.3f) * margin %.3f = %.3f kWh | "
+            "available=(reserve %.3f + pv %.3f)=%.3f kWh | surplus=%.3f kWh",
+            usage_kwh,
+            heat_pump_kwh,
+            losses_kwh,
+            self.margin,
+            required_kwh,
+            reserve_kwh,
+            pv_forecast_kwh,
+            reserve_kwh + pv_forecast_kwh,
+            surplus_kwh,
         )
         if surplus_kwh <= 0.0:
             return build_no_action_outcome(
@@ -268,13 +308,13 @@ class EveningSellStrategy(BaseSellStrategy):
         today_hours = max(len(today_window), 1)
 
         today_usage_kwh = sum(hourly_usage[hour] for hour in today_window)
-        today_hp_kwh, _ = await get_heat_pump_forecast_window(
+        today_hp_kwh, today_hp_hourly = await get_heat_pump_forecast_window(
             self.hass,
             self.config,
             start_hour=today_start,
             end_hour=today_end,
         )
-        today_pv_kwh, _ = get_pv_forecast_window(
+        today_pv_kwh, today_pv_hourly = get_pv_forecast_window(
             self.hass,
             self.config,
             start_hour=today_start,
@@ -290,9 +330,85 @@ class EveningSellStrategy(BaseSellStrategy):
             margin=self.margin,
         )
 
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            today_usage_hourly = {
+                hour: round(hourly_usage[hour], 3)
+                for hour in today_window
+            }
+            tomorrow_usage_hourly = {
+                hour: round(hourly_usage[hour], 3)
+                for hour in tomorrow_hour_window
+            }
+            tomorrow_heat_pump_hourly = {
+                hour: round(tomorrow_hp_hourly.get(hour, 0.0), 3)
+                for hour in tomorrow_hour_window
+            }
+            tomorrow_pv_hourly_map = {
+                hour: round(tomorrow_pv_hourly.get(hour, 0.0), 3)
+                for hour in tomorrow_hour_window
+            }
+            today_heat_pump_hourly = {
+                hour: round(today_hp_hourly.get(hour, 0.0), 3)
+                for hour in today_window
+            }
+            today_pv_hourly_map = {
+                hour: round(today_pv_hourly.get(hour, 0.0), 3)
+                for hour in today_window
+            }
+            _LOGGER.debug(
+                "Evening surplus input windows | today=%02d:00-%02d:00 (hours=%d) tomorrow=00:00-%02d:00 (hours=%d) | margin=%.3f",
+                today_start,
+                today_end,
+                today_hours,
+                tomorrow_end,
+                max(len(tomorrow_hour_window), 1),
+                self.margin,
+            )
+            _LOGGER.debug(
+                "Evening surplus totals today | usage_kwh=%.3f heat_pump_kwh=%.3f pv_kwh=%.3f losses_kwh=%.3f losses_hourly_kwh=%.3f",
+                today_usage_kwh,
+                today_hp_kwh,
+                today_pv_kwh,
+                today_losses_kwh,
+                today_losses_kwh / today_hours if today_hours > 0 else 0.0,
+            )
+            _LOGGER.debug(
+                "Evening surplus totals tomorrow | usage_kwh=%.3f heat_pump_kwh=%.3f pv_kwh=%.3f losses_kwh=%.3f losses_hourly_kwh=%.3f",
+                tomorrow_usage_kwh,
+                tomorrow_hp_kwh,
+                tomorrow_pv_kwh,
+                tomorrow_losses_kwh,
+                tomorrow_losses_hourly,
+            )
+            _LOGGER.debug("Evening surplus usage hourly today: %s", today_usage_hourly)
+            _LOGGER.debug("Evening surplus usage hourly tomorrow: %s", tomorrow_usage_hourly)
+            _LOGGER.debug("Evening surplus heat pump hourly today: %s", today_heat_pump_hourly)
+            _LOGGER.debug("Evening surplus heat pump hourly tomorrow: %s", tomorrow_heat_pump_hourly)
+            _LOGGER.debug("Evening surplus PV hourly today: %s", today_pv_hourly_map)
+            _LOGGER.debug("Evening surplus PV hourly tomorrow: %s", tomorrow_pv_hourly_map)
+
         today_required_kwh = (today_usage_kwh + today_hp_kwh + today_losses_kwh) * self.margin
         required_kwh = today_required_kwh + tomorrow_sufficiency.required_kwh
         pv_forecast_kwh = today_pv_kwh + tomorrow_pv_kwh
+        _LOGGER.debug(
+            "Evening surplus step 1 | today_required=(usage %.3f + hp %.3f + losses %.3f) * margin %.3f = %.3f kWh | "
+            "tomorrow_required=%.3f kWh | required_total=%.3f kWh | pv_total=%.3f kWh",
+            today_usage_kwh,
+            today_hp_kwh,
+            today_losses_kwh,
+            self.margin,
+            today_required_kwh,
+            tomorrow_sufficiency.required_kwh,
+            required_kwh,
+            pv_forecast_kwh,
+        )
+        _LOGGER.debug(
+            "Evening surplus sufficiency | required_sufficiency_kwh=%.3f pv_sufficiency_kwh=%.3f sufficiency_hour=%s sufficiency_reached=%s",
+            tomorrow_sufficiency.required_sufficiency_kwh,
+            tomorrow_sufficiency.pv_sufficiency_kwh,
+            tomorrow_sufficiency.sufficiency_hour,
+            tomorrow_sufficiency.sufficiency_reached,
+        )
 
         if not tomorrow_sufficiency.sufficiency_reached:
             return build_no_action_outcome(
@@ -323,6 +439,19 @@ class EveningSellStrategy(BaseSellStrategy):
         today_net_kwh = max(0.0, today_required_kwh - today_pv_kwh)
         total_needed_kwh = today_net_kwh + tomorrow_net_kwh
         surplus_kwh = max(0.0, reserve_kwh - total_needed_kwh)
+        _LOGGER.debug(
+            "Evening surplus step 2 | today_net=max(0, %.3f-%.3f)=%.3f kWh | "
+            "tomorrow_net=max(0, %.3f-%.3f)=%.3f kWh | total_needed=%.3f kWh | reserve=%.3f kWh | surplus=max(0, reserve-total_needed)=%.3f kWh",
+            today_required_kwh,
+            today_pv_kwh,
+            today_net_kwh,
+            tomorrow_sufficiency.required_sufficiency_kwh,
+            tomorrow_sufficiency.pv_sufficiency_kwh,
+            tomorrow_net_kwh,
+            total_needed_kwh,
+            reserve_kwh,
+            surplus_kwh,
+        )
 
         if surplus_kwh <= 0.0:
             return build_no_action_outcome(
