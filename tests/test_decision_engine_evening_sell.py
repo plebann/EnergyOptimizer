@@ -222,7 +222,7 @@ async def test_evening_sell_high_sell_no_surplus_no_action(
 
 
 @pytest.mark.asyncio
-async def test_evening_sell_surplus_sell_no_sufficiency(
+async def test_evening_sell_surplus_sell_no_sufficiency_uses_full_tariff_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _base_config()
@@ -259,8 +259,7 @@ async def test_evening_sell_surplus_sell_no_sufficiency(
     await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
 
     assert outcomes
-    assert outcomes[-1].action_type == "no_action"
-    assert "sufficiency" in (outcomes[-1].reason or "").lower()
+    assert outcomes[-1].action_type == "sell"
 
 
 @pytest.mark.asyncio
@@ -391,3 +390,45 @@ async def test_evening_sell_surplus_sell_no_surplus(monkeypatch: pytest.MonkeyPa
     assert outcomes
     assert outcomes[-1].action_type == "no_action"
     assert "No surplus energy" in (outcomes[-1].reason or "")
+
+
+@pytest.mark.asyncio
+async def test_evening_sell_surplus_no_action_required_uses_sufficiency_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    states = _base_states()
+    states["sensor.evening_price"] = "350"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    async def _hp(*args, **kwargs):
+        return 1.0, {}
+
+    monkeypatch.setattr(
+        f"{EVENING}.get_heat_pump_forecast_window",
+        _hp,
+    )
+    monkeypatch.setattr(
+        f"{EVENING}.get_pv_forecast_window",
+        lambda *args, **kwargs: (0.0, {}),
+    )
+    monkeypatch.setattr(
+        f"{EVENING}.calculate_losses",
+        lambda *args, **kwargs: (0.0, 0.0),
+    )
+    monkeypatch.setattr(
+        f"{EVENING}.calculate_battery_reserve",
+        lambda *args, **kwargs: 5.0,
+    )
+    monkeypatch.setattr(
+        f"{EVENING}.calculate_sufficiency_window",
+        lambda **kwargs: (9.0, 8.0, 2.0, 8, True),
+    )
+
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].full_details["required_kwh"] == 9.0

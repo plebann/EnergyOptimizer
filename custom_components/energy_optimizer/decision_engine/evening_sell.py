@@ -388,7 +388,14 @@ class EveningSellStrategy(BaseSellStrategy):
             _LOGGER.debug("Evening surplus PV hourly tomorrow: %s", tomorrow_pv_hourly_map)
 
         today_required_kwh = (today_usage_kwh + today_hp_kwh + today_losses_kwh) * self.margin
-        required_kwh = today_required_kwh + tomorrow_sufficiency.required_kwh
+        if tomorrow_sufficiency.sufficiency_reached:
+            tomorrow_required_kwh = tomorrow_sufficiency.required_sufficiency_kwh
+            tomorrow_pv_kwh = tomorrow_sufficiency.pv_sufficiency_kwh
+        else:
+            tomorrow_required_kwh = tomorrow_sufficiency.required_kwh
+            tomorrow_pv_kwh = tomorrow_pv_kwh
+
+        required_kwh = today_required_kwh + tomorrow_required_kwh
         pv_forecast_kwh = today_pv_kwh + tomorrow_pv_kwh
         _LOGGER.debug(
             "Evening surplus step 1 | today_required=(usage %.3f + hp %.3f + losses %.3f) * margin %.3f = %.3f kWh | "
@@ -398,7 +405,7 @@ class EveningSellStrategy(BaseSellStrategy):
             today_losses_kwh,
             self.margin,
             today_required_kwh,
-            tomorrow_sufficiency.required_kwh,
+            tomorrow_required_kwh,
             required_kwh,
             pv_forecast_kwh,
         )
@@ -410,32 +417,7 @@ class EveningSellStrategy(BaseSellStrategy):
             tomorrow_sufficiency.sufficiency_reached,
         )
 
-        if not tomorrow_sufficiency.sufficiency_reached:
-            return build_no_action_outcome(
-                scenario=self.scenario_name,
-                summary="No surplus sell action",
-                reason="Tomorrow PV does not reach sufficiency hour",
-                current_soc=self.current_soc,
-                reserve_kwh=reserve_kwh,
-                required_kwh=required_kwh,
-                pv_forecast_kwh=pv_forecast_kwh,
-                sufficiency_hour=tomorrow_sufficiency.sufficiency_hour,
-                sufficiency_reached=tomorrow_sufficiency.sufficiency_reached,
-                key_metrics_extra={
-                    "evening_price": f"{self.price:.1f} PLN/MWh",
-                    "threshold_price": f"{self.threshold_price:.1f} PLN/MWh",
-                },
-                full_details_extra={
-                    "evening_price": round(self.price, 2),
-                    "threshold_price": round(self.threshold_price, 2),
-                },
-            )
-
-        tomorrow_net_kwh = max(
-            0.0,
-            tomorrow_sufficiency.required_sufficiency_kwh
-            - tomorrow_sufficiency.pv_sufficiency_kwh,
-        )
+        tomorrow_net_kwh = max(0.0, tomorrow_required_kwh - tomorrow_pv_kwh)
         today_net_kwh = max(0.0, today_required_kwh - today_pv_kwh)
         total_needed_kwh = today_net_kwh + tomorrow_net_kwh
         surplus_kwh = max(0.0, reserve_kwh - total_needed_kwh)
@@ -445,8 +427,8 @@ class EveningSellStrategy(BaseSellStrategy):
             today_required_kwh,
             today_pv_kwh,
             today_net_kwh,
-            tomorrow_sufficiency.required_sufficiency_kwh,
-            tomorrow_sufficiency.pv_sufficiency_kwh,
+            tomorrow_required_kwh,
+            tomorrow_pv_kwh,
             tomorrow_net_kwh,
             total_needed_kwh,
             reserve_kwh,
