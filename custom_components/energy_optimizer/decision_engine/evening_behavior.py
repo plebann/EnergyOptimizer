@@ -570,7 +570,7 @@ async def _calculate_preservation_context(
         compensate=True,
         entry_id=entry_id,
     )
-    losses_hourly, _ = calculate_losses(hass, config, hours=hours, margin=margin)
+    losses_hourly, _ = calculate_losses(hass, config, hours=hours)
     (
         required_kwh,
         required_sufficiency_kwh,

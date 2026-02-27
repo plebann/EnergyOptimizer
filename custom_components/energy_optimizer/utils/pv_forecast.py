@@ -229,7 +229,7 @@ def _apply_pv_compensation(
     if factor_combined is None:
         return hourly_kwh
 
-    factor_combined = min(factor_combined, 1.3)
+    factor_combined = min(factor_combined, 1.2)
     return {hour: value * factor_combined for hour, value in hourly_kwh.items()}
 
 

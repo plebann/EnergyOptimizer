@@ -99,7 +99,6 @@ def calculate_losses(
     config: dict[str, object],
     *,
     hours: int,
-    margin: float,
 ) -> tuple[float, float]:
     """Calculate hourly and total losses for a given window."""
     losses_hourly = 0.0
@@ -107,7 +106,7 @@ def calculate_losses(
     if losses_entity:
         daily_losses = get_float_value(hass, losses_entity, default=0.0)
         if daily_losses:
-            losses_hourly = (daily_losses / 24.0) * margin
+            losses_hourly = daily_losses / 24.0
 
     return losses_hourly, losses_hourly * hours
 

@@ -154,7 +154,7 @@ async def gather_forecasts(
         compensate=compensate,
         entry_id=entry_id,
     )
-    losses_hourly, losses_kwh = calculate_losses(hass, config, hours=hours, margin=margin)
+    losses_hourly, losses_kwh = calculate_losses(hass, config, hours=hours)
 
     return ForecastData(
         start_hour=start_hour,

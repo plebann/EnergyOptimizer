@@ -132,7 +132,6 @@ class EveningSellStrategy(BaseSellStrategy):
             self.hass,
             self.config,
             hours=hours,
-            margin=self.margin,
         )
 
         if _LOGGER.isEnabledFor(logging.DEBUG):
@@ -279,7 +278,6 @@ class EveningSellStrategy(BaseSellStrategy):
             self.hass,
             self.config,
             hours=max(tomorrow_end, 1),
-            margin=self.margin,
         )
         tomorrow_hour_window = build_hour_window(0, tomorrow_end)
         tomorrow_usage_kwh = sum(hourly_usage[hour] for hour in tomorrow_hour_window)
@@ -327,7 +325,6 @@ class EveningSellStrategy(BaseSellStrategy):
             self.hass,
             self.config,
             hours=today_hours,
-            margin=self.margin,
         )
 
         if _LOGGER.isEnabledFor(logging.DEBUG):

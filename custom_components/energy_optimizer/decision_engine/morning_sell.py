@@ -98,7 +98,6 @@ class MorningSellStrategy(BaseSellStrategy):
             self.hass,
             self.config,
             hours=base_hours,
-            margin=self.margin,
         )
 
         if _LOGGER.isEnabledFor(logging.DEBUG):
