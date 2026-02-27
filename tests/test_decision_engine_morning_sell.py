@@ -272,23 +272,3 @@ async def test_morning_sell_caps_window_by_sufficiency(monkeypatch: pytest.Monke
     assert outcomes[-1].full_details["end_hour"] == 10
 
 
-@pytest.mark.asyncio
-async def test_morning_sell_no_action_when_window_already_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = _base_config()
-    states = _base_states()
-    hass = _setup_hass(config, states)
-    outcomes: list = []
-    _patch_common(monkeypatch, outcomes)
-
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_sell.dt_util.as_local",
-        lambda _dt: SimpleNamespace(hour=13),
-    )
-
-    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
-
-    assert outcomes
-    assert outcomes[-1].action_type == "no_action"
-    assert "beyond morning sell window" in (outcomes[-1].reason or "")

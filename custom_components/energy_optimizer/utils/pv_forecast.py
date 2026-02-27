@@ -108,6 +108,9 @@ def _collect_pv_forecast_hourly_kwh(
     """Collect PV forecast energy per hour without efficiency adjustments."""
     hour_window = build_hour_window(start_hour, end_hour)
     hourly_kwh: dict[int, float] = {hour: 0.0 for hour in hour_window}
+    if not hour_window:
+        return hourly_kwh
+
     now_hour = dt_util.now().hour
     today_sensor = config.get(CONF_PV_FORECAST_TODAY)
     tomorrow_sensor = config.get(CONF_PV_FORECAST_TOMORROW)
@@ -152,7 +155,8 @@ def _collect_pv_forecast_hourly_kwh(
                 continue
             if window_start <= dt_value.hour < window_end:
                 try:
-                    hourly_kwh[dt_value.hour] += float(pv_estimate)
+                    if dt_value.hour in hourly_kwh:
+                        hourly_kwh[dt_value.hour] += float(pv_estimate)
                 except (ValueError, TypeError):
                     continue
 

@@ -108,6 +108,10 @@ SERVICE_EVENING_PEAK_SELL = "evening_peak_sell"
 DEFAULT_EXPORT_POWER_RESET = 12000
 DEFAULT_DISCHARGE_CURRENT_RESET = 12
 
+# Sell restore persistence
+STORAGE_KEY_SELL_RESTORE = f"{DOMAIN}.sell_restore"
+STORAGE_VERSION_SELL_RESTORE = 1
+
 # Update intervals (seconds)
 UPDATE_INTERVAL_FAST = 60  # For battery-related sensors
 UPDATE_INTERVAL_SLOW = 3600  # For daily forecasts

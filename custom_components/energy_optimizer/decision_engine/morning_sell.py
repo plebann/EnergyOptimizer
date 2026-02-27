@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import Context
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from ..calculations.battery import calculate_battery_reserve, kwh_to_soc
@@ -22,6 +23,9 @@ from ..const import (
     CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_PV_PRODUCTION_SENSOR,
     CONF_WORK_MODE_ENTITY,
+    DOMAIN,
+    STORAGE_KEY_SELL_RESTORE,
+    STORAGE_VERSION_SELL_RESTORE,
 )
 from ..controllers.inverter import set_export_power, set_program_soc, set_work_mode
 from ..decision_engine.common import (
@@ -38,6 +42,7 @@ from ..helpers import (
     get_float_state_info,
     get_required_float_state,
     is_test_sell_mode,
+    resolve_morning_max_price_hour,
     resolve_tariff_end_hour,
 )
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
@@ -60,6 +65,9 @@ async def _execute_sell(
     current_soc: float,
     surplus_kwh: float,
     prog3_soc_entity: str,
+    original_prog_soc: float,
+    restore_hour: int,
+    sell_type: str,
     integration_context: Context,
     build_outcome_fn: Callable[[float, float, float], DecisionOutcome],
     build_no_action_fn: Callable[[float], DecisionOutcome],
@@ -81,6 +89,11 @@ async def _execute_sell(
     work_mode_entity = config.get(CONF_WORK_MODE_ENTITY)
     export_power_entity = config.get(CONF_EXPORT_POWER_ENTITY)
     sell_test_mode = is_test_sell_mode(hass, entry)
+    original_work_mode: str | None = None
+    if work_mode_entity:
+        wm_state = hass.states.get(str(work_mode_entity))
+        if wm_state is not None:
+            original_work_mode = wm_state.state
 
     if sell_test_mode:
         _LOGGER.info("Test sell mode enabled - skipping morning sell inverter writes")
@@ -93,6 +106,22 @@ async def _execute_sell(
             logger=_LOGGER,
             context=integration_context,
         )
+
+        restore_data = {
+            "work_mode": original_work_mode,
+            "prog_soc_entity": prog3_soc_entity,
+            "prog_soc_value": original_prog_soc,
+            "restore_hour": restore_hour,
+            "sell_type": sell_type,
+            "timestamp": dt_util.utcnow().isoformat(),
+        }
+        hass.data[DOMAIN][entry.entry_id]["sell_restore"] = restore_data
+        store = Store(
+            hass,
+            STORAGE_VERSION_SELL_RESTORE,
+            f"{STORAGE_KEY_SELL_RESTORE}.{entry.entry_id}",
+        )
+        await store.async_save(restore_data)
         await set_program_soc(
             hass,
             prog3_soc_entity,
@@ -154,7 +183,9 @@ async def async_run_morning_sell(
     prog3_soc_state = get_required_prog3_soc_state(hass, config)
     if prog3_soc_state is None:
         return
-    prog3_soc_entity, _ = prog3_soc_state
+    prog3_soc_entity, original_prog3_soc = prog3_soc_state
+    sell_hour = resolve_morning_max_price_hour(hass, config, default_hour=7)
+    restore_hour = (sell_hour + 1) % 24
 
     morning_price = get_required_float_state(
         hass,
@@ -173,6 +204,8 @@ async def async_run_morning_sell(
         config=config,
         current_soc=current_soc,
         prog3_soc_entity=prog3_soc_entity,
+        original_prog3_soc=original_prog3_soc,
+        restore_hour=restore_hour,
         morning_price=morning_price,
         threshold_price=threshold_price,
         margin=effective_margin,
@@ -187,6 +220,8 @@ async def _run_morning_surplus_sell(
     config: dict[str, Any],
     current_soc: float,
     prog3_soc_entity: str,
+    original_prog3_soc: float,
+    restore_hour: int,
     morning_price: float,
     threshold_price: float,
     margin: float,
@@ -360,6 +395,9 @@ async def _run_morning_surplus_sell(
         current_soc=current_soc,
         surplus_kwh=surplus_kwh,
         prog3_soc_entity=prog3_soc_entity,
+        original_prog_soc=original_prog3_soc,
+        restore_hour=restore_hour,
+        sell_type="morning",
         integration_context=integration_context,
         build_outcome_fn=_make_outcome,
         build_no_action_fn=_make_no_action,
