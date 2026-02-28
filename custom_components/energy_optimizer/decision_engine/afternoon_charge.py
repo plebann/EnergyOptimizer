@@ -156,11 +156,7 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             reserve_kwh=balance.reserve_kwh,
             required_kwh=balance.required_kwh,
             pv_forecast_kwh=self.forecasts.pv_forecast_kwh,
-            key_metrics_extra={
-                "needed_reserve": f"{balance.needed_reserve_kwh:.1f} kWh",
-                "heat_pump": f"{self.forecasts.heat_pump_kwh:.1f} kWh",
-            },
-            full_details_extra={
+            details_extra={
                 "needed_reserve_kwh": round(balance.needed_reserve_kwh, 2),
                 "usage_kwh": round(self.forecasts.usage_kwh, 2),
                 "pv_compensation_factor": (

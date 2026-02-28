@@ -366,7 +366,7 @@ async def test_morning_charge_logs_last_optimization_attributes() -> None:
 
     assert scenario == "Morning Grid Charge"
     assert details["target_soc"] == pytest.approx(67.0)
-    assert "charge_current_a" not in details
+    assert details["charge_current_a"] == pytest.approx(8)
 
 
 def test_calculate_soc_delta() -> None:

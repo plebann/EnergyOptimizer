@@ -349,7 +349,7 @@ async def test_evening_sell_surplus_sell_success(monkeypatch: pytest.MonkeyPatch
 
     assert outcomes
     assert outcomes[-1].action_type == "sell"
-    assert outcomes[-1].full_details["sufficiency_hour"] == 5
+    assert outcomes[-1].details["sufficiency_hour"] == 5
 
 
 @pytest.mark.asyncio
@@ -431,4 +431,4 @@ async def test_evening_sell_surplus_no_action_required_uses_sufficiency_window(
 
     assert outcomes
     assert outcomes[-1].action_type == "no_action"
-    assert outcomes[-1].full_details["required_kwh"] == 9.0
+    assert outcomes[-1].details["required_kwh"] == 9.0

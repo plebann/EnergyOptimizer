@@ -90,11 +90,11 @@ class MorningSellStrategy(BaseSellStrategy):
             self.config,
             start_hour=start_hour,
             end_hour=base_end_hour,
-            apply_efficiency=False,
+            apply_efficiency=True,
             compensate=True,
             entry_id=self.entry.entry_id,
         )
-        base_losses_hourly, _base_losses_kwh = calculate_losses(
+        base_losses_hourly, _ = calculate_losses(
             self.hass,
             self.config,
             hours=base_hours,
@@ -149,50 +149,24 @@ class MorningSellStrategy(BaseSellStrategy):
             calculator=calculate_sufficiency_window,
         )
 
-        effective_end_hour = base_end_hour
         if sufficiency.sufficiency_reached:
-            effective_end_hour = min(sufficiency.sufficiency_hour, base_end_hour)
+            required_kwh = sufficiency.required_sufficiency_kwh
+            pv_forecast_kwh = sufficiency.pv_sufficiency_kwh
+        else:
+            required_kwh = sufficiency.required_kwh
+            pv_forecast_kwh = base_pv_forecast_kwh
 
-        effective_window = build_hour_window(start_hour, effective_end_hour)
-        effective_hours = max(len(effective_window), 1)
-        usage_kwh = sum(hourly_usage[hour] for hour in effective_window)
-        heat_pump_kwh = sum(base_heat_pump_hourly.get(hour, 0.0) for hour in effective_window)
-        pv_forecast_kwh = sum(base_pv_forecast_hourly.get(hour, 0.0) for hour in effective_window)
-        losses_kwh = base_losses_hourly * effective_hours
+        heat_pump_kwh = base_heat_pump_kwh
+        losses_kwh = base_forecasts.losses_kwh
 
         if _LOGGER.isEnabledFor(logging.DEBUG):
-            effective_usage_hourly = {
-                hour: round(hourly_usage[hour], 3)
-                for hour in effective_window
-            }
-            effective_heat_pump_hourly_map = {
-                hour: round(base_heat_pump_hourly.get(hour, 0.0), 3)
-                for hour in effective_window
-            }
-            effective_pv_hourly_map = {
-                hour: round(base_pv_forecast_hourly.get(hour, 0.0), 3)
-                for hour in effective_window
-            }
             _LOGGER.debug(
-                "Morning sell sufficiency | reached=%s sufficiency_hour=%s effective_window=%02d:00-%02d:00 hours=%d",
+                "Morning sell sufficiency | reached=%s sufficiency_hour=%s required_kwh=%.3f pv_forecast_kwh=%.3f",
                 sufficiency.sufficiency_reached,
                 sufficiency.sufficiency_hour,
-                start_hour,
-                effective_end_hour,
-                effective_hours,
-            )
-            _LOGGER.debug(
-                "Morning sell effective totals | usage_kwh=%.3f heat_pump_kwh=%.3f pv_forecast_kwh=%.3f losses_kwh=%.3f",
-                usage_kwh,
-                heat_pump_kwh,
+                required_kwh,
                 pv_forecast_kwh,
-                losses_kwh,
             )
-            _LOGGER.debug("Morning sell usage hourly effective: %s", effective_usage_hourly)
-            _LOGGER.debug("Morning sell heat pump hourly effective: %s", effective_heat_pump_hourly_map)
-            _LOGGER.debug("Morning sell PV hourly effective: %s", effective_pv_hourly_map)
-
-        required_kwh = (usage_kwh + heat_pump_kwh + losses_kwh) * self.margin
         reserve_kwh = calculate_battery_reserve(
             self.current_soc,
             self.bc.min_soc,
@@ -206,13 +180,14 @@ class MorningSellStrategy(BaseSellStrategy):
             pv_forecast_kwh,
         )
         _LOGGER.debug(
-            "Morning sell calculation | required=(usage %.3f + hp %.3f + losses %.3f) * margin %.3f = %.3f kWh | "
+            "Morning sell calculation | required_kwh=%.3f (from sufficiency model) | "
+            "base_usage_kwh=%.3f base_heat_pump_kwh=%.3f losses_kwh=%.3f margin=%.3f | "
             "available=(reserve %.3f + pv %.3f)=%.3f kWh | surplus=%.3f kWh",
-            usage_kwh,
-            heat_pump_kwh,
+            required_kwh,
+            base_usage_kwh,
+            base_heat_pump_kwh,
             losses_kwh,
             self.margin,
-            required_kwh,
             reserve_kwh,
             pv_forecast_kwh,
             reserve_kwh + pv_forecast_kwh,
@@ -230,21 +205,16 @@ class MorningSellStrategy(BaseSellStrategy):
                 pv_forecast_kwh=pv_forecast_kwh,
                 sufficiency_hour=sufficiency.sufficiency_hour,
                 sufficiency_reached=sufficiency.sufficiency_reached,
-                key_metrics_extra={
-                    "morning_price": f"{self.price:.1f} PLN/MWh",
-                    "threshold_price": f"{self.threshold_price:.1f} PLN/MWh",
-                    "window": f"{start_hour:02d}:00-{effective_end_hour:02d}:00",
-                },
-                full_details_extra={
+                details_extra={
                     "morning_price": round(self.price, 2),
                     "threshold_price": round(self.threshold_price, 2),
                     "start_hour": start_hour,
-                    "end_hour": effective_end_hour,
+                    "end_hour": base_end_hour,
                 },
             )
 
         def _make_outcome(target_soc: float, surplus: float, export_w: float) -> DecisionOutcome:
-            return build_evening_sell_outcome(
+            outcome = build_evening_sell_outcome(
                 scenario=self.scenario_name,
                 action_type="sell",
                 price_metric_key="morning_price",
@@ -258,11 +228,14 @@ class MorningSellStrategy(BaseSellStrategy):
                 heat_pump_kwh=heat_pump_kwh,
                 losses_kwh=losses_kwh,
                 start_hour=start_hour,
-                end_hour=effective_end_hour,
+                end_hour=base_end_hour,
                 export_power_w=export_w,
                 evening_price=self.price,
                 threshold_price=self.threshold_price,
             )
+            outcome.details["sufficiency_hour"] = sufficiency.sufficiency_hour
+            outcome.details["sufficiency_reached"] = sufficiency.sufficiency_reached
+            return outcome
 
         def _make_no_action(current_surplus_kwh: float) -> DecisionOutcome:
             return build_no_action_outcome(
@@ -275,18 +248,12 @@ class MorningSellStrategy(BaseSellStrategy):
                 pv_forecast_kwh=pv_forecast_kwh,
                 sufficiency_hour=sufficiency.sufficiency_hour,
                 sufficiency_reached=sufficiency.sufficiency_reached,
-                key_metrics_extra={
-                    "morning_price": f"{self.price:.1f} PLN/MWh",
-                    "threshold_price": f"{self.threshold_price:.1f} PLN/MWh",
-                    "surplus": f"{current_surplus_kwh:.1f} kWh",
-                    "window": f"{start_hour:02d}:00-{effective_end_hour:02d}:00",
-                },
-                full_details_extra={
+                details_extra={
                     "morning_price": round(self.price, 2),
                     "threshold_price": round(self.threshold_price, 2),
                     "surplus_kwh": round(current_surplus_kwh, 2),
                     "start_hour": start_hour,
-                    "end_hour": effective_end_hour,
+                    "end_hour": base_end_hour,
                 },
             )
 

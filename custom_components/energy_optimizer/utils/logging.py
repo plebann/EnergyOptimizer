@@ -25,12 +25,10 @@ class DecisionOutcome:
     # Concise summary (for logs + notifications)
     summary: str  # e.g., "Set Program 2 SOC to 75%"
 
-    # Structured details (for history sensor)
-    key_metrics: dict[str, str]  # Pre-formatted strings, 3-5 items
     reason: str | None = None  # Optional explanation
 
-    # Complete data (for last optimization sensor + events)
-    full_details: dict[str, Any] = field(default_factory=dict)
+    # Unified data payload (for history sensor + last optimization + events)
+    details: dict[str, Any] = field(default_factory=dict)
 
     # Entity changes (for custom events)
     entities_changed: list[dict[str, Any]] = field(default_factory=list)
@@ -119,10 +117,10 @@ async def log_decision_unified(
 
     opt_sensor, hist_sensor = get_logging_sensors(hass, entry.entry_id)
     if opt_sensor:
-        opt_sensor.log_optimization(outcome.scenario, outcome.full_details)
+        opt_sensor.log_optimization(outcome.scenario, outcome.details)
 
     if hist_sensor:
-        history_entry = {**outcome.key_metrics}
+        history_entry = {**outcome.details}
         if outcome.reason:
             history_entry["reason"] = outcome.reason
         hist_sensor.add_entry(outcome.scenario, history_entry)
@@ -133,7 +131,7 @@ async def log_decision_unified(
             "description": outcome.summary,
             "scenario": outcome.scenario,
             "entry_id": entry.entry_id,
-            **outcome.full_details,
+            **outcome.details,
         }
         if outcome.entities_changed:
             event_data["entities_changed"] = outcome.entities_changed

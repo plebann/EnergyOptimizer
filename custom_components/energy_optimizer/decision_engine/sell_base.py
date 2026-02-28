@@ -252,7 +252,7 @@ class BaseSellStrategy(ABC):
             )
 
         outcome = request.build_outcome_fn(target_soc, surplus_kwh, export_power_w)
-        outcome.full_details["test_sell_mode"] = sell_test_mode
+        outcome.details["test_sell_mode"] = sell_test_mode
 
         if not sell_test_mode:
             outcome.entities_changed = [

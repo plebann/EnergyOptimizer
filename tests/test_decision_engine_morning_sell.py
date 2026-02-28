@@ -272,6 +272,7 @@ async def test_morning_sell_caps_window_by_sufficiency(monkeypatch: pytest.Monke
 
     assert outcomes
     assert outcomes[-1].action_type == "sell"
-    assert outcomes[-1].full_details["end_hour"] == 10
+    assert outcomes[-1].details["end_hour"] == 13
+    assert outcomes[-1].details["sufficiency_hour"] == 10
 
 

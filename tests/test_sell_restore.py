@@ -104,7 +104,7 @@ async def test_execute_sell_saves_restore_data(monkeypatch: pytest.MonkeyPatch) 
     _FakeStore.load_data = None
     _FakeStore.removed = False
 
-    outcome = SimpleNamespace(full_details={}, entities_changed=[])
+    outcome = SimpleNamespace(details={}, entities_changed=[])
     strategy = _TestSellStrategy(hass, entry_id="entry-1", margin=1.0)
     strategy.entry = entry
     strategy.config = {

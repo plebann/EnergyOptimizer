@@ -35,7 +35,7 @@ from ..const import (
 )
 from ..helpers import get_required_float_state
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
-from ..utils.logging import DecisionOutcome, format_sufficiency_hour, log_decision_unified
+from ..utils.logging import DecisionOutcome, log_decision_unified
 from ..utils.time_window import build_hour_window
 
 if TYPE_CHECKING:
@@ -259,18 +259,11 @@ def build_no_action_outcome(
     pv_forecast_kwh: float,
     sufficiency_hour: int | None = None,
     sufficiency_reached: bool | None = None,
-    key_metrics_extra: dict[str, str] | None = None,
-    full_details_extra: dict[str, Any] | None = None,
+    details_extra: dict[str, Any] | None = None,
 ) -> DecisionOutcome:
     """Build a shared no-action decision outcome payload."""
-    key_metrics: dict[str, str] = {
+    details: dict[str, Any] = {
         "result": summary,
-        "current_soc": f"{current_soc:.0f}%",
-        "reserve": f"{reserve_kwh:.1f} kWh",
-        "required": f"{required_kwh:.1f} kWh",
-        "pv": f"{pv_forecast_kwh:.1f} kWh",
-    }
-    full_details: dict[str, Any] = {
         "current_soc": round(current_soc, 1),
         "reserve_kwh": round(reserve_kwh, 2),
         "required_kwh": round(required_kwh, 2),
@@ -278,25 +271,18 @@ def build_no_action_outcome(
     }
 
     if sufficiency_hour is not None and sufficiency_reached is not None:
-        key_metrics["sufficiency_hour"] = format_sufficiency_hour(
-            sufficiency_hour,
-            sufficiency_reached=sufficiency_reached,
-        )
-        full_details["sufficiency_hour"] = sufficiency_hour
-        full_details["sufficiency_reached"] = sufficiency_reached
+        details["sufficiency_hour"] = sufficiency_hour
+        details["sufficiency_reached"] = sufficiency_reached
 
-    if key_metrics_extra:
-        key_metrics.update(key_metrics_extra)
-    if full_details_extra:
-        full_details.update(full_details_extra)
+    if details_extra:
+        details.update(details_extra)
 
     return DecisionOutcome(
         scenario=scenario,
         action_type="no_action",
         summary=summary,
         reason=reason,
-        key_metrics=key_metrics,
-        full_details=full_details,
+        details=details,
     )
 
 
@@ -454,8 +440,7 @@ def build_charge_outcome_base(
     efficiency: float,
     pv_compensation_factor: float | None,
     arbitrage_kwh: float | None = None,
-    key_metrics_extra: dict[str, str] | None = None,
-    full_details_extra: dict[str, float | str | int | bool | None] | None = None,
+    details_extra: dict[str, float | str | int | bool | None] | None = None,
 ) -> DecisionOutcome:
     """Build the shared charge decision outcome payload."""
     summary = f"Battery scheduled to charge to {action.target_soc:.0f}%"
@@ -472,56 +457,41 @@ def build_charge_outcome_base(
             f"arbitrage {arbitrage_kwh:.1f} kWh, current {action.charge_current:.0f} A"
         )
 
-    key_metrics = {
+    details = {
         "result": summary,
-        "target": f"{action.target_soc:.0f}%",
-        "required": f"{balance.required_kwh:.1f} kWh",
-        "needed_reserve": f"{balance.needed_reserve_kwh:.1f} kWh",
-        "reserve": f"{balance.reserve_kwh:.1f} kWh",
-        "to_charge": f"{action.gap_to_charge_kwh:.1f} kWh",
-        "pv": f"{forecasts.pv_forecast_kwh:.1f} kWh",
-        "heat_pump": f"{forecasts.heat_pump_kwh:.1f} kWh",
-        "charge_current": f"{action.charge_current:.0f} A",
-        "window": f"{forecasts.start_hour:02d}:00-{forecasts.end_hour:02d}:00",
-    }
-    if arbitrage_kwh is not None:
-        key_metrics["arbitrage"] = f"{arbitrage_kwh:.1f} kWh"
-    if key_metrics_extra:
-        key_metrics.update(key_metrics_extra)
-
-    full_details = {
         "target_soc": round(action.target_soc, 1),
         "current_soc": round(current_soc, 1),
-        "needed_reserve": round(balance.needed_reserve_kwh, 2),
-        "reserve": round(balance.reserve_kwh, 2),
-        "required": round(balance.required_kwh, 2),
-        "to_charge": round(action.gap_to_charge_kwh, 2),
-        "gap": round(balance.gap_kwh, 2),
-        "losses": round(forecasts.losses_kwh, 2),
-        "pv_forecast": round(forecasts.pv_forecast_kwh, 2),
+        "needed_reserve_kwh": round(balance.needed_reserve_kwh, 2),
+        "reserve_kwh": round(balance.reserve_kwh, 2),
+        "required_kwh": round(balance.required_kwh, 2),
+        "to_charge_kwh": round(action.gap_to_charge_kwh, 2),
+        "gap_kwh": round(balance.gap_kwh, 2),
+        "losses_kwh": round(forecasts.losses_kwh, 2),
+        "pv_forecast_kwh": round(forecasts.pv_forecast_kwh, 2),
         "pv_compensation_factor": (
             round(pv_compensation_factor, 4)
             if pv_compensation_factor is not None
             else None
         ),
-        "heat_pump": round(forecasts.heat_pump_kwh, 2),
-        "charge_current": round(action.charge_current, 1),
+        "heat_pump_kwh": round(forecasts.heat_pump_kwh, 2),
+        "charge_current_a": round(action.charge_current, 1),
         "efficiency": round(efficiency, 1),
         "margin": forecasts.margin,
+        "usage_kwh": round(forecasts.usage_kwh, 2),
+        "window_start_hour": forecasts.start_hour,
+        "window_end_hour": forecasts.end_hour,
     }
-    full_details["usage"] = round(forecasts.usage_kwh, 2)
     if arbitrage_kwh is not None:
-        full_details["arbitrage"] = round(arbitrage_kwh, 2)
-    if full_details_extra:
-        full_details.update(full_details_extra)
+        details["arbitrage_kwh"] = round(arbitrage_kwh, 2)
+    if details_extra:
+        details.update(details_extra)
 
     return DecisionOutcome(
         scenario=scenario,
         action_type="charge_scheduled",
         summary=summary,
         reason=reason,
-        key_metrics=key_metrics,
-        full_details=full_details,
+        details=details,
     )
 
 
@@ -539,23 +509,12 @@ def build_morning_charge_outcome(
     pv_compensation_factor: float | None,
 ) -> DecisionOutcome:
     """Build a morning charge decision outcome."""
-    key_metrics_extra = {
-        "gap": f"{balance.gap_kwh:.1f} kWh",
-        "needed_reserve_sufficiency": f"{needed_reserve_sufficiency_kwh:.1f} kWh",
-        "required_sufficiency": f"{sufficiency.required_sufficiency_kwh:.1f} kWh",
-        "pv_sufficiency": f"{sufficiency.pv_sufficiency_kwh:.1f} kWh",
-        "gap_sufficiency": f"{gap_sufficiency_kwh:.1f} kWh",
-        "sufficiency_hour": format_sufficiency_hour(
-            sufficiency.sufficiency_hour,
-            sufficiency_reached=sufficiency.sufficiency_reached,
-        ),
-    }
-    full_details_extra = {
-        "required_sufficiency": round(sufficiency.required_sufficiency_kwh, 2),
-        "pv_sufficiency": round(sufficiency.pv_sufficiency_kwh, 2),
-        "needed_reserve_sufficiency": round(needed_reserve_sufficiency_kwh, 2),
-        "gap_full": round(balance.gap_kwh, 2),
-        "gap_sufficiency": round(gap_sufficiency_kwh, 2),
+    details_extra = {
+        "required_sufficiency_kwh": round(sufficiency.required_sufficiency_kwh, 2),
+        "pv_sufficiency_kwh": round(sufficiency.pv_sufficiency_kwh, 2),
+        "needed_reserve_sufficiency_kwh": round(needed_reserve_sufficiency_kwh, 2),
+        "gap_full_kwh": round(balance.gap_kwh, 2),
+        "gap_sufficiency_kwh": round(gap_sufficiency_kwh, 2),
         "sufficiency_hour": sufficiency.sufficiency_hour,
         "sufficiency_reached": sufficiency.sufficiency_reached,
     }
@@ -568,8 +527,7 @@ def build_morning_charge_outcome(
         current_soc=current_soc,
         efficiency=efficiency,
         pv_compensation_factor=pv_compensation_factor,
-        key_metrics_extra=key_metrics_extra,
-        full_details_extra=full_details_extra,
+        details_extra=details_extra,
     )
 
 
@@ -586,9 +544,9 @@ def build_afternoon_charge_outcome(
     pv_compensation_factor: float | None,
 ) -> DecisionOutcome:
     """Build an afternoon charge decision outcome."""
-    full_details_extra = {
-        "start_hour": forecasts.start_hour,
-        "end_hour": forecasts.end_hour,
+    details_extra = {
+        "window_start_hour": forecasts.start_hour,
+        "window_end_hour": forecasts.end_hour,
         **(arbitrage_details or {}),
     }
     return build_charge_outcome_base(
@@ -600,7 +558,7 @@ def build_afternoon_charge_outcome(
         efficiency=efficiency,
         pv_compensation_factor=pv_compensation_factor,
         arbitrage_kwh=arbitrage_kwh,
-        full_details_extra=full_details_extra,
+        details_extra=details_extra,
     )
 
 
@@ -634,17 +592,8 @@ def build_evening_sell_outcome(
             f"Surplus {surplus_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
             f"required {required_kwh:.1f} kWh, PV {pv_forecast_kwh:.1f} kWh"
         ),
-        key_metrics={
+        details={
             "result": summary,
-            "current_soc": f"{current_soc:.0f}%",
-            "target_soc": f"{target_soc:.0f}%",
-            "surplus": f"{surplus_kwh:.1f} kWh",
-            "export_power": f"{export_power_w:.0f} W",
-            price_metric_key: f"{evening_price:.1f} PLN/MWh",
-            threshold_metric_key: f"{threshold_price:.1f} PLN/MWh",
-            "window": f"{start_hour:02d}:00-{end_hour:02d}:00",
-        },
-        full_details={
             "current_soc": round(current_soc, 1),
             "target_soc": round(target_soc, 1),
             "surplus_kwh": round(surplus_kwh, 2),
@@ -695,20 +644,8 @@ def build_surplus_sell_outcome(
             f"Surplus {surplus_kwh:.1f} kWh, reserve {reserve_kwh:.1f} kWh, "
             f"today net {today_net_kwh:.1f} kWh, tomorrow net {tomorrow_net_kwh:.1f} kWh"
         ),
-        key_metrics={
+        details={
             "result": summary,
-            "current_soc": f"{current_soc:.0f}%",
-            "target_soc": f"{target_soc:.0f}%",
-            "surplus": f"{surplus_kwh:.1f} kWh",
-            "sufficiency_hour": format_sufficiency_hour(
-                sufficiency_hour,
-                sufficiency_reached=sufficiency_reached,
-            ),
-            "export_power": f"{export_power_w:.0f} W",
-            price_metric_key: f"{evening_price:.1f} PLN/MWh",
-            threshold_metric_key: f"{threshold_price:.1f} PLN/MWh",
-        },
-        full_details={
             "current_soc": round(current_soc, 1),
             "target_soc": round(target_soc, 1),
             "surplus_kwh": round(surplus_kwh, 2),

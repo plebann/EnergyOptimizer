@@ -85,11 +85,7 @@ class EveningSellStrategy(BaseSellStrategy):
             reserve_kwh=0.0,
             required_kwh=0.0,
             pv_forecast_kwh=0.0,
-            key_metrics_extra={
-                "evening_price": f"{self.price:.1f} PLN/MWh",
-                "tomorrow_morning_price": f"{tomorrow_morning_price:.1f} PLN/MWh",
-            },
-            full_details_extra={
+            details_extra={
                 "evening_price": round(self.price, 2),
                 "tomorrow_morning_price": round(tomorrow_morning_price, 2),
             },
@@ -124,7 +120,7 @@ class EveningSellStrategy(BaseSellStrategy):
             self.config,
             start_hour=start_hour,
             end_hour=end_hour,
-            apply_efficiency=False,
+            apply_efficiency=True,
             compensate=True,
             entry_id=self.entry.entry_id,
         )
@@ -192,11 +188,7 @@ class EveningSellStrategy(BaseSellStrategy):
                 reserve_kwh=reserve_kwh,
                 required_kwh=required_kwh,
                 pv_forecast_kwh=pv_forecast_kwh,
-                key_metrics_extra={
-                    "evening_price": f"{self.price:.1f} PLN/MWh",
-                    "threshold_price": f"{self.threshold_price:.1f} PLN/MWh",
-                },
-                full_details_extra={
+                details_extra={
                     "evening_price": round(self.price, 2),
                     "threshold_price": round(self.threshold_price, 2),
                 },
@@ -228,11 +220,7 @@ class EveningSellStrategy(BaseSellStrategy):
                 reserve_kwh=reserve_kwh,
                 required_kwh=required_kwh,
                 pv_forecast_kwh=pv_forecast_kwh,
-                key_metrics_extra={
-                    "evening_price": f"{self.price:.1f} PLN/MWh",
-                    "threshold_price": f"{self.threshold_price:.1f} PLN/MWh",
-                },
-                full_details_extra={
+                details_extra={
                     "evening_price": round(self.price, 2),
                     "threshold_price": round(self.threshold_price, 2),
                 },
@@ -443,13 +431,7 @@ class EveningSellStrategy(BaseSellStrategy):
                 pv_forecast_kwh=pv_forecast_kwh,
                 sufficiency_hour=tomorrow_sufficiency.sufficiency_hour,
                 sufficiency_reached=tomorrow_sufficiency.sufficiency_reached,
-                key_metrics_extra={
-                    "evening_price": f"{self.price:.1f} PLN/MWh",
-                    "threshold_price": f"{self.threshold_price:.1f} PLN/MWh",
-                    "surplus": f"{surplus_kwh:.1f} kWh",
-                    "total_needed": f"{total_needed_kwh:.1f} kWh",
-                },
-                full_details_extra={
+                details_extra={
                     "evening_price": round(self.price, 2),
                     "threshold_price": round(self.threshold_price, 2),
                     "surplus_kwh": round(surplus_kwh, 2),
@@ -488,13 +470,7 @@ class EveningSellStrategy(BaseSellStrategy):
                 pv_forecast_kwh=pv_forecast_kwh,
                 sufficiency_hour=tomorrow_sufficiency.sufficiency_hour,
                 sufficiency_reached=tomorrow_sufficiency.sufficiency_reached,
-                key_metrics_extra={
-                    "evening_price": f"{self.price:.1f} PLN/MWh",
-                    "threshold_price": f"{self.threshold_price:.1f} PLN/MWh",
-                    "surplus": f"{current_surplus_kwh:.1f} kWh",
-                    "total_needed": f"{total_needed_kwh:.1f} kWh",
-                },
-                full_details_extra={
+                details_extra={
                     "evening_price": round(self.price, 2),
                     "threshold_price": round(self.threshold_price, 2),
                     "surplus_kwh": round(current_surplus_kwh, 2),

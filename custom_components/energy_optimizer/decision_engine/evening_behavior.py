@@ -8,10 +8,6 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import Context
 from homeassistant.util import dt as dt_util
 
-from custom_components.energy_optimizer.utils.pv_forecast import (
-    _get_sensor_compensation_factor,
-)
-
 from ..calculations.battery import calculate_battery_reserve, calculate_battery_space
 from ..calculations.energy import (
     calculate_losses,
@@ -26,14 +22,12 @@ from ..const import (
     CONF_PROG1_SOC_ENTITY,
     CONF_PROG2_SOC_ENTITY,
     CONF_PROG6_SOC_ENTITY,
-    CONF_PV_EFFICIENCY,
     CONF_PV_FORECAST_TODAY,
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PRODUCTION_SENSOR,
     DEFAULT_BALANCING_INTERVAL_DAYS,
     DEFAULT_BALANCING_PV_THRESHOLD,
     DEFAULT_MAX_CHARGE_CURRENT,
-    DEFAULT_PV_EFFICIENCY,
 )
 from ..controllers.inverter import set_max_charge_current, set_program_soc
 from ..decision_engine.common import (
@@ -225,19 +219,12 @@ async def _handle_balancing(
         action_type="balancing_enabled",
         summary=summary,
         reason=f"Balancing treshold exceeded ({days_since_balancing} days)",
-        key_metrics={
+        details={
             "result": summary,
-            "pv_forecast_with_efficiency": f"{pv_with_efficiency:.1f} kWh",
-            "target": "100%",
-            "days_since": (
-                f"{days_since_balancing} days" if days_since_balancing else "first time"
-            ),
-        },
-        full_details={
-            "pv_forecast_with_efficiency_kwh": round(pv_with_efficiency, 2),
+            "pv_with_efficiency_kwh": round(pv_with_efficiency, 2),
             "threshold_kwh": balancing_pv_threshold,
             "target_soc": max_soc,
-            "days_since_last": days_since_balancing,
+            "days_since_last_balancing": days_since_balancing,
             **pv_compensation_details,
         },
         entities_changed=[
@@ -322,18 +309,8 @@ async def _handle_preservation(
             f"SOC locked at {current_soc:.0f}%, PV: {pv_with_efficiency:.1f}, "
             f"battery space: {battery_space:.1f}, reason: {reason_detail}"
         ),
-        key_metrics={
+        details={
             "result": summary,
-            "pv_forecast": f"{pv_forecast:.1f} kWh",
-            "battery_space": f"{battery_space:.1f} kWh",
-            "reserve": f"{reserve_kwh:.1f} kWh",
-            "required_to_sufficiency": f"{needed_reserve_sufficiency_kwh:.1f} kWh",
-            "sufficiency_hour": format_sufficiency_hour(
-                sufficiency_hour, sufficiency_reached=sufficiency_reached
-            ),
-            "target": f"{current_soc:.0f}%",
-        },
-        full_details={
             "pv_forecast_kwh": round(pv_forecast, 2),
             "pv_forecast_window_kwh": round(pv_forecast_window_kwh, 2),
             "pv_with_efficiency_kwh": round(pv_with_efficiency, 2),
@@ -434,20 +411,9 @@ async def _handle_normal_restoration(
         action_type="normal_restored",
         summary=summary,
         reason=f"PV within normal range, SOC minimum {min_soc:.0f}%",
-        key_metrics={
+        details={
             "result": summary,
             "previous": f"{current_prog6_soc:.0f}%",
-            "target": f"{min_soc:.0f}%",
-            "pv_forecast": f"{pv_forecast:.1f} kWh",
-            "battery_space": f"{battery_space:.1f} kWh",
-            "pv_with_efficiency": f"{pv_with_efficiency:.1f} kWh",
-            "reserve": f"{reserve_kwh:.1f} kWh",
-            "required_to_sufficiency": f"{needed_reserve_sufficiency_kwh:.1f} kWh",
-            "sufficiency_hour": format_sufficiency_hour(
-                sufficiency_hour, sufficiency_reached=sufficiency_reached
-            ),
-        },
-        full_details={
             "previous_soc": round(current_prog6_soc, 1),
             "target_soc": min_soc,
             "pv_forecast_kwh": round(pv_forecast, 2),
@@ -514,11 +480,15 @@ def _collect_balancing_data(
         elif pv_error == "invalid":
             _LOGGER.warning("Could not parse PV forecast: %s", pv_raw)
 
-    pv_efficiency = config.get(CONF_PV_EFFICIENCY, DEFAULT_PV_EFFICIENCY)
-    pv_factor_sensor = _get_sensor_compensation_factor(hass, entry_id)
-    if pv_factor_sensor is None:
-        pv_factor_sensor = 1.0
-    pv_with_efficiency = pv_forecast * pv_efficiency * pv_factor_sensor
+    pv_with_efficiency, _ = get_pv_forecast_window(
+        hass,
+        config,
+        start_hour=0,
+        end_hour=24,
+        apply_efficiency=True,
+        compensate=True,
+        entry_id=entry_id,
+    )
     _LOGGER.debug(
         "Balancing check: due=%s, pv_forecast_with_efficiency=%.2f kWh, threshold=%.2f kWh",
         balancing_due,
@@ -567,6 +537,7 @@ async def _calculate_preservation_context(
         config,
         start_hour=start_hour,
         end_hour=tariff_end_hour,
+        apply_efficiency=True,
         compensate=True,
         entry_id=entry_id,
     )
@@ -725,8 +696,8 @@ async def _run_non_balancing_flow(
         action_type="no_action",
         summary="No action",
         reason="Battery state within acceptable parameters",
-        key_metrics={"result": "No action"},
-        full_details={
+        details={
+            "result": "No action",
             "pv_forecast_kwh": round(balancing_data.pv_forecast, 2),
             "battery_space_kwh": round(preservation.battery_space, 2),
             "target_soc": round(current_soc, 1) if current_soc else 0,

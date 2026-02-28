@@ -139,14 +139,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
             pv_forecast_kwh=self.forecasts.pv_forecast_kwh,
             sufficiency_hour=self._sufficiency.sufficiency_hour,
             sufficiency_reached=self._sufficiency.sufficiency_reached,
-            key_metrics_extra={
-                "needed_reserve": f"{balance.needed_reserve_kwh:.1f} kWh",
-                "needed_reserve_sufficiency": f"{self._needed_reserve_sufficiency_kwh:.1f} kWh",
-                "required_sufficiency": f"{self._sufficiency.required_sufficiency_kwh:.1f} kWh",
-                "pv_sufficiency": f"{self._sufficiency.pv_sufficiency_kwh:.1f} kWh",
-                "heat_pump": f"{self.forecasts.heat_pump_kwh:.1f} kWh",
-            },
-            full_details_extra={
+            details_extra={
                 "needed_reserve_kwh": round(balance.needed_reserve_kwh, 2),
                 "needed_reserve_sufficiency_kwh": round(
                     self._needed_reserve_sufficiency_kwh,
@@ -179,7 +172,6 @@ class MorningChargeStrategy(BaseChargeStrategy):
             outcome=outcome,
         )
 
-
 async def async_run_morning_charge(
     hass: HomeAssistant,
     *,
@@ -189,7 +181,6 @@ async def async_run_morning_charge(
     """Run morning grid charge routine."""
     strategy = MorningChargeStrategy(hass, entry_id=entry_id, margin=margin)
     await strategy.run()
-
 
 def _calculate_morning_balance(
     bc,
@@ -235,7 +226,6 @@ def _calculate_morning_balance(
         gap_kwh,
     )
 
-
 def _build_balancing_ongoing_outcome() -> DecisionOutcome:
     """Build outcome for balancing ongoing skip."""
     summary = "Battery balancing ongoing"
@@ -244,16 +234,9 @@ def _build_balancing_ongoing_outcome() -> DecisionOutcome:
         action_type="no_action",
         summary=summary,
         reason="Battery balancing in progress",
-        key_metrics={
+        details={
             "result": summary,
             "balancing": "ongoing",
-        },
-        full_details={
             "balancing_ongoing": True,
         },
     )
-
-
-
-
-
