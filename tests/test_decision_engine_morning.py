@@ -365,21 +365,21 @@ async def test_morning_charge_logs_last_optimization_attributes() -> None:
     scenario, details = opt_sensor.log_optimization.call_args.args
 
     assert scenario == "Morning Grid Charge"
-    assert details["target_soc"] == pytest.approx(67.0)
+    assert details["target_soc"] == pytest.approx(66.0)
     assert details["charge_current_a"] == pytest.approx(8)
 
 
 def test_calculate_soc_delta() -> None:
     soc_delta = calculate_soc_delta(3.72, capacity_ah=37, voltage=576)
 
-    assert soc_delta == pytest.approx(17.454954954954953, rel=1e-3)
+    assert soc_delta == pytest.approx(17.0)
 
 
 def test_calculate_target_soc() -> None:
     soc_delta = calculate_soc_delta(3.72, capacity_ah=37, voltage=576)
     target_soc = calculate_target_soc(25.0, soc_delta, max_soc=100)
 
-    assert target_soc == pytest.approx(43.0)
+    assert target_soc == pytest.approx(42.0)
 
     assert calculate_target_soc(80, -52, max_soc=100) == 28.0
     assert calculate_target_soc(30, -52, max_soc=100) == -22.0

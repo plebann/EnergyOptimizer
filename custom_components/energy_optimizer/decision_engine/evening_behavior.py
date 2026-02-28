@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import Context
 from homeassistant.util import dt as dt_util
 
-from ..calculations.battery import calculate_battery_reserve, calculate_battery_space
+from ..calculations.battery import (
+    calculate_battery_reserve,
+    calculate_battery_space,
+    calculate_target_soc_from_reserve,
+)
 from ..calculations.energy import (
     calculate_losses,
     calculate_needed_reserve_sufficiency,
@@ -74,6 +78,10 @@ class PreservationContext:
     grid_assist_on: bool
     battery_space: float
     pv_forecast_window_kwh: float
+    heat_pump_window_kwh: float
+    heat_pump_to_sufficiency_kwh: float
+    morning_target_soc: float
+    morning_needed_reserve_kwh: float
 
 
 def _coerce_float(value: object | None) -> float | None:
@@ -253,7 +261,11 @@ async def _handle_preservation(
     prog1_soc: str | None,
     prog6_soc: str | None,
     current_soc: float,
+    morning_target_soc: float,
+    morning_needed_reserve_kwh: float,
     pv_forecast: float,
+    heat_pump_window_kwh: float,
+    heat_pump_to_sufficiency_kwh: float,
     reserve_kwh: float,
     required_kwh: float,
     required_sufficiency_kwh: float,
@@ -286,7 +298,7 @@ async def _handle_preservation(
     await set_program_soc(
         hass,
         prog1_soc,
-        current_soc,
+        morning_target_soc,
         entry=entry,
         logger=_LOGGER,
         context=integration_context,
@@ -294,7 +306,7 @@ async def _handle_preservation(
     await set_program_soc(
         hass,
         prog6_soc,
-        current_soc,
+        morning_target_soc,
         entry=entry,
         logger=_LOGGER,
         context=integration_context,
@@ -306,13 +318,15 @@ async def _handle_preservation(
         action_type="preservation_enabled",
         summary=summary,
         reason=(
-            f"SOC locked at {current_soc:.0f}%, PV: {pv_with_efficiency:.1f}, "
+            f"SOC target {morning_target_soc:.0f}%, PV: {pv_with_efficiency:.1f}, "
             f"battery space: {battery_space:.1f}, reason: {reason_detail}"
         ),
         details={
             "result": summary,
             "pv_forecast_kwh": round(pv_forecast, 2),
             "pv_forecast_window_kwh": round(pv_forecast_window_kwh, 2),
+            "heat_pump_window_kwh": round(heat_pump_window_kwh, 2),
+            "heat_pump_to_sufficiency_kwh": round(heat_pump_to_sufficiency_kwh, 2),
             "pv_with_efficiency_kwh": round(pv_with_efficiency, 2),
             "battery_space_kwh": round(battery_space, 2),
             "reserve_kwh": round(reserve_kwh, 2),
@@ -325,12 +339,14 @@ async def _handle_preservation(
             "reserve_insufficient": reserve_insufficient,
             "afternoon_grid_assist": grid_assist_on,
             "current_soc": round(current_soc, 1),
-            "target_soc": round(current_soc, 1),
+            "target_soc": round(morning_target_soc, 1),
+            "morning_target_soc": round(morning_target_soc, 1),
+            "morning_needed_reserve_kwh": round(morning_needed_reserve_kwh, 2),
             **pv_compensation_details,
         },
         entities_changed=[
-            {"entity_id": prog1_soc, "value": current_soc},
-            {"entity_id": prog6_soc, "value": current_soc},
+            {"entity_id": prog1_soc, "value": morning_target_soc},
+            {"entity_id": prog6_soc, "value": morning_target_soc},
         ],
     )
     await log_decision_unified(
@@ -350,6 +366,8 @@ async def _handle_normal_restoration(
     prog6_soc: str | None,
     min_soc: float,
     pv_forecast: float,
+    heat_pump_window_kwh: float,
+    heat_pump_to_sufficiency_kwh: float,
     battery_space: float,
     pv_with_efficiency: float,
     reserve_kwh: float,
@@ -417,6 +435,8 @@ async def _handle_normal_restoration(
             "previous_soc": round(current_prog6_soc, 1),
             "target_soc": min_soc,
             "pv_forecast_kwh": round(pv_forecast, 2),
+            "heat_pump_window_kwh": round(heat_pump_window_kwh, 2),
+            "heat_pump_to_sufficiency_kwh": round(heat_pump_to_sufficiency_kwh, 2),
             "reserve_kwh": round(reserve_kwh, 2),
             "required_kwh": round(required_kwh, 2),
             "required_to_sufficiency_kwh": round(required_sufficiency_kwh, 2),
@@ -529,7 +549,7 @@ async def _calculate_preservation_context(
     tariff_end_hour = resolve_tariff_end_hour(hass, config)
     hours = max(len(build_hour_window(start_hour, tariff_end_hour)), 1)
 
-    _, heat_pump_hourly = await get_heat_pump_forecast_window(
+    heat_pump_window_kwh, heat_pump_hourly = await get_heat_pump_forecast_window(
         hass, config, start_hour=start_hour, end_hour=tariff_end_hour
     )
     pv_forecast_window_kwh, pv_forecast_hourly = get_pv_forecast_window(
@@ -561,7 +581,49 @@ async def _calculate_preservation_context(
         required_sufficiency_kwh,
         pv_sufficiency_kwh,
     )
+    heat_pump_to_sufficiency_kwh = 0.0
+    for hour in build_hour_window(start_hour, tariff_end_hour):
+        if sufficiency_reached and hour == sufficiency_hour:
+            break
+        heat_pump_to_sufficiency_kwh += heat_pump_hourly.get(hour, 0.0)
+
     reserve_insufficient = reserve_kwh < needed_reserve_sufficiency_kwh
+
+    MORNING_START_HOUR = 6
+    morning_end_hour = sufficiency_hour if sufficiency_reached else tariff_end_hour
+    if morning_end_hour > MORNING_START_HOUR:
+        (
+            _morning_required_kwh,
+            morning_req_suff_kwh,
+            morning_pv_suff_kwh,
+            _morning_suff_hour,
+            _morning_suff_reached,
+        ) = calculate_sufficiency_window(
+            start_hour=MORNING_START_HOUR,
+            end_hour=morning_end_hour,
+            hourly_usage=hourly_usage,
+            heat_pump_hourly=heat_pump_hourly,
+            losses_hourly=losses_hourly,
+            margin=margin,
+            pv_forecast_hourly=pv_forecast_hourly,
+        )
+        morning_needed_reserve_kwh = calculate_needed_reserve_sufficiency(
+            morning_req_suff_kwh,
+            morning_pv_suff_kwh,
+        )
+        unclamped_morning_target_soc = calculate_target_soc_from_reserve(
+            needed_reserve_kwh=morning_needed_reserve_kwh,
+            min_soc=battery_config.min_soc,
+            max_soc=battery_config.max_soc,
+            capacity_ah=battery_config.capacity_ah,
+            voltage=battery_config.voltage,
+        )
+    else:
+        morning_needed_reserve_kwh = 0.0
+        unclamped_morning_target_soc = battery_config.min_soc
+
+    morning_target_soc = min(unclamped_morning_target_soc, current_soc)
+
     grid_assist_on = bool(afternoon_grid_assist_sensor and afternoon_grid_assist_sensor.is_on)
     battery_space = calculate_battery_space(
         current_soc,
@@ -577,15 +639,31 @@ async def _calculate_preservation_context(
     )
     _LOGGER.debug(
         "Reserve until sufficiency: reserve=%.2f kWh, needed_reserve=%.2f kWh, "
-        "pv_to_sufficiency=%.2f kWh, sufficiency=%s, grid_assist=%s",
+        "pv_to_sufficiency=%.2f kWh, heat_pump_to_sufficiency=%.2f kWh, "
+        "sufficiency=%s, grid_assist=%s",
         reserve_kwh,
         needed_reserve_sufficiency_kwh,
         pv_sufficiency_kwh,
+        heat_pump_to_sufficiency_kwh,
         format_sufficiency_hour(
             sufficiency_hour,
             sufficiency_reached=sufficiency_reached,
         ),
         grid_assist_on,
+    )
+    _LOGGER.debug(
+        "Heat pump forecast in preservation window: %.2f kWh",
+        heat_pump_window_kwh,
+    )
+    _LOGGER.debug(
+        "Morning reserve target: morning_window=%02d:00-%02d:00, "
+        "morning_needed_reserve=%.2f kWh, morning_target_soc=%.1f%% "
+        "(clamped from %.1f%%)",
+        MORNING_START_HOUR,
+        morning_end_hour,
+        morning_needed_reserve_kwh,
+        morning_target_soc,
+        unclamped_morning_target_soc,
     )
 
     return PreservationContext(
@@ -600,6 +678,10 @@ async def _calculate_preservation_context(
         grid_assist_on=grid_assist_on,
         battery_space=battery_space,
         pv_forecast_window_kwh=pv_forecast_window_kwh,
+        heat_pump_window_kwh=heat_pump_window_kwh,
+        heat_pump_to_sufficiency_kwh=heat_pump_to_sufficiency_kwh,
+        morning_target_soc=morning_target_soc,
+        morning_needed_reserve_kwh=morning_needed_reserve_kwh,
     )
 
 
@@ -655,7 +737,11 @@ async def _run_non_balancing_flow(
         prog1_soc=prog1_soc,
         prog6_soc=prog6_soc,
         current_soc=current_soc,
+        morning_target_soc=preservation.morning_target_soc,
+        morning_needed_reserve_kwh=preservation.morning_needed_reserve_kwh,
         pv_forecast=balancing_data.pv_forecast,
+        heat_pump_window_kwh=preservation.heat_pump_window_kwh,
+        heat_pump_to_sufficiency_kwh=preservation.heat_pump_to_sufficiency_kwh,
         reserve_kwh=preservation.reserve_kwh,
         required_kwh=preservation.required_kwh,
         required_sufficiency_kwh=preservation.required_sufficiency_kwh,
@@ -677,6 +763,8 @@ async def _run_non_balancing_flow(
         prog6_soc=prog6_soc,
         min_soc=battery_config.min_soc,
         pv_forecast=balancing_data.pv_forecast,
+        heat_pump_window_kwh=preservation.heat_pump_window_kwh,
+        heat_pump_to_sufficiency_kwh=preservation.heat_pump_to_sufficiency_kwh,
         battery_space=preservation.battery_space,
         pv_with_efficiency=balancing_data.pv_with_efficiency,
         reserve_kwh=preservation.reserve_kwh,
@@ -700,6 +788,11 @@ async def _run_non_balancing_flow(
             "result": "No action",
             "pv_forecast_kwh": round(balancing_data.pv_forecast, 2),
             "battery_space_kwh": round(preservation.battery_space, 2),
+            "heat_pump_window_kwh": round(preservation.heat_pump_window_kwh, 2),
+            "heat_pump_to_sufficiency_kwh": round(
+                preservation.heat_pump_to_sufficiency_kwh,
+                2,
+            ),
             "target_soc": round(current_soc, 1) if current_soc else 0,
             "reserve_kwh": round(preservation.reserve_kwh, 2),
             "required_kwh": round(preservation.required_kwh, 2),
