@@ -116,14 +116,14 @@ def _collect_pv_forecast_hourly_kwh(
     tomorrow_sensor = config.get(CONF_PV_FORECAST_TOMORROW)
     segments: list[tuple[list[dict], int, int]] = []
 
-    if start_hour < now_hour:
-        if end_hour < start_hour:
-            _LOGGER.error(
-                "Invalid PV forecast window: end_hour %s < start_hour %s for tomorrow",
-                end_hour,
-                start_hour,
-            )
-            return hourly_kwh
+    if end_hour < start_hour:
+        detailed_today = _get_detailed_forecast(hass, today_sensor, "today")
+        if detailed_today:
+            segments.append((detailed_today, start_hour, 24))
+        detailed_tomorrow = _get_detailed_forecast(hass, tomorrow_sensor, "tomorrow")
+        if detailed_tomorrow:
+            segments.append((detailed_tomorrow, 0, end_hour))
+    elif start_hour < now_hour:
         detailed = _get_detailed_forecast(hass, tomorrow_sensor, "tomorrow")
         if detailed:
             segments.append((detailed, start_hour, end_hour))
@@ -131,13 +131,6 @@ def _collect_pv_forecast_hourly_kwh(
         detailed = _get_detailed_forecast(hass, today_sensor, "today")
         if detailed:
             segments.append((detailed, start_hour, end_hour))
-    else:
-        detailed_today = _get_detailed_forecast(hass, today_sensor, "today")
-        if detailed_today:
-            segments.append((detailed_today, start_hour, 24))
-        detailed_tomorrow = _get_detailed_forecast(hass, tomorrow_sensor, "tomorrow")
-        if detailed_tomorrow:
-            segments.append((detailed_tomorrow, 0, end_hour))
 
     if not segments:
         return hourly_kwh

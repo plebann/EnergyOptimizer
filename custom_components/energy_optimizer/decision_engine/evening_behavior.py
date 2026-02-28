@@ -691,6 +691,7 @@ async def _run_non_balancing_flow(
     *,
     config: dict[str, Any],
     integration_context: Context,
+    margin: float,
     battery_config,
     prog1_soc: str | None,
     prog2_soc: str | None,
@@ -721,7 +722,7 @@ async def _run_non_balancing_flow(
         entry_id=entry.entry_id,
         current_soc=current_soc,
         battery_config=battery_config,
-        margin=1.1,
+        margin=margin,
         pv_with_efficiency=balancing_data.pv_with_efficiency,
         afternoon_grid_assist_sensor=afternoon_grid_assist_sensor,
     )
@@ -884,11 +885,13 @@ async def async_run_evening_behavior(
     ):
         return
 
+    preservation_margin = 1.1
     await _run_non_balancing_flow(
         hass,
         entry,
         config=config,
         integration_context=integration_context,
+        margin=preservation_margin,
         battery_config=bc,
         prog1_soc=prog1_soc,
         prog2_soc=prog2_soc,
