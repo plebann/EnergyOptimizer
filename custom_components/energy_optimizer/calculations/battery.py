@@ -1,7 +1,7 @@
 """Battery calculations for Energy Optimizer."""
 from __future__ import annotations
 
-from math import ceil
+from math import ceil, floor
 
 
 def soc_to_kwh(soc: float, capacity_ah: float, voltage: float) -> float:
@@ -31,7 +31,7 @@ def kwh_to_soc(kwh: float, capacity_ah: float, voltage: float) -> float:
     """
     if capacity_ah == 0 or voltage == 0:
         return 0.0
-    return (kwh * 1000.0) / (capacity_ah * voltage) * 100.0
+    return floor((kwh * 1000.0) / (capacity_ah * voltage) * 100.0)
 
 
 def calculate_battery_reserve(

@@ -65,7 +65,7 @@ class BaseSellStrategy(ABC):
 
         self.entry: ConfigEntry
         self.config: dict[str, Any]
-        self.bc: BatteryConfig
+        self.battery_config: BatteryConfig
         self.current_soc: float
         self.prog_soc_entity: str
         self.original_prog_soc: float
@@ -156,7 +156,7 @@ class BaseSellStrategy(ABC):
 
         self.threshold_price = float(self.config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0)
         self.margin = self._raw_margin if self._raw_margin is not None else 1.1
-        self.bc = get_battery_config(self.config)
+        self.battery_config = get_battery_config(self.config)
         self._now_hour = dt_util.as_local(dt_util.utcnow()).hour
 
         evaluation = await self._evaluate_sell()
@@ -187,8 +187,8 @@ class BaseSellStrategy(ABC):
                     surplus_kwh = min(surplus_kwh, pv_value)
 
         target_soc = max(
-            self.current_soc - kwh_to_soc(surplus_kwh, self.bc.capacity_ah, self.bc.voltage),
-            self.bc.min_soc,
+            self.current_soc - kwh_to_soc(surplus_kwh, self.battery_config.capacity_ah, self.battery_config.voltage),
+            self.battery_config.min_soc,
         )
         if target_soc >= self.current_soc:
             outcome = request.build_no_action_fn(surplus_kwh)

@@ -111,7 +111,7 @@ async def test_execute_sell_saves_restore_data(monkeypatch: pytest.MonkeyPatch) 
         "work_mode_entity": "select.work_mode",
         "export_power_entity": "number.export_power",
     }
-    strategy.bc = SimpleNamespace(min_soc=15.0, capacity_ah=37.0, voltage=640.0)
+    strategy.battery_config = SimpleNamespace(min_soc=15.0, capacity_ah=37.0, voltage=640.0)
     strategy.current_soc = 90.0
     strategy.prog_soc_entity = "number.prog5_soc"
     strategy.original_prog_soc = 70.0

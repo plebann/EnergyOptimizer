@@ -156,10 +156,10 @@ class EveningSellStrategy(BaseSellStrategy):
         required_kwh = (usage_kwh + heat_pump_kwh + losses_kwh) * self.margin
         reserve_kwh = calculate_battery_reserve(
             self.current_soc,
-            self.bc.min_soc,
-            self.bc.capacity_ah,
-            self.bc.voltage,
-            efficiency=self.bc.efficiency,
+            self.battery_config.min_soc,
+            self.battery_config.capacity_ah,
+            self.battery_config.voltage,
+            efficiency=self.battery_config.efficiency,
         )
         surplus_kwh = calculate_surplus_energy(
             reserve_kwh,
@@ -240,10 +240,10 @@ class EveningSellStrategy(BaseSellStrategy):
         )
         reserve_kwh = calculate_battery_reserve(
             self.current_soc,
-            self.bc.min_soc,
-            self.bc.capacity_ah,
-            self.bc.voltage,
-            efficiency=self.bc.efficiency,
+            self.battery_config.min_soc,
+            self.battery_config.capacity_ah,
+            self.battery_config.voltage,
+            efficiency=self.battery_config.efficiency,
         )
 
         tomorrow_end = resolve_tariff_end_hour(self.hass, self.config, default_hour=13)

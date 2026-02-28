@@ -169,10 +169,10 @@ class MorningSellStrategy(BaseSellStrategy):
             )
         reserve_kwh = calculate_battery_reserve(
             self.current_soc,
-            self.bc.min_soc,
-            self.bc.capacity_ah,
-            self.bc.voltage,
-            efficiency=self.bc.efficiency,
+            self.battery_config.min_soc,
+            self.battery_config.capacity_ah,
+            self.battery_config.voltage,
+            efficiency=self.battery_config.efficiency,
         )
         surplus_kwh = calculate_surplus_energy(
             reserve_kwh,
