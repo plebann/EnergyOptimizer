@@ -5,14 +5,21 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
+from homeassistant.util import dt as dt_util
+
 from ..calculations.battery import (
     apply_efficiency_compensation,
     calculate_charge_current,
     calculate_soc_delta,
     calculate_target_soc,
     calculate_target_soc_from_reserve,
+    soc_to_kwh,
 )
-from ..calculations.energy import calculate_losses, calculate_sufficiency_window
+from ..calculations.energy import (
+    calculate_losses,
+    calculate_sufficiency_window,
+    hourly_demand,
+)
 from ..calculations.utils import build_hourly_usage_array
 from ..controllers.inverter import set_program_soc
 from ..const import (
@@ -507,6 +514,8 @@ def build_morning_charge_outcome(
     current_soc: float,
     efficiency: float,
     pv_compensation_factor: float | None,
+    arbitrage_kwh: float | None = None,
+    arbitrage_details: dict[str, float | str] | None = None,
 ) -> DecisionOutcome:
     """Build a morning charge decision outcome."""
     details_extra = {
@@ -517,6 +526,7 @@ def build_morning_charge_outcome(
         "gap_sufficiency_kwh": round(gap_sufficiency_kwh, 2),
         "sufficiency_hour": sufficiency.sufficiency_hour,
         "sufficiency_reached": sufficiency.sufficiency_reached,
+        **(arbitrage_details or {}),
     }
 
     return build_charge_outcome_base(
@@ -527,6 +537,7 @@ def build_morning_charge_outcome(
         current_soc=current_soc,
         efficiency=efficiency,
         pv_compensation_factor=pv_compensation_factor,
+        arbitrage_kwh=arbitrage_kwh,
         details_extra=details_extra,
     )
 
@@ -560,6 +571,58 @@ def build_afternoon_charge_outcome(
         arbitrage_kwh=arbitrage_kwh,
         details_extra=details_extra,
     )
+
+
+def _compute_arbitrage_from_cap(
+    *,
+    bc: BatteryConfig,
+    forecasts: ForecastData,
+    sell_start_hour: int,
+    current_soc: float,
+    required_kwh: float,
+    cap_kwh: float,
+) -> tuple[float, dict[str, float | int]]:
+    """Compute arbitrage kWh and capacity/surplus metrics given a pre-resolved cap.
+
+    Shared by afternoon (cap = forecast_adjusted) and morning (cap = remaining_kwh).
+    Returns (arbitrage_kwh, metrics) where arbitrage_kwh may be 0.0 if arb_limit is zero.
+    Callers are responsible for setting arbitrage_reason in their own details dict.
+    """
+    capacity_kwh = soc_to_kwh(100.0, bc.capacity_ah, bc.voltage)
+    current_energy_kwh = soc_to_kwh(current_soc, bc.capacity_ah, bc.voltage)
+    free_after = capacity_kwh - (current_energy_kwh + required_kwh)
+
+    now_hour = dt_util.as_local(dt_util.utcnow()).hour
+    surplus_start = max(forecasts.start_hour, now_hour)
+    surplus_end = min(sell_start_hour, forecasts.end_hour)
+    if surplus_end <= surplus_start:
+        surplus_kwh = 0.0
+    else:
+        surplus_kwh = sum(
+            max(
+                forecasts.pv_forecast_hourly.get(hour, 0.0)
+                - hourly_demand(
+                    hour,
+                    hourly_usage=forecasts.hourly_usage,
+                    heat_pump_hourly=forecasts.heat_pump_hourly,
+                    losses_hourly=forecasts.losses_hourly,
+                    margin=forecasts.margin,
+                ),
+                0.0,
+            )
+            for hour in range(surplus_start, surplus_end)
+        )
+
+    arb_limit = max(free_after - surplus_kwh, 0.0)
+    arbitrage_kwh = min(arb_limit, cap_kwh)
+
+    metrics: dict[str, float | int] = {
+        "surplus_kwh": round(surplus_kwh, 2),
+        "free_after_kwh": round(free_after, 2),
+        "arb_limit_kwh": round(arb_limit, 2),
+        "sell_window_start_hour": int(sell_start_hour),
+    }
+    return arbitrage_kwh, metrics
 
 
 def build_evening_sell_outcome(

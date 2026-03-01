@@ -4,13 +4,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from homeassistant.util import dt as dt_util
-
-from ..calculations.battery import (
-    calculate_battery_reserve,
-    soc_to_kwh,
-)
-from ..calculations.energy import hourly_demand
+from ..calculations.battery import calculate_battery_reserve
 from ..calculations.energy import calculate_needed_reserve
 from ..const import (
     CONF_EVENING_MAX_PRICE_SENSOR,
@@ -24,6 +18,7 @@ from ..decision_engine.common import (
     ChargeAction,
     EnergyBalance,
     ForecastData,
+    _compute_arbitrage_from_cap,
     build_afternoon_charge_outcome,
     build_no_action_outcome,
     calculate_target_soc_from_needed_reserve,
@@ -256,7 +251,7 @@ def _calculate_arbitrage_kwh(
         details["arbitrage_reason"] = "sell_price_below_threshold"
         return 0.0, details
 
-    forecast_adjusted, forecast_reason = get_forecast_adjusted_kwh(
+    cap_kwh, cap_reason = get_forecast_adjusted_kwh(
         hass,
         config,
         pv_forecast_today_entity=pv_forecast_today_entity,
@@ -264,47 +259,19 @@ def _calculate_arbitrage_kwh(
         pv_production_entity=pv_production_entity,
         entry_id=entry_id,
     )
-    if forecast_adjusted is None:
-        details["arbitrage_reason"] = forecast_reason or "invalid_forecast_adjustment"
+    if cap_kwh is None:
+        details["arbitrage_reason"] = cap_reason or "invalid_forecast_adjustment"
         return 0.0, details
 
-    capacity_kwh = soc_to_kwh(100.0, bc.capacity_ah, bc.voltage)
-    current_energy_kwh = soc_to_kwh(current_soc, bc.capacity_ah, bc.voltage)
-    free_after = capacity_kwh - (current_energy_kwh + required_kwh)
-
-    now_hour = dt_util.as_local(dt_util.utcnow()).hour
-    surplus_start = max(forecasts.start_hour, now_hour)
-    surplus_end = min(sell_start_hour, forecasts.end_hour)
-    if surplus_end <= surplus_start:
-        surplus_kwh = 0.0
-    else:
-        surplus_kwh = sum(
-            max(
-                forecasts.pv_forecast_hourly.get(hour, 0.0)
-                - hourly_demand(
-                    hour,
-                    hourly_usage=forecasts.hourly_usage,
-                    heat_pump_hourly=forecasts.heat_pump_hourly,
-                    losses_hourly=forecasts.losses_hourly,
-                    margin=forecasts.margin,
-                ),
-                0.0,
-            )
-            for hour in range(surplus_start, surplus_end)
-        )
-
-    arb_limit = max(free_after - surplus_kwh, 0.0)
-    arbitrage_kwh = min(arb_limit, forecast_adjusted)
-
-    details.update(
-        {
-            "forecast_adjusted": round(forecast_adjusted, 2),
-            "surplus_kwh": round(surplus_kwh, 2),
-            "free_after_kwh": round(free_after, 2),
-            "arb_limit_kwh": round(arb_limit, 2),
-            "sell_window_start_hour": int(sell_start_hour),
-        }
+    arbitrage_kwh, metrics = _compute_arbitrage_from_cap(
+        bc=bc,
+        forecasts=forecasts,
+        sell_start_hour=sell_start_hour,
+        current_soc=current_soc,
+        required_kwh=required_kwh,
+        cap_kwh=cap_kwh,
     )
+    details.update({"forecast_adjusted": round(cap_kwh, 2), **metrics})
 
     if arbitrage_kwh <= 0:
         details["arbitrage_reason"] = "arb_limit_zero"
