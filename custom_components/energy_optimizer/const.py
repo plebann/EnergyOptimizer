@@ -19,6 +19,7 @@ CONF_BATTERY_VOLTAGE_SENSOR = "battery_voltage_sensor"
 CONF_BATTERY_CURRENT_SENSOR = "battery_current_sensor"
 
 CONF_BATTERY_CAPACITY_AH = "battery_capacity_ah"
+CONF_MAX_EXPORT_POWER = "max_export_power"
 CONF_BATTERY_VOLTAGE = "battery_voltage"
 CONF_BATTERY_EFFICIENCY = "battery_efficiency"
 CONF_MIN_SOC = "min_soc"
@@ -86,6 +87,7 @@ CONF_TEST_SELL_MODE = "test_sell_mode"
 
 # Default values
 DEFAULT_BATTERY_CAPACITY_AH = 37
+DEFAULT_MAX_EXPORT_POWER = 12000
 DEFAULT_BATTERY_VOLTAGE = 640
 DEFAULT_BATTERY_EFFICIENCY = 95
 DEFAULT_MIN_SOC = 15
@@ -105,7 +107,6 @@ SERVICE_AFTERNOON_GRID_CHARGE = "afternoon_grid_charge"
 SERVICE_MORNING_PEAK_SELL = "morning_peak_sell"
 SERVICE_EVENING_PEAK_SELL = "evening_peak_sell"
 
-DEFAULT_EXPORT_POWER_RESET = 12000
 DEFAULT_DISCHARGE_CURRENT_RESET = 12
 
 # Sell restore persistence

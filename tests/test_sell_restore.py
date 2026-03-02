@@ -13,6 +13,9 @@ from custom_components.energy_optimizer.decision_engine.sell_base import (
     SellRequest,
 )
 from custom_components.energy_optimizer.scheduler.action_scheduler import ActionScheduler
+from custom_components.energy_optimizer.service_handlers.sell_restore import (
+    async_check_pending_sell_restore,
+)
 
 
 class _TestSellStrategy(BaseSellStrategy):
@@ -140,7 +143,7 @@ async def test_execute_sell_saves_restore_data(monkeypatch: pytest.MonkeyPatch) 
 async def test_restore_callback_restores_work_mode_and_soc(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Restore callback calls inverter writes and clears stored payload."""
+    """Restore callback restores work mode, SOC and export power then clears payload."""
     hass = MagicMock()
     hass.data = {
         DOMAIN: {
@@ -159,23 +162,32 @@ async def test_restore_callback_restores_work_mode_and_soc(
 
     entry = MagicMock()
     entry.entry_id = "entry-1"
-    entry.data = {"work_mode_entity": "select.work_mode"}
+    entry.data = {
+        "work_mode_entity": "select.work_mode",
+        "export_power_entity": "number.export_power",
+        "max_export_power": 15000,
+    }
 
     scheduler = ActionScheduler(hass, entry)
     set_work_mode_mock = AsyncMock()
     set_program_soc_mock = AsyncMock()
+    set_export_power_mock = AsyncMock()
 
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.Store",
+        "custom_components.energy_optimizer.service_handlers.sell_restore.Store",
         _FakeStore,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.set_work_mode",
+        "custom_components.energy_optimizer.service_handlers.sell_restore.set_work_mode",
         set_work_mode_mock,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.set_program_soc",
+        "custom_components.energy_optimizer.service_handlers.sell_restore.set_program_soc",
         set_program_soc_mock,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.service_handlers.sell_restore.set_export_power",
+        set_export_power_mock,
     )
 
     _FakeStore.saved_data = None
@@ -186,6 +198,8 @@ async def test_restore_callback_restores_work_mode_and_soc(
 
     assert set_work_mode_mock.await_count == 1
     assert set_program_soc_mock.await_count == 1
+    assert set_export_power_mock.await_count == 1
+    assert set_export_power_mock.await_args.args[2] == pytest.approx(15000.0)
     assert "sell_restore" not in hass.data[DOMAIN]["entry-1"]
     assert _FakeStore.removed is True
 
@@ -206,16 +220,19 @@ async def test_startup_recovery_restores_immediately_when_overdue(
     restore_mock = AsyncMock()
 
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.Store",
+        "custom_components.energy_optimizer.service_handlers.sell_restore.Store",
         _FakeStore,
     )
-    monkeypatch.setattr(scheduler, "_handle_sell_restore", restore_mock)
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.dt_util.utcnow",
+        "custom_components.energy_optimizer.service_handlers.sell_restore.async_handle_sell_restore",
+        restore_mock,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.service_handlers.sell_restore.dt_util.utcnow",
         lambda: datetime(2026, 2, 27, 12, 0, tzinfo=timezone.utc),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.dt_util.as_local",
+        "custom_components.energy_optimizer.service_handlers.sell_restore.dt_util.as_local",
         lambda value: value,
     )
 
@@ -230,7 +247,7 @@ async def test_startup_recovery_restores_immediately_when_overdue(
         "timestamp": "2026-02-27T07:00:00+00:00",
     }
 
-    await scheduler._check_pending_restore()
+    await async_check_pending_sell_restore(hass, entry)
 
     assert restore_mock.await_count == 1
-    assert restore_mock.await_args.args[0] == "morning"
+    assert restore_mock.await_args.args[2] == "morning"

@@ -51,6 +51,7 @@
         "title": "Battery Parameters",
         "description": "Configure battery specifications and operating limits",
         "data": {
+          "max_export_power": "Maximum Export Power (W)",
           "battery_capacity_ah": "Battery Capacity (Ah)",
           "battery_voltage": "Battery Nominal Voltage (V)",
           "battery_efficiency": "Battery Efficiency (%)",
@@ -61,6 +62,7 @@
           "balancing_pv_threshold_kwh": "Balancing PV Threshold (kWh)"
         },
         "data_description": {
+          "max_export_power": "Maximum export value applied after the sell window ends",
           "battery_capacity_ah": "Battery capacity in Ampere-hours",
           "battery_voltage": "Battery system voltage (typically 48V)",
           "battery_efficiency": "Round-trip efficiency (90-95% typical)",
@@ -214,6 +216,7 @@
         "title": "Energy Optimizer Options",
         "description": "Reconfigure battery parameters.",
         "data": {
+          "max_export_power": "Maximum Export Power (W)",
           "battery_capacity_ah": "Battery Capacity (Ah)",
           "battery_voltage": "Battery Nominal Voltage (V)",
           "min_soc": "Minimum SOC (%)",
@@ -224,6 +227,7 @@
           "max_charge_current_entity": "Max Charge Current (Optional)"
         },
         "data_description": {
+          "max_export_power": "Maximum export value applied after the sell window ends",
           "battery_capacity_ah": "Battery capacity in Ampere-hours",
           "battery_voltage": "Battery system voltage (typically 48V)",
           "min_soc": "Minimum SOC to preserve battery health",

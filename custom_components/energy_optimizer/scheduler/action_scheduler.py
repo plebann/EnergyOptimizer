@@ -4,26 +4,22 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable
 
-from homeassistant.core import Context
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_change
-from homeassistant.helpers.storage import Store
-from homeassistant.util import dt as dt_util
 
 from ..const import (
     CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_TARIFF_END_HOUR_SENSOR,
-    CONF_WORK_MODE_ENTITY,
-    DOMAIN,
-    STORAGE_KEY_SELL_RESTORE,
-    STORAGE_VERSION_SELL_RESTORE,
 )
-from ..controllers.inverter import set_program_soc, set_work_mode
 from ..decision_engine.evening_sell import async_run_evening_sell
 from ..decision_engine.morning_sell import async_run_morning_sell
 from ..decision_engine.evening_behavior import async_run_evening_behavior
 from ..decision_engine.afternoon_charge import async_run_afternoon_charge
 from ..decision_engine.morning_charge import async_run_morning_charge
+from ..service_handlers.sell_restore import (
+    async_check_pending_sell_restore,
+    async_handle_sell_restore,
+)
 from ..helpers import (
     resolve_evening_max_price_hour,
     resolve_morning_max_price_hour,
@@ -185,75 +181,8 @@ class ActionScheduler:
         await self._handle_sell_restore("evening", now)
 
     async def _handle_sell_restore(self, sell_type: str, now: datetime) -> None:
-        """Restore work mode and program SOC after sell window."""
-        entry_data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {})
-        restore = entry_data.get("sell_restore")
-        store = Store(
-            self.hass,
-            STORAGE_VERSION_SELL_RESTORE,
-            f"{STORAGE_KEY_SELL_RESTORE}.{self.entry.entry_id}",
-        )
-
-        if not restore:
-            restore = await store.async_load()
-
-        if not restore or restore.get("sell_type") != sell_type:
-            return
-
-        _LOGGER.info("Restoring inverter state after %s sell", sell_type)
-        integration_context = Context()
-
-        if restore.get("work_mode"):
-            work_mode_entity = self.entry.data.get(CONF_WORK_MODE_ENTITY)
-            await set_work_mode(
-                self.hass,
-                str(work_mode_entity) if work_mode_entity else None,
-                str(restore["work_mode"]),
-                entry=self.entry,
-                logger=_LOGGER,
-                context=integration_context,
-            )
-
-        prog_soc_entity = restore.get("prog_soc_entity")
-        prog_soc_value = restore.get("prog_soc_value")
-        if prog_soc_entity is not None and prog_soc_value is not None:
-            await set_program_soc(
-                self.hass,
-                str(prog_soc_entity),
-                float(prog_soc_value),
-                entry=self.entry,
-                logger=_LOGGER,
-                context=integration_context,
-            )
-
-        entry_data.pop("sell_restore", None)
-        await store.async_remove()
-
-    async def _check_pending_restore(self) -> None:
-        """Check pending restore data after startup and run overdue restores."""
-        store = Store(
-            self.hass,
-            STORAGE_VERSION_SELL_RESTORE,
-            f"{STORAGE_KEY_SELL_RESTORE}.{self.entry.entry_id}",
-        )
-        data = await store.async_load()
-        if not data:
-            return
-
-        now = dt_util.as_local(dt_util.utcnow())
-        restore_hour = int(data.get("restore_hour", 0))
-        sell_time_raw = data.get("timestamp")
-        sell_time = dt_util.parse_datetime(str(sell_time_raw)) if sell_time_raw else None
-
-        if sell_time and (
-            now.date() > sell_time.date()
-            or (now.date() == sell_time.date() and now.hour >= restore_hour)
-        ):
-            _LOGGER.info("Startup: executing overdue sell restore for %s", data.get("sell_type"))
-            await self._handle_sell_restore(str(data.get("sell_type")), now)
-            return
-
-        self.hass.data[DOMAIN][self.entry.entry_id]["sell_restore"] = data
+        """Delegate sell restore handling to dedicated handler."""
+        await async_handle_sell_restore(self.hass, self.entry, sell_type)
 
     def _schedule_afternoon_charge(self) -> None:
         """Schedule afternoon charge at current tariff end hour."""
@@ -327,4 +256,6 @@ class ActionScheduler:
             second=0,
         )
 
-        self.hass.async_create_task(self._check_pending_restore())
+        self.hass.async_create_task(
+            async_check_pending_sell_restore(self.hass, self.entry)
+        )

@@ -39,6 +39,7 @@ from .const import (
     CONF_LOAD_USAGE_16_20,
     CONF_LOAD_USAGE_20_24,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
+    CONF_MAX_EXPORT_POWER,
     CONF_MAX_SOC,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MIN_SOC,
@@ -79,6 +80,7 @@ from .const import (
     DEFAULT_HEAT_PUMP_FORECAST_DOMAIN,
     DEFAULT_HEAT_PUMP_FORECAST_SERVICE,
     DEFAULT_MAX_SOC,
+    DEFAULT_MAX_EXPORT_POWER,
     DEFAULT_MIN_ARBITRAGE_PRICE,
     DEFAULT_MIN_SOC,
     DEFAULT_PV_EFFICIENCY,
@@ -225,6 +227,9 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
+                vol.Required(
+                    CONF_MAX_EXPORT_POWER, default=DEFAULT_MAX_EXPORT_POWER
+                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=200000)),
                 vol.Required(
                     CONF_BATTERY_CAPACITY_AH, default=DEFAULT_BATTERY_CAPACITY_AH
                 ): vol.All(vol.Coerce(float), vol.Range(min=1, max=1000)),
@@ -824,6 +829,15 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
 
         schema = vol.Schema(
             {
+                vol.Optional(
+                    CONF_MAX_EXPORT_POWER,
+                    default=self._config_entry.data.get(
+                        CONF_MAX_EXPORT_POWER,
+                        self._config_entry.data.get(
+                            "inverter_max_power", DEFAULT_MAX_EXPORT_POWER
+                        ),
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=200000)),
                 vol.Optional(
                     CONF_BATTERY_CAPACITY_AH,
                     default=self._config_entry.data.get(
