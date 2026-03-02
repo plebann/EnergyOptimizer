@@ -98,7 +98,7 @@ class EveningSellStrategy(BaseSellStrategy):
 
     async def _high_price_sell(self) -> DecisionOutcome | SellRequest:
         start_hour = (self._now_hour + 1) % 24
-        end_hour = resolve_tariff_start_hour(self.hass, self.config, default_hour=22)
+        end_hour = 22
 
         hours_window = build_hour_window(start_hour, end_hour)
         hours = max(len(hours_window), 1)
