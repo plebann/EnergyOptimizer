@@ -66,6 +66,15 @@ class MorningSellStrategy(BaseSellStrategy):
         """Resolve morning sell hour."""
         return resolve_morning_max_price_hour(self.hass, self.config, default_hour=7)
 
+    async def _on_price_unavailable(self) -> bool:
+        """Fall back to surplus-over-space sell when morning price sensor is unavailable."""
+        _LOGGER.info(
+            "Morning max price sensor unavailable - falling back to surplus-over-space sell"
+        )
+        self.price = 0.0
+        self._price_unavailable = True
+        return True
+
     async def _evaluate_sell(self) -> DecisionOutcome | SellRequest:
         """Run morning sell logic using a single surplus branch."""
         start_hour = (self._now_hour + 1) % 24
@@ -240,7 +249,8 @@ class MorningSellStrategy(BaseSellStrategy):
         surplus_to_22_kwh: float | None = None
         selection_reason = "base_surplus"
 
-        if surplus_kwh > free_space_kwh:
+        price_unavailable = getattr(self, "_price_unavailable", False)
+        if surplus_kwh > free_space_kwh and not price_unavailable:
             if evening_price is not None and self.price > evening_price:
                 selected_surplus_kwh = surplus_kwh
                 selection_reason = "morning_price_higher_than_evening"
@@ -319,7 +329,7 @@ class MorningSellStrategy(BaseSellStrategy):
                 sufficiency_hour=sufficiency.sufficiency_hour,
                 sufficiency_reached=sufficiency.sufficiency_reached,
                 details_extra={
-                    "morning_price": round(self.price, 2),
+                    "morning_price": None if price_unavailable else round(self.price, 2),
                     "evening_price": round(evening_price, 2) if evening_price is not None else None,
                     "threshold_price": round(self.threshold_price, 2),
                     "surplus_kwh": round(surplus_kwh, 2),
@@ -331,6 +341,7 @@ class MorningSellStrategy(BaseSellStrategy):
                         else None
                     ),
                     "surplus_selection_reason": selection_reason,
+                    "price_unavailable": price_unavailable,
                     "start_hour": start_hour,
                     "end_hour": base_end_hour,
                 },
@@ -353,7 +364,7 @@ class MorningSellStrategy(BaseSellStrategy):
                 start_hour=start_hour,
                 end_hour=base_end_hour,
                 export_power_w=export_w,
-                evening_price=self.price,
+                evening_price=None if price_unavailable else self.price,
                 threshold_price=self.threshold_price,
             )
             outcome.details["sufficiency_hour"] = sufficiency.sufficiency_hour
@@ -370,6 +381,7 @@ class MorningSellStrategy(BaseSellStrategy):
                 else None
             )
             outcome.details["surplus_selection_reason"] = selection_reason
+            outcome.details["price_unavailable"] = price_unavailable
             return outcome
 
         def _make_no_action(current_surplus_kwh: float) -> DecisionOutcome:
@@ -384,7 +396,7 @@ class MorningSellStrategy(BaseSellStrategy):
                 sufficiency_hour=sufficiency.sufficiency_hour,
                 sufficiency_reached=sufficiency.sufficiency_reached,
                 details_extra={
-                    "morning_price": round(self.price, 2),
+                    "morning_price": None if price_unavailable else round(self.price, 2),
                     "evening_price": (
                         round(evening_price, 2) if evening_price is not None else None
                     ),
@@ -398,6 +410,7 @@ class MorningSellStrategy(BaseSellStrategy):
                         else None
                     ),
                     "surplus_selection_reason": selection_reason,
+                    "price_unavailable": price_unavailable,
                     "start_hour": start_hour,
                     "end_hour": base_end_hour,
                 },

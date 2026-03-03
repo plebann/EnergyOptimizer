@@ -103,6 +103,15 @@ class BaseSellStrategy(ABC):
     def _resolve_sell_hour(self) -> int:
         """Return configured sell hour used to compute restore hour."""
 
+    async def _on_price_unavailable(self) -> bool:
+        """Handle unavailable price sensor. Return True to continue execution, False to abort.
+
+        Subclasses may override to implement fallback behaviour when the price
+        sensor is temporarily or permanently unavailable.  The default
+        behaviour is to abort the run silently (current historical behaviour).
+        """
+        return False
+
     async def _check_early_exit(self) -> DecisionOutcome | None:
         """Optional early-exit hook executed before evaluation."""
         return None
@@ -146,8 +155,10 @@ class BaseSellStrategy(ABC):
 
         price = self._get_price()
         if price is None:
-            return
-        self.price = price
+            if not await self._on_price_unavailable():
+                return
+        else:
+            self.price = price
 
         early_outcome = await self._check_early_exit()
         if early_outcome is not None:

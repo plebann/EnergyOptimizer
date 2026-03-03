@@ -66,7 +66,19 @@ class EveningSellStrategy(BaseSellStrategy):
     def _resolve_sell_hour(self) -> int:
         return resolve_evening_max_price_hour(self.hass, self.config, default_hour=17)
 
+    async def _on_price_unavailable(self) -> bool:
+        """Fall back to surplus sell when evening price sensor is unavailable."""
+        _LOGGER.info(
+            "Evening max price sensor unavailable - falling back to surplus sell"
+        )
+        self.price = 0.0
+        self._price_unavailable = True
+        return True
+
     async def _check_early_exit(self) -> DecisionOutcome | None:
+        if getattr(self, "_price_unavailable", False):
+            # Price unknown - skip tomorrow comparison and proceed to surplus sell.
+            return None
         tomorrow_morning_price = get_required_float_state(
             self.hass,
             self.config.get(CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR),
@@ -92,7 +104,7 @@ class EveningSellStrategy(BaseSellStrategy):
         )
 
     async def _evaluate_sell(self) -> DecisionOutcome | SellRequest:
-        if self.price <= self.threshold_price:
+        if getattr(self, "_price_unavailable", False) or self.price <= self.threshold_price:
             return await self._surplus_sell()
         return await self._high_price_sell()
 
