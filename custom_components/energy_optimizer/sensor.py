@@ -77,6 +77,9 @@ async def async_setup_entry(
     hass.data[DOMAIN][config_entry.entry_id][
         "optimization_history_sensor"
     ] = optimization_history_sensor
+    hass.data[DOMAIN][config_entry.entry_id]["battery_space_sensor"] = next(
+        sensor for sensor in sensors if isinstance(sensor, BatterySpaceSensor)
+    )
     hass.data[DOMAIN][config_entry.entry_id][
         "pv_forecast_compensation_sensor"
     ] = next(

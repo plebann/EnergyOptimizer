@@ -12,6 +12,7 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_EFFICIENCY,
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
+    CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_EXPORT_POWER_ENTITY,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MORNING_MAX_PRICE_SENSOR,
@@ -64,6 +65,9 @@ def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
             entry.entry_id: {
                 "last_optimization_sensor": mock_opt_sensor,
                 "optimization_history_sensor": mock_hist_sensor,
+                "battery_space_sensor": SimpleNamespace(
+                    entity_id="sensor.energy_optimizer_battery_space"
+                ),
             }
         }
     }
@@ -75,6 +79,7 @@ def _base_config() -> dict[str, object]:
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_PROG3_SOC_ENTITY: "number.prog3_soc",
         CONF_MORNING_MAX_PRICE_SENSOR: "sensor.morning_price",
+        CONF_EVENING_MAX_PRICE_SENSOR: "sensor.evening_price",
         CONF_MIN_ARBITRAGE_PRICE: 400.0,
         CONF_WORK_MODE_ENTITY: "select.work_mode",
         CONF_EXPORT_POWER_ENTITY: "number.export_power",
@@ -91,7 +96,9 @@ def _base_states() -> dict[str, str]:
         "sensor.battery_soc": "90",
         "number.prog3_soc": "50",
         "sensor.morning_price": "250",
+        "sensor.evening_price": "200",
         "sensor.pv_today": "8",
+        "sensor.energy_optimizer_battery_space": "3",
     }
 
 
@@ -140,6 +147,7 @@ async def test_morning_sell_executes_with_surplus_below_threshold(
     config = _base_config()
     states = _base_states()
     states["sensor.morning_price"] = "100"
+    states["sensor.evening_price"] = "50"
     hass = _setup_hass(config, states)
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
@@ -183,6 +191,153 @@ async def test_morning_sell_executes_with_surplus_below_threshold(
 
 
 @pytest.mark.asyncio
+async def test_morning_sell_surplus_above_free_space_but_morning_not_higher_no_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    states = _base_states()
+    states["sensor.morning_price"] = "100"
+    states["sensor.evening_price"] = "150"
+    states["sensor.energy_optimizer_battery_space"] = "3"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    async def _hp(*args, **kwargs):
+        return 1.0, {}
+
+    monkeypatch.setattr(
+        f"{MORNING}.get_heat_pump_forecast_window",
+        _hp,
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.get_pv_forecast_window",
+        lambda *args, **kwargs: (2.0, {}),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_losses",
+        lambda *args, **kwargs: (0.0, 0.0),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_sufficiency_window",
+        lambda **kwargs: (3.0, 2.0, 1.0, 13, False),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_battery_reserve",
+        lambda *args, **kwargs: 10.0,
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_surplus_energy",
+        lambda reserve, required, pv: 5.0,
+    )
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].details["surplus_selection_reason"] == "pv_fit_fallback_from_free_space"
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_surplus_below_free_space_and_to_22_not_above_no_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    states = _base_states()
+    states["sensor.energy_optimizer_battery_space"] = "8"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    async def _hp(*args, **kwargs):
+        return 1.0, {}
+
+    monkeypatch.setattr(
+        f"{MORNING}.get_heat_pump_forecast_window",
+        _hp,
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.get_pv_forecast_window",
+        lambda *args, **kwargs: (2.0, {}),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_losses",
+        lambda *args, **kwargs: (0.0, 0.0),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_sufficiency_window",
+        lambda **kwargs: (3.0, 2.0, 1.0, kwargs["end_hour"], False),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_battery_reserve",
+        lambda *args, **kwargs: 10.0,
+    )
+    surplus_calls = iter([5.0, 6.0])
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_surplus_energy",
+        lambda reserve, required, pv: next(surplus_calls),
+    )
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].details["surplus_selection_reason"] == "surplus_to_22_not_above_free_space"
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_surplus_below_free_space_and_to_22_above_sells_min_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    states = _base_states()
+    states["sensor.energy_optimizer_battery_space"] = "8"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    async def _hp(*args, **kwargs):
+        return 1.0, {}
+
+    monkeypatch.setattr(
+        f"{MORNING}.get_heat_pump_forecast_window",
+        _hp,
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.get_pv_forecast_window",
+        lambda *args, **kwargs: (2.0, {}),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_losses",
+        lambda *args, **kwargs: (0.0, 0.0),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_sufficiency_window",
+        lambda **kwargs: (3.0, 2.0, 1.0, kwargs["end_hour"], False),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_battery_reserve",
+        lambda *args, **kwargs: 10.0,
+    )
+    surplus_calls = iter([5.0, 9.5])
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_surplus_energy",
+        lambda reserve, required, pv: next(surplus_calls),
+    )
+    monkeypatch.setattr(
+        f"{SELL_BASE}.calculate_export_power",
+        lambda *args, **kwargs: 600.0,
+    )
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes
+    assert outcomes[-1].action_type == "sell"
+    assert outcomes[-1].details["selected_surplus_kwh"] == 1.5
+    assert outcomes[-1].details["surplus_selection_reason"] == "surplus_to_22_above_free_space"
+
+
+@pytest.mark.asyncio
 async def test_morning_sell_no_surplus_no_action(monkeypatch: pytest.MonkeyPatch) -> None:
     config = _base_config()
     states = _base_states()
@@ -222,7 +377,7 @@ async def test_morning_sell_no_surplus_no_action(monkeypatch: pytest.MonkeyPatch
 
     assert outcomes
     assert outcomes[-1].action_type == "no_action"
-    assert "No surplus energy" in (outcomes[-1].reason or "")
+    assert "No eligible surplus energy" in (outcomes[-1].reason or "")
 
 
 @pytest.mark.asyncio
