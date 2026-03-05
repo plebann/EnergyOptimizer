@@ -16,6 +16,7 @@ from ..decision_engine.morning_sell import async_run_morning_sell
 from ..decision_engine.evening_behavior import async_run_evening_behavior
 from ..decision_engine.afternoon_charge import async_run_afternoon_charge
 from ..decision_engine.morning_charge import async_run_morning_charge
+from ..decision_engine.solar_charge_block import async_run_solar_charge_block
 from ..service_handlers.sell_restore import (
     async_check_pending_sell_restore,
     async_handle_sell_restore,
@@ -64,6 +65,14 @@ class ActionScheduler:
         self._schedule_morning_sell()
         self._schedule_evening_sell()
         self._schedule_sell_restores()
+
+        # Solar charge block: hourly from 05:00 to 12:00 (pre-noon)
+        for hour in range(5, 13):
+            self._listeners.append(
+                async_track_time_change(
+                    self.hass, self._handle_solar_charge_block, hour=hour, minute=0, second=0
+                )
+            )
 
         tariff_end_entity = self.entry.data.get(CONF_TARIFF_END_HOUR_SENSOR)
         if tariff_end_entity:
@@ -179,6 +188,14 @@ class ActionScheduler:
     async def _handle_evening_restore(self, now: datetime) -> None:
         """Restore inverter state after evening sell window."""
         await self._handle_sell_restore("evening", now)
+
+    async def _handle_solar_charge_block(self, now: datetime) -> None:
+        """Run pre-noon solar charge block check on the hour."""
+        _LOGGER.info("Scheduler triggering solar charge block check at %02d:00", now.hour)
+        await async_run_solar_charge_block(
+            self.hass,
+            entry_id=self.entry.entry_id,
+        )
 
     async def _handle_sell_restore(self, sell_type: str, now: datetime) -> None:
         """Delegate sell restore handling to dedicated handler."""

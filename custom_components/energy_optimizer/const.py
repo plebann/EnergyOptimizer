@@ -106,6 +106,7 @@ SERVICE_MORNING_GRID_CHARGE = "morning_grid_charge"
 SERVICE_AFTERNOON_GRID_CHARGE = "afternoon_grid_charge"
 SERVICE_MORNING_PEAK_SELL = "morning_peak_sell"
 SERVICE_EVENING_PEAK_SELL = "evening_peak_sell"
+SERVICE_SOLAR_CHARGE_BLOCK = "solar_charge_block"
 
 DEFAULT_DISCHARGE_CURRENT_RESET = 12
 

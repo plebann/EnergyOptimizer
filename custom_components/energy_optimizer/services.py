@@ -16,6 +16,7 @@ from .const import (
     SERVICE_MORNING_GRID_CHARGE,
     SERVICE_MORNING_PEAK_SELL,
     SERVICE_OVERNIGHT_SCHEDULE,
+    SERVICE_SOLAR_CHARGE_BLOCK,
 )
 from .helpers import get_float_state_info
 from .decision_engine.morning_charge import async_run_morning_charge
@@ -23,6 +24,7 @@ from .decision_engine.afternoon_charge import async_run_afternoon_charge
 from .decision_engine.evening_behavior import async_run_evening_behavior
 from .decision_engine.evening_sell import async_run_evening_sell
 from .decision_engine.morning_sell import async_run_morning_sell
+from .decision_engine.solar_charge_block import async_run_solar_charge_block
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -71,6 +73,12 @@ SERVICE_SCHEMA_MORNING_PEAK_SELL = vol.Schema(
         vol.Optional("margin", default=1.1): vol.All(
             vol.Coerce(float), vol.Range(min=1.0, max=1.5)
         ),
+    }
+)
+
+SERVICE_SCHEMA_SOLAR_CHARGE_BLOCK = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_ENTRY_ID): vol.Coerce(str),
     }
 )
 
@@ -219,6 +227,12 @@ async def async_register_services(hass: HomeAssistant) -> None:
             margin=call.data.get("margin"),
         )
 
+    async def _handle_solar_charge_block(call: ServiceCall) -> None:
+        await async_run_solar_charge_block(
+            hass,
+            entry_id=call.data.get(SERVICE_FIELD_ENTRY_ID),
+        )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_MORNING_GRID_CHARGE,
@@ -248,6 +262,12 @@ async def async_register_services(hass: HomeAssistant) -> None:
         SERVICE_MORNING_PEAK_SELL,
         _handle_morning_peak_sell,
         schema=SERVICE_SCHEMA_MORNING_PEAK_SELL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SOLAR_CHARGE_BLOCK,
+        _handle_solar_charge_block,
+        schema=SERVICE_SCHEMA_SOLAR_CHARGE_BLOCK,
     )
 
     _LOGGER.info("Energy Optimizer services registered")
