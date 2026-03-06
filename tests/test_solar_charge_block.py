@@ -44,8 +44,8 @@ def _setup_hass(
     sun_state: str = "above_horizon",
     sun_attrs: dict | None = None,
     now_hour: int = 9,
-    current_price: str = "0.80",
-    min_price: str = "0.40",
+    current_price: str = "800",
+    min_price: str = "400",
     battery_space_value: float | None = 2.0,
     pv_forecast_kwh: float = 5.0,
     max_charge_entity: str = _MAX_CHARGE_ENTITY,
@@ -155,8 +155,8 @@ async def test_skip_when_past_noon() -> None:
 @pytest.mark.asyncio
 async def test_skip_when_price_close_to_minimum() -> None:
     """No action when 0.7 * current_price < min_price (price near daily min)."""
-    # 0.7 * 0.50 = 0.35 < 0.40 → skip
-    hass = _setup_hass(current_price="0.50", min_price="0.40")
+    # 0.7 * 500 = 350 < 400 → skip
+    hass = _setup_hass(current_price="500", min_price="400")
     p_now, p_pv = _patch_now_and_pv(hass, pv_kwh=10.0)
     with p_now, p_pv:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
@@ -166,9 +166,9 @@ async def test_skip_when_price_close_to_minimum() -> None:
 @pytest.mark.asyncio
 async def test_skip_when_surplus_fits_in_battery() -> None:
     """No action when PV surplus <= free battery space."""
-    # price gate: 0.7 * 0.80 = 0.56 >= 0.40 → passes
+    # price gate: 0.7 * 800 = 560 >= 400 → passes
     # surplus 3.0 <= free_space 5.0 → no block
-    hass = _setup_hass(current_price="0.80", min_price="0.40", battery_space_value=5.0)
+    hass = _setup_hass(current_price="800", min_price="400", battery_space_value=5.0)
     p_now, p_pv = _patch_now_and_pv(hass, pv_kwh=3.0)
     with p_now, p_pv:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
@@ -178,9 +178,9 @@ async def test_skip_when_surplus_fits_in_battery() -> None:
 @pytest.mark.asyncio
 async def test_blocks_when_surplus_exceeds_space() -> None:
     """Sets max charge current to 0 when PV surplus > free battery space."""
-    # price gate: 0.7 * 0.80 = 0.56 >= 0.40 → passes
+    # price gate: 0.7 * 800 = 560 >= 400 → passes
     # surplus 8.0 > free_space 2.0 → BLOCK
-    hass = _setup_hass(current_price="0.80", min_price="0.40", battery_space_value=2.0)
+    hass = _setup_hass(current_price="800", min_price="400", battery_space_value=2.0)
     p_now, p_pv = _patch_now_and_pv(hass, pv_kwh=8.0)
     with p_now, p_pv:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)

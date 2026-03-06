@@ -78,6 +78,7 @@
         "description": "Select entities for controlling battery/inverter behavior. Configure either a single target SOC entity or use time-based programs in the next step.",
         "data": {
           "work_mode_entity": "Work Mode Control (Optional)",
+          "inverter_export_surplus_switch": "Inverter Export Surplus Switch (Optional)",
           "charge_current_entity": "Charge Current Control (Optional)",
           "discharge_current_entity": "Discharge Current Control (Optional)",
           "export_power_entity": "Export Power Control (Optional)",
@@ -86,6 +87,7 @@
         },
         "data_description": {
           "work_mode_entity": "Entity to switch inverter work modes",
+          "inverter_export_surplus_switch": "Switch used to enable/disable export surplus mode for hourly export blocking",
           "charge_current_entity": "Entity to control charge current limit",
           "discharge_current_entity": "Entity to control discharge current limit",
           "export_power_entity": "Entity to control export power limit during selling",
@@ -175,6 +177,7 @@
       "not_numeric": "Entity state is not numeric.",
       "not_binary_sensor": "Entity must be a binary sensor.",
       "not_number_entity": "Entity must be a number entity.",
+      "not_switch_entity": "Entity must be a switch entity.",
       "min_greater_than_max": "Minimum SOC must be less than maximum SOC.",
       "no_target_configured": "You must configure either a single target SOC entity or at least one time-based program.",
       "cannot_connect": "Failed to connect.",

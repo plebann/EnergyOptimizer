@@ -25,7 +25,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _SUN_ENTITY = "sun.sun"
 _SUN_ABOVE_HORIZON = "above_horizon"
-_PRICE_BLOCK_FACTOR = 0.7
+_PRICE_BLOCK_FACTOR = 0.3
 _NOON_HOUR = 12
 
 
@@ -84,9 +84,13 @@ async def async_run_solar_charge_block(
     if min_price is None:
         return
 
+    if current_price <= 0:
+        _LOGGER.debug("Solar charge block: current price %.4f zero or negative — skip", current_price)
+        return
+
     # Price gate: proceed only when current price is significantly above minimum
-    # Condition: 0.7 * current_price >= min_price  (i.e. price is not close to min)
-    if _PRICE_BLOCK_FACTOR * current_price < min_price:
+    _PRICE_MARGIN = max(100, _PRICE_BLOCK_FACTOR * current_price)  # Avoid blocking at very low prices
+    if current_price - _PRICE_MARGIN < min_price:
         _LOGGER.debug(
             "Solar charge block: price gate skip — %.4f * %.4f = %.4f < min %.4f",
             _PRICE_BLOCK_FACTOR,

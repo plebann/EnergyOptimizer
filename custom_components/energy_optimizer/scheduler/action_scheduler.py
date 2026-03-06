@@ -17,6 +17,7 @@ from ..decision_engine.evening_behavior import async_run_evening_behavior
 from ..decision_engine.afternoon_charge import async_run_afternoon_charge
 from ..decision_engine.morning_charge import async_run_morning_charge
 from ..decision_engine.solar_charge_block import async_run_solar_charge_block
+from ..decision_engine.export_block_control import async_run_export_block_control
 from ..service_handlers.sell_restore import (
     async_check_pending_sell_restore,
     async_handle_sell_restore,
@@ -65,14 +66,7 @@ class ActionScheduler:
         self._schedule_morning_sell()
         self._schedule_evening_sell()
         self._schedule_sell_restores()
-
-        # Solar charge block: hourly from 05:00 to 12:00 (pre-noon)
-        for hour in range(5, 13):
-            self._listeners.append(
-                async_track_time_change(
-                    self.hass, self._handle_solar_charge_block, hour=hour, minute=0, second=0
-                )
-            )
+        self._schedule_hourly_actions()
 
         tariff_end_entity = self.entry.data.get(CONF_TARIFF_END_HOUR_SENSOR)
         if tariff_end_entity:
@@ -197,6 +191,15 @@ class ActionScheduler:
             entry_id=self.entry.entry_id,
         )
 
+    async def _handle_hourly_actions(self, now: datetime) -> None:
+        """Run all hourly actions via a single intermediate handler."""
+        _LOGGER.info("Scheduler triggering hourly actions at %02d:00", now.hour)
+        await self._handle_solar_charge_block(now)
+        await async_run_export_block_control(
+            self.hass,
+            entry_id=self.entry.entry_id,
+        )
+
     async def _handle_sell_restore(self, sell_type: str, now: datetime) -> None:
         """Delegate sell restore handling to dedicated handler."""
         await async_handle_sell_restore(self.hass, self.entry, sell_type)
@@ -215,6 +218,19 @@ class ActionScheduler:
             minute=0,
             second=0,
         )
+
+    def _schedule_hourly_actions(self) -> None:
+        """Schedule hourly action entrypoint from 05:00 to 12:00."""
+        for hour in range(5, 13):
+            self._listeners.append(
+                async_track_time_change(
+                    self.hass,
+                    self._handle_hourly_actions,
+                    hour=hour,
+                    minute=0,
+                    second=0,
+                )
+            )
 
     def _schedule_evening_sell(self) -> None:
         """Schedule evening peak sell at configured evening max price hour."""

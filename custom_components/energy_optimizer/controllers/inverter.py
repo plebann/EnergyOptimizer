@@ -243,3 +243,69 @@ async def set_work_mode(
         logger.debug("Set %s to %s", entity_id, option)
     else:
         _LOGGER.debug("Set %s to %s", entity_id, option)
+
+
+async def turn_on_switch(
+    hass: HomeAssistant,
+    entity_id: str | None,
+    *,
+    entry: ConfigEntry | None = None,
+    logger: logging.Logger | None = None,
+    context: Context | None = None,
+) -> None:
+    """Turn on switch entity if provided."""
+    if not entity_id:
+        return
+
+    if entry is not None and is_test_mode(hass, entry):
+        if logger:
+            logger.info("Test mode enabled - skipping turn_on for %s", entity_id)
+        else:
+            _LOGGER.info("Test mode enabled - skipping turn_on for %s", entity_id)
+        return
+
+    await _call_service(
+        hass,
+        "switch",
+        "turn_on",
+        {"entity_id": entity_id},
+        context=context,
+    )
+
+    if logger:
+        logger.debug("Turned on %s", entity_id)
+    else:
+        _LOGGER.debug("Turned on %s", entity_id)
+
+
+async def turn_off_switch(
+    hass: HomeAssistant,
+    entity_id: str | None,
+    *,
+    entry: ConfigEntry | None = None,
+    logger: logging.Logger | None = None,
+    context: Context | None = None,
+) -> None:
+    """Turn off switch entity if provided."""
+    if not entity_id:
+        return
+
+    if entry is not None and is_test_mode(hass, entry):
+        if logger:
+            logger.info("Test mode enabled - skipping turn_off for %s", entity_id)
+        else:
+            _LOGGER.info("Test mode enabled - skipping turn_off for %s", entity_id)
+        return
+
+    await _call_service(
+        hass,
+        "switch",
+        "turn_off",
+        {"entity_id": entity_id},
+        context=context,
+    )
+
+    if logger:
+        logger.debug("Turned off %s", entity_id)
+    else:
+        _LOGGER.debug("Turned off %s", entity_id)

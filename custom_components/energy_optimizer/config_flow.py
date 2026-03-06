@@ -32,6 +32,7 @@ from .const import (
     CONF_GRID_CHARGE_SWITCH,
     CONF_HEAT_PUMP_FORECAST_DOMAIN,
     CONF_HEAT_PUMP_FORECAST_SERVICE,
+    CONF_INVERTER_EXPORT_SURPLUS_SWITCH,
     CONF_LOAD_USAGE_00_04,
     CONF_LOAD_USAGE_04_08,
     CONF_LOAD_USAGE_08_12,
@@ -277,6 +278,9 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Optional(CONF_WORK_MODE_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="select")
+                ),
+                vol.Optional(CONF_INVERTER_EXPORT_SURPLUS_SWITCH): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="switch")
                 ),
                 vol.Optional(CONF_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
@@ -626,6 +630,16 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 domain_error="not_number_entity",
             )
 
+        export_surplus_switch = user_input.get(CONF_INVERTER_EXPORT_SURPLUS_SWITCH)
+        if export_surplus_switch:
+            self._validate_entity(
+                entity_id=export_surplus_switch,
+                field=CONF_INVERTER_EXPORT_SURPLUS_SWITCH,
+                errors=errors,
+                expected_domain="switch",
+                domain_error="not_switch_entity",
+            )
+
         return errors
 
     async def _validate_program_entities(
@@ -904,6 +918,12 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     default=self._config_entry.data.get(CONF_WORK_MODE_ENTITY),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="select")
+                ),
+                vol.Optional(
+                    CONF_INVERTER_EXPORT_SURPLUS_SWITCH,
+                    default=self._config_entry.data.get(CONF_INVERTER_EXPORT_SURPLUS_SWITCH),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="switch")
                 ),
                 vol.Optional(
                     CONF_CHARGE_CURRENT_ENTITY,
