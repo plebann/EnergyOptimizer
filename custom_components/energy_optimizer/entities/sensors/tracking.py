@@ -118,7 +118,7 @@ class HistoryExtraStoredData(ExtraStoredData):
         history = data.get("history", [])
         if not isinstance(history, list):
             history = []
-        history = history[:50] if len(history) > 50 else history
+        history = history[:20] if len(history) > 20 else history
         return cls(
             native_value=data.get("native_value", "No optimizations yet"),
             history=history,
@@ -326,7 +326,7 @@ class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
 
             if restored_data is not None:
                 self._attr_native_value = restored_data.native_value
-                self._history = restored_data.history[:30]
+                self._history = restored_data.history[:20]
                 _LOGGER.info(
                     "Restored OptimizationHistorySensor: %d entries",
                     len(self._history),
@@ -343,7 +343,7 @@ class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the optimization history."""
         return {
-            "history": self._history[:30],
+            "history": self._history[:20],
         }
 
     @property
@@ -351,7 +351,7 @@ class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
         """Return extra data to persist."""
         return HistoryExtraStoredData(
             native_value=self._attr_native_value,
-            history=self._history[:30],
+            history=self._history[:20],
         )
 
     def add_entry(self, scenario: str, details: dict[str, Any]) -> None:
@@ -362,6 +362,6 @@ class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
             **details,
         }
         self._history.insert(0, entry)
-        self._history = self._history[:30]
+        self._history = self._history[:20]
         self._attr_native_value = f"{scenario} - {details.get('result', 'completed')}"
         self.async_write_ha_state()
