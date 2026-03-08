@@ -1,7 +1,7 @@
 """Helper utilities for Energy Optimizer integration."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -481,3 +481,59 @@ def resolve_morning_max_price_hour(
         morning_peak_hour = default_hour
 
     return morning_peak_hour
+
+def resolve_daytime_min_price_time(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    default_time: str = "12:00",
+) -> time:
+    """Resolve daytime minimum price time (HH:MM) from configured sensor with fallback."""
+    from .const import CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR
+
+    def _normalize_to_time(raw_value: object) -> time | None:
+        dt_value = dt_util.parse_datetime(str(raw_value))
+        if dt_value is not None:
+            local_dt = dt_util.as_local(dt_value)
+            return time(local_dt.hour, local_dt.minute)
+
+        parsed_time = dt_util.parse_time(str(raw_value))
+        if parsed_time is not None:
+            return time(parsed_time.hour, parsed_time.minute)
+
+        return None
+
+    default_resolved = _normalize_to_time(default_time)
+    if default_resolved is None:
+        _LOGGER.warning(
+            "Daytime min price default_time %s invalid, using 12:00",
+            default_time,
+        )
+        default_resolved = time(12, 0)
+
+    min_price_hour_entity = config.get(CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR)
+    if min_price_hour_entity:
+        min_price_hour_state = hass.states.get(str(min_price_hour_entity))
+        if min_price_hour_state is None:
+            _LOGGER.warning(
+                "Daytime min price hour entity %s unavailable, using default %s",
+                min_price_hour_entity,
+                default_resolved.strftime("%H:%M"),
+            )
+        else:
+            resolved_time = _normalize_to_time(min_price_hour_state.state)
+            if resolved_time is not None:
+                return resolved_time
+            _LOGGER.warning(
+                "Daytime min price hour entity %s has invalid value %s, using default %s",
+                min_price_hour_entity,
+                min_price_hour_state.state,
+                default_resolved.strftime("%H:%M"),
+            )
+    else:
+        _LOGGER.warning(
+            "Daytime min price hour sensor not configured, using default %s",
+            default_resolved.strftime("%H:%M"),
+        )
+
+    return default_resolved

@@ -8,13 +8,14 @@ from homeassistant.core import Context
 from homeassistant.util import dt as dt_util
 
 from ..const import (
+    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
     CONF_DAYTIME_MIN_PRICE_SENSOR,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_PRICE_SENSOR,
     DOMAIN,
 )
 from ..controllers.inverter import set_max_charge_current
-from ..helpers import get_float_state_info, get_required_float_state
+from ..helpers import get_float_state_info, get_required_float_state, resolve_daytime_min_price_time
 from ..utils.forecast import get_pv_forecast_window
 from .common import get_entry_data, resolve_entry
 
@@ -45,9 +46,6 @@ async def async_run_solar_charge_block(
         hass,
         max_charge_entity,
     )
-    if max_charge_error is None and max_charge_value is not None and max_charge_value <= 0:
-        _LOGGER.debug("Solar charge block: max charge current already 0 — skip")
-        return
 
     # Guard: only run while sun is above horizon
     sun_state = hass.states.get(_SUN_ENTITY)
@@ -60,6 +58,30 @@ async def async_run_solar_charge_block(
     if now.hour >= _NOON_HOUR:
         _LOGGER.debug("Solar charge block: past noon (%02d:xx) — skip", now.hour)
         return
+
+    # When min price hour sensor is not configured, skip if charging is already blocked
+    # (avoids redundant service calls)
+    if max_charge_error is None and max_charge_value is not None and max_charge_value <= 0:
+        _LOGGER.debug("Solar charge block: max charge current already 0 — skip")
+        return
+
+    # Min price hour check: restore or keep blocked based on whether the min-price window has passed
+    if config.get(CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR):
+        min_price_time = resolve_daytime_min_price_time(hass, config)
+        if now.time() < min_price_time:
+            # Before the min-price window — if charging is already blocked keep it that way
+            if max_charge_value is not None and max_charge_value == 0:
+                _LOGGER.debug(
+                    "Solar charge block: before min price time %s, max charge already 0 — skip",
+                    min_price_time,
+                )
+                return
+        else:
+            _LOGGER.debug(
+                "Solar charge block: past min price time %s - no action needed",
+                min_price_time,
+            )
+            return
 
     # Current price
     current_price = get_required_float_state(
@@ -85,8 +107,17 @@ async def async_run_solar_charge_block(
         return
 
     if current_price <= 0:
-        _LOGGER.debug("Solar charge block: current price %.4f zero or negative — skip", current_price)
-        return
+        if max_charge_value is not None and max_charge_value == 0:
+            _LOGGER.debug("Solar charge block: current price %.4f zero or negative and charging blocked - unblocking", current_price)
+            await set_max_charge_current(
+                hass,
+                max_charge_entity,
+                23,
+                entry=entry,
+                logger=_LOGGER,
+                context=Context(),
+            )
+            return
 
     # Price gate: proceed only when current price is significantly above minimum
     _PRICE_MARGIN = max(100, _PRICE_BLOCK_FACTOR * current_price)  # Avoid blocking at very low prices

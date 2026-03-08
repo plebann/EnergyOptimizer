@@ -12,6 +12,7 @@ CONF_MORNING_MAX_PRICE_SENSOR = "morning_max_price_sensor"
 CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR = "tomorrow_morning_max_price_sensor"
 CONF_MORNING_MAX_PRICE_HOUR_SENSOR = "morning_max_price_hour_sensor"
 CONF_DAYTIME_MIN_PRICE_SENSOR = "daytime_min_price_sensor"
+CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR = "daytime_min_price_hour_sensor"
 
 CONF_BATTERY_SOC_SENSOR = "battery_soc_sensor"
 CONF_BATTERY_POWER_SENSOR = "battery_power_sensor"

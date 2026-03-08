@@ -24,6 +24,7 @@ from .const import (
     CONF_DAILY_LOAD_SENSOR,
     CONF_DAILY_LOSSES_SENSOR,
     CONF_DISCHARGE_CURRENT_ENTITY,
+    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
     CONF_DAYTIME_MIN_PRICE_SENSOR,
     CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
     CONF_EVENING_MAX_PRICE_SENSOR,
@@ -161,6 +162,9 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(CONF_DAYTIME_MIN_PRICE_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
             }
         )
@@ -783,6 +787,12 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     default=self._config_entry.data.get(CONF_DAYTIME_MIN_PRICE_SENSOR),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
+                    default=self._config_entry.data.get(CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
             }
         )
