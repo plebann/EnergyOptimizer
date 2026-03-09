@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from homeassistant.util import dt as dt_util
+
 from ..calculations.battery import calculate_battery_reserve, calculate_battery_space
 from ..calculations.energy import (
     calculate_losses,
@@ -246,7 +248,7 @@ class MorningSellStrategy(BaseSellStrategy):
         )
 
         selected_surplus_kwh = surplus_kwh
-        surplus_to_22_kwh: float | None = None
+        surplus_to_sunset: float | None = None
         selection_reason = "base_surplus"
 
         price_unavailable = getattr(self, "_price_unavailable", False)
@@ -258,7 +260,30 @@ class MorningSellStrategy(BaseSellStrategy):
                 selected_surplus_kwh = max(free_space_kwh - surplus_kwh, 0.0)
                 selection_reason = "pv_fit_fallback_from_free_space"
         else:
-            surplus_end_hour = 22
+            surplus_end_hour = 19
+            sun_state = self.hass.states.get("sun.sun")
+            if sun_state is None:
+                _LOGGER.warning(
+                    "Morning sell: sun.sun not found, using default surplus end hour %02d:00",
+                    surplus_end_hour,
+                )
+            else:
+                next_setting_raw = sun_state.attributes.get("next_setting")
+                if next_setting_raw is None:
+                    _LOGGER.warning(
+                        "Morning sell: sun.sun missing next_setting, using default surplus end hour %02d:00",
+                        surplus_end_hour,
+                    )
+                else:
+                    next_setting_dt = dt_util.parse_datetime(str(next_setting_raw))
+                    if next_setting_dt is None:
+                        _LOGGER.warning(
+                            "Morning sell: cannot parse next_setting '%s', using default surplus end hour %02d:00",
+                            next_setting_raw,
+                            surplus_end_hour,
+                        )
+                    else:
+                        surplus_end_hour = dt_util.as_local(next_setting_dt).hour
             surplus_window = build_hour_window(start_hour, surplus_end_hour)
             surplus_hours = max(len(surplus_window), 1)
             surplus_usage_kwh = sum(hourly_usage[hour] for hour in surplus_window)
@@ -282,7 +307,7 @@ class MorningSellStrategy(BaseSellStrategy):
                 self.config,
                 hours=surplus_hours,
             )
-            forecasts_to_22 = ForecastData(
+            forecasts_to_sunset = ForecastData(
                 start_hour=start_hour,
                 end_hour=surplus_end_hour,
                 hours=surplus_hours,
@@ -296,24 +321,24 @@ class MorningSellStrategy(BaseSellStrategy):
                 losses_kwh=surplus_losses_hourly * surplus_hours,
                 margin=self.margin,
             )
-            required_to_22_kwh, pv_to_22_kwh, _suff_to_22 = _resolve_required_and_pv(
-                forecasts_to_22
+            required_to_sunset_kwh, pv_to_sunset_kwh, _suff_to_sunset = _resolve_required_and_pv(
+                forecasts_to_sunset
             )
-            surplus_to_22_kwh = calculate_surplus_energy(
+            surplus_to_sunset = calculate_surplus_energy(
                 reserve_kwh,
-                required_to_22_kwh,
-                pv_to_22_kwh,
+                required_to_sunset_kwh,
+                pv_to_sunset_kwh,
             )
 
-            if surplus_to_22_kwh <= free_space_kwh:
+            if surplus_to_sunset <= free_space_kwh:
                 selected_surplus_kwh = 0.0
-                selection_reason = "surplus_to_22_not_above_free_space"
+                selection_reason = "surplus_to_sunset_not_above_free_space"
             else:
                 selected_surplus_kwh = min(
                     surplus_kwh,
-                    surplus_to_22_kwh - free_space_kwh,
+                    surplus_to_sunset - free_space_kwh,
                 )
-                selection_reason = "surplus_to_22_above_free_space"
+                selection_reason = "surplus_to_sunset_above_free_space"
 
         selected_surplus_kwh = max(selected_surplus_kwh, 0.0)
 
@@ -335,9 +360,9 @@ class MorningSellStrategy(BaseSellStrategy):
                     "surplus_kwh": round(surplus_kwh, 2),
                     "selected_surplus_kwh": round(selected_surplus_kwh, 2),
                     "free_space_kwh": round(free_space_kwh, 2),
-                    "surplus_to_22_kwh": (
-                        round(surplus_to_22_kwh, 2)
-                        if surplus_to_22_kwh is not None
+                    "surplus_to_sunset_kwh": (
+                        round(surplus_to_sunset, 2)
+                        if surplus_to_sunset is not None
                         else None
                     ),
                     "surplus_selection_reason": selection_reason,
@@ -375,9 +400,9 @@ class MorningSellStrategy(BaseSellStrategy):
             outcome.details["free_space_kwh"] = round(free_space_kwh, 2)
             outcome.details["surplus_kwh_base"] = round(surplus_kwh, 2)
             outcome.details["selected_surplus_kwh"] = round(surplus, 2)
-            outcome.details["surplus_to_22_kwh"] = (
-                round(surplus_to_22_kwh, 2)
-                if surplus_to_22_kwh is not None
+            outcome.details["surplus_to_sunset_kwh"] = (
+                round(surplus_to_sunset, 2)
+                if surplus_to_sunset is not None
                 else None
             )
             outcome.details["surplus_selection_reason"] = selection_reason
@@ -404,9 +429,9 @@ class MorningSellStrategy(BaseSellStrategy):
                     "surplus_kwh": round(current_surplus_kwh, 2),
                     "surplus_kwh_base": round(surplus_kwh, 2),
                     "free_space_kwh": round(free_space_kwh, 2),
-                    "surplus_to_22_kwh": (
-                        round(surplus_to_22_kwh, 2)
-                        if surplus_to_22_kwh is not None
+                    "surplus_to_sunset_kwh": (
+                        round(surplus_to_sunset, 2)
+                        if surplus_to_sunset is not None
                         else None
                     ),
                     "surplus_selection_reason": selection_reason,
