@@ -68,7 +68,7 @@ async def async_run_export_block_control(
         "on" if is_enabled else "off",
     )
 
-    if price < 0 and is_enabled:
+    if price <= 0 and is_enabled:
         _LOGGER.info(
             "Export block control: blocking export (price %.4f, switch on -> off)",
             price,
