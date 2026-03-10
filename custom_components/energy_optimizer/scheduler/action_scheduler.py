@@ -10,6 +10,7 @@ from homeassistant.helpers.event import async_track_state_change_event, async_tr
 from ..const import (
     CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
     CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
+    CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_PRICE_SENSOR,
@@ -32,6 +33,7 @@ from ..helpers import (
     get_float_state_info,
     resolve_daytime_min_price_time,
     resolve_evening_max_price_hour,
+    resolve_evening_second_max_price_hour,
     resolve_morning_max_price_hour,
     resolve_tariff_end_hour,
 )
@@ -55,6 +57,7 @@ class ActionScheduler:
         self._afternoon_listener: Callable[[], None] | None = None
         self._morning_sell_listener: Callable[[], None] | None = None
         self._evening_sell_listener: Callable[[], None] | None = None
+        self._evening_sell_second_listener: Callable[[], None] | None = None
         self._morning_restore_listener: Callable[[], None] | None = None
         self._evening_restore_listener: Callable[[], None] | None = None
         self._daytime_min_price_listener: Callable[[], None] | None = None
@@ -112,6 +115,18 @@ class ActionScheduler:
                 )
             )
 
+        evening_second_peak_hour_entity = self.entry.data.get(
+            CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR
+        )
+        if evening_second_peak_hour_entity:
+            self._listeners.append(
+                async_track_state_change_event(
+                    self.hass,
+                    [str(evening_second_peak_hour_entity)],
+                    self._handle_evening_second_peak_hour_change,
+                )
+            )
+
         morning_peak_hour_entity = self.entry.data.get(CONF_MORNING_MAX_PRICE_HOUR_SENSOR)
         if morning_peak_hour_entity:
             self._listeners.append(
@@ -148,6 +163,9 @@ class ActionScheduler:
         if self._evening_sell_listener is not None:
             self._evening_sell_listener()
             self._evening_sell_listener = None
+        if self._evening_sell_second_listener is not None:
+            self._evening_sell_second_listener()
+            self._evening_sell_second_listener = None
         if self._morning_restore_listener is not None:
             self._morning_restore_listener()
             self._morning_restore_listener = None
@@ -198,12 +216,26 @@ class ActionScheduler:
             entry_id=self.entry.entry_id,
         )
 
+    async def _handle_evening_sell_second(self, now: datetime) -> None:
+        """Run evening second-session sell at configured second-best price hour."""
+        _LOGGER.info("Scheduler triggering evening second-session sell")
+        await async_run_evening_sell(
+            self.hass,
+            entry_id=self.entry.entry_id,
+            is_second_session=True,
+        )
+
     async def _handle_tariff_end_change(self, event) -> None:
         """Reschedule afternoon charge when tariff end hour changes."""
         self._schedule_afternoon_charge()
 
     async def _handle_evening_peak_hour_change(self, event) -> None:
         """Reschedule evening peak sell when peak hour changes."""
+        self._schedule_evening_sell()
+        self._schedule_sell_restores()
+
+    async def _handle_evening_second_peak_hour_change(self, event) -> None:
+        """Reschedule evening sell when second-best price hour changes."""
         self._schedule_evening_sell()
         self._schedule_sell_restores()
 
@@ -268,6 +300,9 @@ class ActionScheduler:
         if self._evening_sell_listener is not None:
             self._evening_sell_listener()
             self._evening_sell_listener = None
+        if self._evening_sell_second_listener is not None:
+            self._evening_sell_second_listener()
+            self._evening_sell_second_listener = None
 
         hour = resolve_evening_max_price_hour(self.hass, self.entry.data, default_hour=17)
         self._evening_sell_listener = async_track_time_change(
@@ -277,6 +312,16 @@ class ActionScheduler:
             minute=0,
             second=0,
         )
+
+        second_hour = resolve_evening_second_max_price_hour(self.hass, self.entry.data)
+        if second_hour is not None:
+            self._evening_sell_second_listener = async_track_time_change(
+                self.hass,
+                self._handle_evening_sell_second,
+                hour=second_hour,
+                minute=0,
+                second=0,
+            )
 
     def _schedule_morning_sell(self) -> None:
         """Schedule morning peak sell at configured morning max price hour."""
@@ -371,10 +416,16 @@ class ActionScheduler:
         )
 
         evening_hour = resolve_evening_max_price_hour(self.hass, self.entry.data, default_hour=17)
+        second_evening_hour = resolve_evening_second_max_price_hour(self.hass, self.entry.data)
+        effective_evening_restore_hour = (
+            (max(evening_hour, second_evening_hour) + 1) % 24
+            if second_evening_hour is not None
+            else (evening_hour + 1) % 24
+        )
         self._evening_restore_listener = async_track_time_change(
             self.hass,
             self._handle_evening_restore,
-            hour=(evening_hour + 1) % 24,
+            hour=effective_evening_restore_hour,
             minute=0,
             second=0,
         )

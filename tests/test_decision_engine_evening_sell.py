@@ -12,8 +12,12 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_EFFICIENCY,
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
+    CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
     CONF_EVENING_MAX_PRICE_SENSOR,
+    CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
+    CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
     CONF_EXPORT_POWER_ENTITY,
+    CONF_MAX_SELL_ENERGY_ENTITY,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_PROG5_SOC_ENTITY,
     CONF_PV_PRODUCTION_SENSOR,
@@ -45,6 +49,7 @@ def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
     entry.entry_id = "entry-1"
     entry.domain = DOMAIN
     entry.data = config
+    entry.options = {}
     hass.config_entries.async_entries.return_value = [entry]
     hass.config_entries.async_get_entry.return_value = entry
     hass.states.get.side_effect = lambda entity_id: (
@@ -115,6 +120,17 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, outcomes: list) -> None:
     monkeypatch.setattr(
         f"{SELL_BASE}.set_export_power",
         AsyncMock(),
+    )
+    class _StoreStub:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        async def async_save(self, _data: dict[str, object]) -> None:
+            return None
+
+    monkeypatch.setattr(
+        f"{SELL_BASE}.Store",
+        _StoreStub,
     )
     monkeypatch.setattr(
         f"{SELL_BASE}.dt_util.utcnow",
@@ -432,3 +448,200 @@ async def test_evening_sell_surplus_no_action_required_uses_sufficiency_window(
     assert outcomes
     assert outcomes[-1].action_type == "no_action"
     assert outcomes[-1].details["required_kwh"] == 9.0
+
+
+@pytest.mark.asyncio
+async def test_evening_sell_max_sell_energy_clamp_and_fail_open(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = _base_config()
+    config[CONF_MAX_SELL_ENERGY_ENTITY] = "sensor.max_sell_energy"
+    states = _base_states()
+    states["sensor.max_sell_energy"] = "3.0"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    async def _hp(*args, **kwargs):
+        return 1.0, {}
+
+    monkeypatch.setattr(f"{EVENING}.get_heat_pump_forecast_window", _hp)
+    monkeypatch.setattr(f"{EVENING}.get_pv_forecast_window", lambda *args, **kwargs: (2.0, {}))
+    monkeypatch.setattr(f"{EVENING}.calculate_losses", lambda *args, **kwargs: (0.0, 0.0))
+    monkeypatch.setattr(f"{EVENING}.calculate_battery_reserve", lambda *args, **kwargs: 10.0)
+    monkeypatch.setattr(f"{EVENING}.calculate_surplus_energy", lambda reserve, required, pv: 7.0)
+    monkeypatch.setattr(f"{SELL_BASE}.calculate_export_power", lambda *args, **kwargs: 1200.0)
+
+    kwh_calls: list[float] = []
+
+    def _kwh_to_soc(kwh: float, capacity_ah: float, voltage: float) -> float:
+        kwh_calls.append(kwh)
+        return 10.0
+
+    monkeypatch.setattr(f"{SELL_BASE}.kwh_to_soc", _kwh_to_soc)
+
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes
+    assert kwh_calls[-1] == 3.0
+
+    caplog.clear()
+    kwh_calls.clear()
+    del states["sensor.max_sell_energy"]
+
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert kwh_calls[-1] == 7.0
+
+
+@pytest.mark.asyncio
+async def test_evening_sell_case_a_first_skips_restore_second_persists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    config[CONF_EVENING_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_hour"
+    config[CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_second_hour"
+    config[CONF_EVENING_SECOND_MAX_PRICE_SENSOR] = "sensor.evening_second_price"
+    config[CONF_MAX_SELL_ENERGY_ENTITY] = "sensor.max_sell_energy"
+    states = _base_states()
+    states["sensor.evening_hour"] = "19"
+    states["sensor.evening_second_hour"] = "20"
+    states["sensor.evening_second_price"] = "600"
+    states["sensor.max_sell_energy"] = "4.0"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    async def _hp(*args, **kwargs):
+        return 1.0, {}
+
+    monkeypatch.setattr(f"{EVENING}.get_heat_pump_forecast_window", _hp)
+    monkeypatch.setattr(f"{EVENING}.get_pv_forecast_window", lambda *args, **kwargs: (2.0, {}))
+    monkeypatch.setattr(f"{EVENING}.calculate_losses", lambda *args, **kwargs: (0.0, 0.0))
+    monkeypatch.setattr(f"{EVENING}.calculate_battery_reserve", lambda *args, **kwargs: 10.0)
+    monkeypatch.setattr(f"{EVENING}.calculate_surplus_energy", lambda reserve, required, pv: 6.0)
+    monkeypatch.setattr(f"{SELL_BASE}.calculate_export_power", lambda *args, **kwargs: 1100.0)
+
+    set_program_soc_mock = AsyncMock()
+    set_export_power_mock = AsyncMock()
+    monkeypatch.setattr(f"{SELL_BASE}.set_program_soc", set_program_soc_mock)
+    monkeypatch.setattr(f"{SELL_BASE}.set_export_power", set_export_power_mock)
+
+    saved_payloads: list[dict[str, object]] = []
+
+    class _StoreStub:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        async def async_save(self, data: dict[str, object]) -> None:
+            saved_payloads.append(data)
+
+    monkeypatch.setattr(f"{SELL_BASE}.Store", _StoreStub)
+
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0, is_second_session=False)
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0, is_second_session=True)
+
+    assert set_program_soc_mock.await_count >= 2
+    assert set_export_power_mock.await_count >= 2
+    assert len(saved_payloads) == 1
+    assert saved_payloads[0]["restore_hour"] == 21
+
+
+@pytest.mark.asyncio
+async def test_evening_sell_case_b_early_no_action_when_surplus_covered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    config[CONF_EVENING_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_hour"
+    config[CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_second_hour"
+    config[CONF_EVENING_SECOND_MAX_PRICE_SENSOR] = "sensor.evening_second_price"
+    config[CONF_MAX_SELL_ENERGY_ENTITY] = "sensor.max_sell_energy"
+    states = _base_states()
+    states["sensor.evening_hour"] = "19"
+    states["sensor.evening_second_hour"] = "18"
+    states["sensor.evening_second_price"] = "600"
+    states["sensor.max_sell_energy"] = "3.0"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    async def _hp(*args, **kwargs):
+        return 1.0, {}
+
+    monkeypatch.setattr(f"{EVENING}.get_heat_pump_forecast_window", _hp)
+    monkeypatch.setattr(f"{EVENING}.get_pv_forecast_window", lambda *args, **kwargs: (2.0, {}))
+    monkeypatch.setattr(f"{EVENING}.calculate_losses", lambda *args, **kwargs: (0.0, 0.0))
+    monkeypatch.setattr(f"{EVENING}.calculate_battery_reserve", lambda *args, **kwargs: 10.0)
+    monkeypatch.setattr(f"{EVENING}.calculate_surplus_energy", lambda reserve, required, pv: 2.5)
+
+    set_work_mode_mock = AsyncMock()
+    set_program_soc_mock = AsyncMock()
+    set_export_power_mock = AsyncMock()
+    monkeypatch.setattr(f"{SELL_BASE}.set_work_mode", set_work_mode_mock)
+    monkeypatch.setattr(f"{SELL_BASE}.set_program_soc", set_program_soc_mock)
+    monkeypatch.setattr(f"{SELL_BASE}.set_export_power", set_export_power_mock)
+
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0, is_second_session=True)
+
+    assert outcomes
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].reason == "Surplus covered by main session"
+    set_work_mode_mock.assert_not_awaited()
+    set_program_soc_mock.assert_not_awaited()
+    set_export_power_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_evening_sell_case_b_early_sells_overflow_and_skips_restore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    config[CONF_EVENING_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_hour"
+    config[CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_second_hour"
+    config[CONF_EVENING_SECOND_MAX_PRICE_SENSOR] = "sensor.evening_second_price"
+    config[CONF_MAX_SELL_ENERGY_ENTITY] = "sensor.max_sell_energy"
+    states = _base_states()
+    states["sensor.evening_hour"] = "19"
+    states["sensor.evening_second_hour"] = "18"
+    states["sensor.evening_second_price"] = "600"
+    states["sensor.max_sell_energy"] = "3.0"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    async def _hp(*args, **kwargs):
+        return 1.0, {}
+
+    monkeypatch.setattr(f"{EVENING}.get_heat_pump_forecast_window", _hp)
+    monkeypatch.setattr(f"{EVENING}.get_pv_forecast_window", lambda *args, **kwargs: (2.0, {}))
+    monkeypatch.setattr(f"{EVENING}.calculate_losses", lambda *args, **kwargs: (0.0, 0.0))
+    monkeypatch.setattr(f"{EVENING}.calculate_battery_reserve", lambda *args, **kwargs: 10.0)
+    monkeypatch.setattr(f"{EVENING}.calculate_surplus_energy", lambda reserve, required, pv: 5.0)
+    monkeypatch.setattr(f"{SELL_BASE}.calculate_export_power", lambda *args, **kwargs: 800.0)
+
+    kwh_calls: list[float] = []
+
+    def _kwh_to_soc(kwh: float, capacity_ah: float, voltage: float) -> float:
+        kwh_calls.append(kwh)
+        return 10.0
+
+    monkeypatch.setattr(f"{SELL_BASE}.kwh_to_soc", _kwh_to_soc)
+
+    saved_payloads: list[dict[str, object]] = []
+
+    class _StoreStub:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        async def async_save(self, data: dict[str, object]) -> None:
+            saved_payloads.append(data)
+
+    monkeypatch.setattr(f"{SELL_BASE}.Store", _StoreStub)
+
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0, is_second_session=True)
+
+    assert outcomes
+    assert outcomes[-1].action_type in ("high_sell", "sell")
+    assert kwh_calls[-1] == 2.0
+    assert saved_payloads == []

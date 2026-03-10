@@ -64,26 +64,39 @@ Algorytm two-window z granicą na północy:
 
 ```mermaid
 flowchart TD
-   ES_start([Run evening peak sell]) --> ES_branch{Price > threshold?}
-   ES_no_action[No action]
-   ES_surplus{Surplus > 0?}
-   ES_clamp[Clamp to PV production]
-   ES_target{Target SOC < Current SOC?}
+   ES_start([Run evening peak sell]) --> ES_mode{Second session active?}
+   ES_mode -->|no| ES_branch{Price > threshold?}
+   ES_mode -->|yes| ES_case{Session mode}
 
-   ES_branch -->|yes| HP_inputs[High sell window: now+1 to tariff_start]
+   ES_case -->|Case A first| AB_common[High sell or surplus evaluation]
+   ES_case -->|Case A second| AB_common
+   ES_case -->|Case B early| B1[High sell eval in window first_hour+1 -> 22]
+   ES_case -->|Case B main| AB_common
+
+   B1 --> B1_guard{surplus <= max_sell_energy?}
+   B1_guard -->|yes| ES_no_action[No action: surplus covered by main session]
+   B1_guard -->|no| B1_overflow[Sell only overflow: surplus - max_sell_energy]
+
+   ES_branch -->|yes| HP_inputs[High sell window: now+1 -> 22]
    HP_inputs --> ES_surplus
 
-   ES_branch -->|no| SP_window2[WINDOW 2: tomorrow 00:00 to tariff_end sufficiency]
+   ES_branch -->|no| SP_window2[WINDOW 2: tomorrow 00:00 -> tariff_end sufficiency]
    SP_window2 --> SP_suff{Sufficiency reached?}
-   SP_suff -->|no| ES_no_action
-   SP_suff -->|yes| SP_window1[WINDOW 1: today now+1 to 24:00]
+   SP_suff -->|no| ES_no_action2[No action]
+   SP_suff -->|yes| SP_window1[WINDOW 1: today now+1 -> 24:00]
    SP_window1 --> ES_surplus
 
-   ES_surplus -->|no| ES_no_action
-   ES_surplus -->|yes| ES_clamp
-   ES_clamp --> ES_target
-   ES_target -->|no| ES_no_action
-   ES_target -->|yes| ES_sell[Sell scheduled]
+   AB_common --> ES_surplus
+   B1_overflow --> ES_surplus
+
+   ES_surplus{Surplus > 0?} -->|no| ES_no_action3[No action]
+   ES_surplus -->|yes| ES_clamp_pv[Clamp to PV production]
+   ES_clamp_pv --> ES_clamp_max[Clamp to max_sell_energy if configured]
+   ES_clamp_max --> ES_target{Target SOC < Current SOC?}
+   ES_target -->|no| ES_no_action4[No action]
+   ES_target -->|yes| ES_restore{Skip restore persistence?}
+   ES_restore -->|yes| ES_sell_skip[Sell scheduled without restore persistence]
+   ES_restore -->|no| ES_sell_persist[Sell scheduled with restore persistence]
 ```
 
 ### Szczegóły decyzyjne

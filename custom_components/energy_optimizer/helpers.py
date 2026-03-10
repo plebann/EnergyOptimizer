@@ -435,6 +435,45 @@ def resolve_evening_max_price_hour(
     return evening_peak_hour
 
 
+def resolve_evening_second_max_price_hour(
+    hass: HomeAssistant,
+    config: dict[str, object],
+) -> int | None:
+    """Resolve evening second-best price hour from configured sensor.
+
+    Returns None when not configured or sensor unavailable.
+    """
+    from .const import CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR
+
+    entity = config.get(CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR)
+    if not entity:
+        return None
+
+    state = hass.states.get(str(entity))
+    if state is None:
+        _LOGGER.warning(
+            "Evening second max price hour entity %s unavailable", entity
+        )
+        return None
+
+    parsed = _parse_hour_from_state_value(state.state)
+    if parsed is None:
+        _LOGGER.warning(
+            "Evening second max price hour entity %s has invalid value %s",
+            entity,
+            state.state,
+        )
+        return None
+
+    if parsed < 0 or parsed > 23:
+        _LOGGER.warning(
+            "Evening second max price hour %s out of range, ignoring", parsed
+        )
+        return None
+
+    return parsed
+
+
 def resolve_morning_max_price_hour(
     hass: HomeAssistant,
     config: dict[str, object],

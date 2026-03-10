@@ -12,6 +12,11 @@ from ..calculations.energy import (
 )
 from ..calculations.utils import build_hourly_usage_array
 from ..const import CONF_EVENING_MAX_PRICE_SENSOR, CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR
+from ..const import (
+    CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
+    CONF_MAX_SELL_ENERGY_ENTITY,
+    CONF_MIN_ARBITRAGE_PRICE,
+)
 from ..decision_engine.common import (
     ForecastData,
     build_evening_sell_outcome,
@@ -21,8 +26,10 @@ from ..decision_engine.common import (
     get_required_prog5_soc_state,
 )
 from ..helpers import (
+    get_float_state_info,
     get_required_float_state,
     resolve_evening_max_price_hour,
+    resolve_evening_second_max_price_hour,
     resolve_tariff_end_hour,
     resolve_tariff_start_hour,
 )
@@ -40,6 +47,22 @@ _LOGGER = logging.getLogger(__name__)
 
 class EveningSellStrategy(BaseSellStrategy):
     """Evening sell strategy using high-price and surplus branches."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        *,
+        entry_id: str | None,
+        margin: float | None,
+        is_second_session: bool = False,
+    ) -> None:
+        """Initialize evening sell strategy."""
+        super().__init__(hass, entry_id=entry_id, margin=margin)
+        self._is_second_session = is_second_session
+        self._session_mode = "none"
+        self._first_sell_hour = 17
+        self._second_sell_hour: int | None = None
+        self._case_b_early_request: SellRequest | None = None
 
     @property
     def scenario_name(self) -> str:
@@ -64,6 +87,10 @@ class EveningSellStrategy(BaseSellStrategy):
         )
 
     def _resolve_sell_hour(self) -> int:
+        if self._is_second_session:
+            second_hour = resolve_evening_second_max_price_hour(self.hass, self.config)
+            if second_hour is not None:
+                return second_hour
         return resolve_evening_max_price_hour(self.hass, self.config, default_hour=17)
 
     async def _on_price_unavailable(self) -> bool:
@@ -76,6 +103,42 @@ class EveningSellStrategy(BaseSellStrategy):
         return True
 
     async def _check_early_exit(self) -> DecisionOutcome | None:
+        self._session_mode = self._resolve_second_session_mode()
+        self._case_b_early_request = None
+
+        if self._session_mode == "case_b_early":
+            max_sell_entity = self.config.get(CONF_MAX_SELL_ENERGY_ENTITY)
+            if max_sell_entity:
+                max_sell_value, _, max_sell_error = get_float_state_info(
+                    self.hass,
+                    str(max_sell_entity),
+                )
+                if max_sell_error is None and max_sell_value is not None and max_sell_value > 0:
+                    early_start_hour = (self._first_sell_hour + 1) % 24
+                    early_evaluation = await self._high_price_sell(
+                        start_hour=early_start_hour,
+                        end_hour=22,
+                    )
+                    if isinstance(early_evaluation, DecisionOutcome):
+                        return early_evaluation
+                    if early_evaluation.surplus_kwh <= max_sell_value:
+                        return build_no_action_outcome(
+                            scenario=self.scenario_name,
+                            summary="No evening peak sell action",
+                            reason="Surplus covered by main session",
+                            current_soc=self.current_soc,
+                            reserve_kwh=0.0,
+                            required_kwh=0.0,
+                            pv_forecast_kwh=0.0,
+                        )
+                    overflow_kwh = early_evaluation.surplus_kwh - max_sell_value
+                    self._case_b_early_request = SellRequest(
+                        surplus_kwh=overflow_kwh,
+                        build_outcome_fn=early_evaluation.build_outcome_fn,
+                        build_no_action_fn=early_evaluation.build_no_action_fn,
+                        skip_restore=True,
+                    )
+
         if getattr(self, "_price_unavailable", False):
             # Price unknown - skip tomorrow comparison and proceed to surplus sell.
             return None
@@ -104,13 +167,50 @@ class EveningSellStrategy(BaseSellStrategy):
         )
 
     async def _evaluate_sell(self) -> DecisionOutcome | SellRequest:
-        if getattr(self, "_price_unavailable", False) or self.price <= self.threshold_price:
-            return await self._surplus_sell()
-        return await self._high_price_sell()
+        if self._session_mode == "case_b_early":
+            if self._case_b_early_request is not None:
+                return self._case_b_early_request
+            early_start_hour = (self._first_sell_hour + 1) % 24
+            max_sell_entity = self.config.get(CONF_MAX_SELL_ENERGY_ENTITY)
+            max_sell_value = 0.0
+            if max_sell_entity:
+                value, _, error = get_float_state_info(self.hass, str(max_sell_entity))
+                if error is None and value is not None and value > 0:
+                    max_sell_value = value
+            return await self._high_price_sell(
+                start_hour=early_start_hour,
+                end_hour=22,
+                surplus_offset_kwh=max_sell_value,
+                skip_restore=True,
+            )
 
-    async def _high_price_sell(self) -> DecisionOutcome | SellRequest:
-        start_hour = (self._now_hour + 1) % 24
-        end_hour = 22
+        if getattr(self, "_price_unavailable", False) or self.price <= self.threshold_price:
+            evaluation = await self._surplus_sell()
+        else:
+            evaluation = await self._high_price_sell()
+
+        if (
+            isinstance(evaluation, SellRequest)
+            and self._session_mode in ("case_a_first", "case_b_early")
+        ):
+            return SellRequest(
+                surplus_kwh=evaluation.surplus_kwh,
+                build_outcome_fn=evaluation.build_outcome_fn,
+                build_no_action_fn=evaluation.build_no_action_fn,
+                skip_restore=True,
+            )
+        return evaluation
+
+    async def _high_price_sell(
+        self,
+        *,
+        start_hour: int | None = None,
+        end_hour: int = 22,
+        surplus_offset_kwh: float = 0.0,
+        skip_restore: bool = False,
+    ) -> DecisionOutcome | SellRequest:
+        if start_hour is None:
+            start_hour = (self._now_hour + 1) % 24
 
         hours_window = build_hour_window(start_hour, end_hour)
         hours = max(len(hours_window), 1)
@@ -178,6 +278,8 @@ class EveningSellStrategy(BaseSellStrategy):
             required_kwh,
             pv_forecast_kwh,
         )
+        if surplus_offset_kwh > 0:
+            surplus_kwh = max(0.0, surplus_kwh - surplus_offset_kwh)
         _LOGGER.debug(
             "Evening high-price calculation | required=(usage %.3f + hp %.3f + losses %.3f) * margin %.3f = %.3f kWh | "
             "available=(reserve %.3f + pv %.3f)=%.3f kWh | surplus=%.3f kWh",
@@ -242,6 +344,7 @@ class EveningSellStrategy(BaseSellStrategy):
             surplus_kwh=surplus_kwh,
             build_outcome_fn=_make_outcome,
             build_no_action_fn=_make_no_action,
+            skip_restore=skip_restore,
         )
 
     async def _surplus_sell(self) -> DecisionOutcome | SellRequest:
@@ -496,13 +599,47 @@ class EveningSellStrategy(BaseSellStrategy):
             build_no_action_fn=_make_no_action,
         )
 
+    def _resolve_second_session_mode(self) -> str:
+        """Determine which sell session role this invocation plays."""
+        second_hour = resolve_evening_second_max_price_hour(self.hass, self.config)
+        self._second_sell_hour = second_hour
+        self._first_sell_hour = resolve_evening_max_price_hour(
+            self.hass,
+            self.config,
+            default_hour=17,
+        )
+        if second_hour is None:
+            return "none"
+
+        second_price = get_required_float_state(
+            self.hass,
+            self.config.get(CONF_EVENING_SECOND_MAX_PRICE_SENSOR),
+            entity_name="Evening second max price sensor",
+        )
+        if second_price is None:
+            return "none"
+
+        arbitrage = float(self.config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0)
+        if second_price <= arbitrage:
+            return "none"
+
+        if second_hour > self._first_sell_hour:
+            return "case_a_second" if self._is_second_session else "case_a_first"
+        return "case_b_early" if self._is_second_session else "case_b_main"
+
 
 async def async_run_evening_sell(
     hass: HomeAssistant,
     *,
     entry_id: str | None = None,
     margin: float | None = None,
+    is_second_session: bool = False,
 ) -> None:
     """Run evening peak sell routine."""
-    strategy = EveningSellStrategy(hass, entry_id=entry_id, margin=margin)
+    strategy = EveningSellStrategy(
+        hass,
+        entry_id=entry_id,
+        margin=margin,
+        is_second_session=is_second_session,
+    )
     await strategy.run()

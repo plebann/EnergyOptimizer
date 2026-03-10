@@ -15,6 +15,7 @@ from ..calculations.battery import kwh_to_soc
 from ..calculations.energy import calculate_export_power
 from ..const import (
     CONF_EXPORT_POWER_ENTITY,
+    CONF_MAX_SELL_ENERGY_ENTITY,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_PV_PRODUCTION_SENSOR,
     CONF_WORK_MODE_ENTITY,
@@ -46,6 +47,7 @@ class SellRequest:
     surplus_kwh: float
     build_outcome_fn: Callable[[float, float, float], DecisionOutcome]
     build_no_action_fn: Callable[[float], DecisionOutcome]
+    skip_restore: bool = False
 
 
 class BaseSellStrategy(ABC):
@@ -160,24 +162,24 @@ class BaseSellStrategy(ABC):
         else:
             self.price = price
 
-        early_outcome = await self._check_early_exit()
-        if early_outcome is not None:
-            await self._log_outcome(early_outcome)
-            return
-
         self.threshold_price = float(self.config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0)
         self.margin = self._raw_margin if self._raw_margin is not None else 1.1
         self.battery_config = get_battery_config(self.config)
         self._now_hour = dt_util.as_local(dt_util.utcnow()).hour
 
+        early_outcome = await self._check_early_exit()
+        if early_outcome is not None:
+            await self._log_outcome(early_outcome)
+            return
+
         evaluation = await self._evaluate_sell()
         if isinstance(evaluation, SellRequest):
-            await self._execute_sell(evaluation)
+            await self._execute_sell(evaluation, skip_restore=evaluation.skip_restore)
             return
 
         await self._log_outcome(evaluation)
 
-    async def _execute_sell(self, request: SellRequest) -> None:
+    async def _execute_sell(self, request: SellRequest, *, skip_restore: bool = False) -> None:
         """Execute shared sell tail: clamp, target, writes and final outcome."""
         surplus_kwh = request.surplus_kwh
 
@@ -196,6 +198,27 @@ class BaseSellStrategy(ABC):
                             pv_value,
                         )
                     surplus_kwh = min(surplus_kwh, pv_value)
+
+        max_sell_entity = self.config.get(CONF_MAX_SELL_ENERGY_ENTITY)
+        if max_sell_entity:
+            max_sell_value, _, max_sell_error = get_float_state_info(
+                self.hass,
+                str(max_sell_entity),
+            )
+            if max_sell_error is None and max_sell_value is not None and max_sell_value > 0:
+                if surplus_kwh > max_sell_value:
+                    _LOGGER.info(
+                        "Clamping surplus from %.2f kWh to max_sell_energy %.2f kWh",
+                        surplus_kwh,
+                        max_sell_value,
+                    )
+                surplus_kwh = min(surplus_kwh, max_sell_value)
+            else:
+                _LOGGER.warning(
+                    "max_sell_energy entity %s unavailable (%s) — no cap applied",
+                    max_sell_entity,
+                    max_sell_error,
+                )
 
         target_soc = max(
             self.current_soc - kwh_to_soc(surplus_kwh, self.battery_config.capacity_ah, self.battery_config.voltage),
@@ -229,21 +252,22 @@ class BaseSellStrategy(ABC):
                 context=self.integration_context,
             )
 
-            restore_data = {
-                "work_mode": original_work_mode,
-                "prog_soc_entity": self.prog_soc_entity,
-                "prog_soc_value": self.original_prog_soc,
-                "restore_hour": self.restore_hour,
-                "sell_type": self.sell_type,
-                "timestamp": dt_util.utcnow().isoformat(),
-            }
-            self.hass.data[DOMAIN][self.entry.entry_id]["sell_restore"] = restore_data
-            store = Store(
-                self.hass,
-                STORAGE_VERSION_SELL_RESTORE,
-                f"{STORAGE_KEY_SELL_RESTORE}.{self.entry.entry_id}",
-            )
-            await store.async_save(restore_data)
+            if not skip_restore:
+                restore_data = {
+                    "work_mode": original_work_mode,
+                    "prog_soc_entity": self.prog_soc_entity,
+                    "prog_soc_value": self.original_prog_soc,
+                    "restore_hour": self.restore_hour,
+                    "sell_type": self.sell_type,
+                    "timestamp": dt_util.utcnow().isoformat(),
+                }
+                self.hass.data[DOMAIN][self.entry.entry_id]["sell_restore"] = restore_data
+                store = Store(
+                    self.hass,
+                    STORAGE_VERSION_SELL_RESTORE,
+                    f"{STORAGE_KEY_SELL_RESTORE}.{self.entry.entry_id}",
+                )
+                await store.async_save(restore_data)
 
             await set_program_soc(
                 self.hass,

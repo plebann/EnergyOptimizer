@@ -28,6 +28,8 @@ from .const import (
     CONF_DAYTIME_MIN_PRICE_SENSOR,
     CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
     CONF_EVENING_MAX_PRICE_SENSOR,
+    CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
+    CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
     CONF_ENABLE_HEAT_PUMP,
     CONF_EXPORT_POWER_ENTITY,
     CONF_GRID_CHARGE_SWITCH,
@@ -41,6 +43,7 @@ from .const import (
     CONF_LOAD_USAGE_16_20,
     CONF_LOAD_USAGE_20_24,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
+    CONF_MAX_SELL_ENERGY_ENTITY,
     CONF_MAX_EXPORT_POWER,
     CONF_MAX_SOC,
     CONF_MIN_ARBITRAGE_PRICE,
@@ -150,6 +153,12 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(CONF_EVENING_MAX_PRICE_HOUR_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(CONF_EVENING_SECOND_MAX_PRICE_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_MORNING_MAX_PRICE_SENSOR): selector.EntitySelector(
@@ -298,6 +307,9 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(CONF_MAX_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(CONF_MAX_SELL_ENERGY_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["number", "input_number", "sensor"])
                 ),
                 vol.Optional(CONF_GRID_CHARGE_SWITCH): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="switch")
@@ -766,6 +778,18 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(
+                    CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
+                    default=self._config_entry.data.get(CONF_EVENING_SECOND_MAX_PRICE_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
+                    default=self._config_entry.data.get(CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                ),
+                vol.Optional(
                     CONF_MORNING_MAX_PRICE_SENSOR,
                     default=self._config_entry.data.get(CONF_MORNING_MAX_PRICE_SENSOR),
                 ): selector.EntitySelector(
@@ -959,6 +983,12 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     default=self._config_entry.data.get(CONF_MAX_CHARGE_CURRENT_ENTITY),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_MAX_SELL_ENERGY_ENTITY,
+                    default=self._config_entry.data.get(CONF_MAX_SELL_ENERGY_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["number", "input_number", "sensor"])
                 ),
                 vol.Optional(
                     CONF_GRID_CHARGE_SWITCH,

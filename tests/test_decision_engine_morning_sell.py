@@ -282,7 +282,7 @@ async def test_morning_sell_surplus_below_free_space_and_to_22_not_above_no_acti
 
     assert outcomes
     assert outcomes[-1].action_type == "no_action"
-    assert outcomes[-1].details["surplus_selection_reason"] == "surplus_to_22_not_above_free_space"
+    assert outcomes[-1].details["surplus_selection_reason"] == "surplus_to_sunset_not_above_free_space"
 
 
 @pytest.mark.asyncio
@@ -334,7 +334,7 @@ async def test_morning_sell_surplus_below_free_space_and_to_22_above_sells_min_v
     assert outcomes
     assert outcomes[-1].action_type == "sell"
     assert outcomes[-1].details["selected_surplus_kwh"] == 1.5
-    assert outcomes[-1].details["surplus_selection_reason"] == "surplus_to_22_above_free_space"
+    assert outcomes[-1].details["surplus_selection_reason"] == "surplus_to_sunset_above_free_space"
 
 
 @pytest.mark.asyncio
