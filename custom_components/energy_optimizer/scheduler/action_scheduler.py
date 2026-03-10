@@ -14,6 +14,7 @@ from ..const import (
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_TARIFF_END_HOUR_SENSOR,
+    DEFAULT_MAX_CHARGE_CURRENT,
 )
 from ..controllers.inverter import set_max_charge_current
 from ..decision_engine.evening_sell import async_run_evening_sell
@@ -74,7 +75,7 @@ class ActionScheduler:
         self._schedule_morning_sell()
         self._schedule_evening_sell()
         self._schedule_sell_restores()
-        self._schedule_hourly_actions()
+        self._schedule_hourly_solar_charge_block()
         self._schedule_daytime_min_price_restore()
 
         price_sensor = self.entry.data.get(CONF_PRICE_SENSOR)
@@ -87,7 +88,9 @@ class ActionScheduler:
                 )
             )
         else:
-            _LOGGER.warning("Export block control: price sensor not configured — export blocking disabled")
+            _LOGGER.warning(
+                "Export block control: price sensor not configured — export blocking disabled"
+            )
 
         tariff_end_entity = self.entry.data.get(CONF_TARIFF_END_HOUR_SENSOR)
         if tariff_end_entity:
@@ -211,19 +214,11 @@ class ActionScheduler:
 
     async def _handle_morning_restore(self, now: datetime) -> None:
         """Restore inverter state after morning sell window."""
-        await self._handle_sell_restore("morning", now)
+        await async_handle_sell_restore(self.hass, self.entry, "morning")
 
     async def _handle_evening_restore(self, now: datetime) -> None:
         """Restore inverter state after evening sell window."""
-        await self._handle_sell_restore("evening", now)
-
-    async def _handle_solar_charge_block(self, now: datetime) -> None:
-        """Run pre-noon solar charge block check on the hour."""
-        _LOGGER.info("Scheduler triggering solar charge block check at %02d:00", now.hour)
-        await async_run_solar_charge_block(
-            self.hass,
-            entry_id=self.entry.entry_id,
-        )
+        await async_handle_sell_restore(self.hass, self.entry, "evening")
 
     async def _handle_price_change(self, event) -> None:
         """Run export block control when price sensor value changes."""
@@ -232,14 +227,13 @@ class ActionScheduler:
             entry_id=self.entry.entry_id,
         )
 
-    async def _handle_hourly_actions(self, now: datetime) -> None:
-        """Run all hourly actions via a single intermediate handler."""
-        _LOGGER.info("Scheduler triggering hourly actions at %02d:00", now.hour)
-        await self._handle_solar_charge_block(now)
-
-    async def _handle_sell_restore(self, sell_type: str, now: datetime) -> None:
-        """Delegate sell restore handling to dedicated handler."""
-        await async_handle_sell_restore(self.hass, self.entry, sell_type)
+    async def _handle_hourly_solar_charge_block(self, now: datetime) -> None:
+        """Run solar charge block check on the hour."""
+        _LOGGER.info("Scheduler triggering solar charge block check at %02d:00", now.hour)
+        await async_run_solar_charge_block(
+            self.hass,
+            entry_id=self.entry.entry_id,
+        )
 
     def _schedule_afternoon_charge(self) -> None:
         """Schedule afternoon charge at current tariff end hour."""
@@ -256,13 +250,13 @@ class ActionScheduler:
             second=0,
         )
 
-    def _schedule_hourly_actions(self) -> None:
-        """Schedule hourly action entrypoint from 05:00 to 12:00."""
+    def _schedule_hourly_solar_charge_block(self) -> None:
+        """Schedule hourly solar charge block checks from 05:00 to 16:00."""
         for hour in range(5, 17):
             self._listeners.append(
                 async_track_time_change(
                     self.hass,
-                    self._handle_hourly_actions,
+                    self._handle_hourly_solar_charge_block,
                     hour=hour,
                     minute=0,
                     second=0,
@@ -300,7 +294,7 @@ class ActionScheduler:
         )
 
     async def _handle_daytime_min_price_restore(self, now: datetime) -> None:
-        """Restore max charge current to 23 at daytime min price hour."""
+        """Restore max charge current to configured default at daytime min price hour."""
         _LOGGER.info("Scheduler triggering daytime min price restore at %02d:00", now.hour)
         config = self.entry.data
         max_charge_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
@@ -313,19 +307,20 @@ class ActionScheduler:
         if max_charge_value is None:
             _LOGGER.warning("Daytime min price restore: max charge current has no value — skip")
             return
-        if max_charge_value >= 23:
+        if max_charge_value >= DEFAULT_MAX_CHARGE_CURRENT:
             _LOGGER.debug(
                 "Daytime min price restore: max charge current already %.0f — skip", max_charge_value
             )
             return
         _LOGGER.info(
-            "Daytime min price restore: setting max charge current to 23 (was %.0f)",
+            "Daytime min price restore: setting max charge current to %.0f (was %.0f)",
+            float(DEFAULT_MAX_CHARGE_CURRENT),
             max_charge_value,
         )
         await set_max_charge_current(
             self.hass,
             max_charge_entity,
-            23,
+            DEFAULT_MAX_CHARGE_CURRENT,
             entry=self.entry,
             logger=_LOGGER,
             context=Context(),

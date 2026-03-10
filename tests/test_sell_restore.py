@@ -194,7 +194,7 @@ async def test_restore_callback_restores_work_mode_and_soc(
     _FakeStore.load_data = None
     _FakeStore.removed = False
 
-    await scheduler._handle_sell_restore("evening", datetime(2026, 2, 27, 18, 0, 0))
+    await scheduler._handle_evening_restore(datetime(2026, 2, 27, 18, 0, 0))
 
     assert set_work_mode_mock.await_count == 1
     assert set_program_soc_mock.await_count == 1
