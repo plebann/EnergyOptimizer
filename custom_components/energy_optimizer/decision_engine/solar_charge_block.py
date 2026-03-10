@@ -13,6 +13,8 @@ from ..const import (
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_PRICE_SENSOR,
     DOMAIN,
+    SUN_ABOVE_HORIZON,
+    SUN_ENTITY,
 )
 from ..controllers.inverter import set_max_charge_current
 from ..helpers import get_float_state_info, get_required_float_state, resolve_daytime_min_price_time
@@ -24,8 +26,6 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-_SUN_ENTITY = "sun.sun"
-_SUN_ABOVE_HORIZON = "above_horizon"
 _PRICE_BLOCK_FACTOR = 0.3
 _NOON_HOUR = 12
 
@@ -48,8 +48,8 @@ async def async_run_solar_charge_block(
     )
 
     # Guard: only run while sun is above horizon
-    sun_state = hass.states.get(_SUN_ENTITY)
-    if sun_state is None or sun_state.state != _SUN_ABOVE_HORIZON:
+    sun_state = hass.states.get(SUN_ENTITY)
+    if sun_state is None or sun_state.state != SUN_ABOVE_HORIZON:
         _LOGGER.debug("Solar charge block: sun not above horizon — skip")
         return
 
@@ -131,10 +131,13 @@ async def async_run_solar_charge_block(
         )
         return
 
-    # Determine sunset hour from sun.sun attribute
+    # Determine sunset hour from sun entity attribute
     next_setting_raw = sun_state.attributes.get("next_setting")
     if next_setting_raw is None:
-        _LOGGER.warning("Solar charge block: sun.sun missing next_setting attribute — skip")
+        _LOGGER.warning(
+            "Solar charge block: %s missing next_setting attribute — skip",
+            SUN_ENTITY,
+        )
         return
 
     next_setting_dt = dt_util.parse_datetime(str(next_setting_raw))

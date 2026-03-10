@@ -19,6 +19,7 @@ pytestmark = pytest.mark.enable_socket
 _ENTRY_ID = "entry-export"
 _PRICE_ENTITY = "sensor.price"
 _EXPORT_SURPLUS_SWITCH = "switch.inverter_export_surplus"
+_SUN_ENTITY = "sun.sun"
 
 
 def _state(value: str, attributes: dict | None = None) -> MagicMock:
@@ -28,7 +29,12 @@ def _state(value: str, attributes: dict | None = None) -> MagicMock:
     return state
 
 
-def _setup_hass(*, price: str, export_surplus_switch_state: str) -> MagicMock:
+def _setup_hass(
+    *,
+    price: str,
+    export_surplus_switch_state: str,
+    sun_state: str = "above_horizon",
+) -> MagicMock:
     hass = MagicMock()
     entry = MagicMock()
     entry.entry_id = _ENTRY_ID
@@ -44,6 +50,7 @@ def _setup_hass(*, price: str, export_surplus_switch_state: str) -> MagicMock:
     states = {
         _PRICE_ENTITY: _state(price),
         _EXPORT_SURPLUS_SWITCH: _state(export_surplus_switch_state),
+        _SUN_ENTITY: _state(sun_state),
     }
     hass.states.get.side_effect = lambda entity_id: states.get(entity_id)
     hass.services.async_call = AsyncMock()
@@ -97,6 +104,20 @@ async def test_no_action_when_negative_and_already_blocked() -> None:
 async def test_no_action_when_positive_and_already_unblocked() -> None:
     """Do nothing when price is positive and export is already unblocked."""
     hass = _setup_hass(price="20", export_surplus_switch_state="on")
+
+    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
+
+    hass.services.async_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_no_action_when_sun_not_above_horizon() -> None:
+    """Do nothing when sun is below horizon."""
+    hass = _setup_hass(
+        price="-20",
+        export_surplus_switch_state="on",
+        sun_state="below_horizon",
+    )
 
     await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
 

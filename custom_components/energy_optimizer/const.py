@@ -99,6 +99,7 @@ DEFAULT_BALANCING_PV_THRESHOLD = 20.5
 DEFAULT_MAX_CHARGE_CURRENT = 23
 DEFAULT_PV_EFFICIENCY = 0.9
 DEFAULT_MIN_ARBITRAGE_PRICE = 0.0
+DEFAULT_TODAY_LOAD_SENSOR = "sensor.load_usage_daily"
 DEFAULT_HEAT_PUMP_FORECAST_DOMAIN = "heat_pump_predictor"
 DEFAULT_HEAT_PUMP_FORECAST_SERVICE = "calculate_forecast_energy"
 
@@ -111,6 +112,10 @@ SERVICE_EVENING_PEAK_SELL = "evening_peak_sell"
 SERVICE_SOLAR_CHARGE_BLOCK = "solar_charge_block"
 
 DEFAULT_DISCHARGE_CURRENT_RESET = 12
+
+# Shared entity/state constants
+SUN_ENTITY = "sun.sun"
+SUN_ABOVE_HORIZON = "above_horizon"
 
 # Sell restore persistence
 STORAGE_KEY_SELL_RESTORE = f"{DOMAIN}.sell_restore"

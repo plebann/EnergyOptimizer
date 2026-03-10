@@ -86,6 +86,7 @@ from .const import (
     DEFAULT_MIN_ARBITRAGE_PRICE,
     DEFAULT_MIN_SOC,
     DEFAULT_PV_EFFICIENCY,
+    DEFAULT_TODAY_LOAD_SENSOR,
     DOMAIN,
 )
 
@@ -429,7 +430,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Optional(
                     CONF_TODAY_LOAD_SENSOR,
-                    description={"suggested_value": "sensor.load_usage_daily"},
+                    description={"suggested_value": DEFAULT_TODAY_LOAD_SENSOR},
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),

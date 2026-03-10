@@ -13,7 +13,12 @@ from ..calculations.energy import (
     calculate_surplus_energy,
 )
 from ..calculations.utils import build_hourly_usage_array
-from ..const import CONF_EVENING_MAX_PRICE_SENSOR, CONF_MORNING_MAX_PRICE_SENSOR, DOMAIN
+from ..const import (
+    CONF_EVENING_MAX_PRICE_SENSOR,
+    CONF_MORNING_MAX_PRICE_SENSOR,
+    DOMAIN,
+    SUN_ENTITY,
+)
 from ..decision_engine.common import (
     ForecastData,
     build_evening_sell_outcome,
@@ -261,17 +266,19 @@ class MorningSellStrategy(BaseSellStrategy):
                 selection_reason = "pv_fit_fallback_from_free_space"
         else:
             surplus_end_hour = 19
-            sun_state = self.hass.states.get("sun.sun")
+            sun_state = self.hass.states.get(SUN_ENTITY)
             if sun_state is None:
                 _LOGGER.warning(
-                    "Morning sell: sun.sun not found, using default surplus end hour %02d:00",
+                    "Morning sell: %s not found, using default surplus end hour %02d:00",
+                    SUN_ENTITY,
                     surplus_end_hour,
                 )
             else:
                 next_setting_raw = sun_state.attributes.get("next_setting")
                 if next_setting_raw is None:
                     _LOGGER.warning(
-                        "Morning sell: sun.sun missing next_setting, using default surplus end hour %02d:00",
+                        "Morning sell: %s missing next_setting, using default surplus end hour %02d:00",
+                        SUN_ENTITY,
                         surplus_end_hour,
                     )
                 else:

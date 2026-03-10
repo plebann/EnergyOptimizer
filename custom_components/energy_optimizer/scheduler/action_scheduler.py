@@ -12,6 +12,7 @@ from ..const import (
     CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
+    CONF_PRICE_SENSOR,
     CONF_TARIFF_END_HOUR_SENSOR,
 )
 from ..controllers.inverter import set_max_charge_current
@@ -75,6 +76,18 @@ class ActionScheduler:
         self._schedule_sell_restores()
         self._schedule_hourly_actions()
         self._schedule_daytime_min_price_restore()
+
+        price_sensor = self.entry.data.get(CONF_PRICE_SENSOR)
+        if price_sensor:
+            self._listeners.append(
+                async_track_state_change_event(
+                    self.hass,
+                    [str(price_sensor)],
+                    self._handle_price_change,
+                )
+            )
+        else:
+            _LOGGER.warning("Export block control: price sensor not configured — export blocking disabled")
 
         tariff_end_entity = self.entry.data.get(CONF_TARIFF_END_HOUR_SENSOR)
         if tariff_end_entity:
@@ -212,14 +225,17 @@ class ActionScheduler:
             entry_id=self.entry.entry_id,
         )
 
-    async def _handle_hourly_actions(self, now: datetime) -> None:
-        """Run all hourly actions via a single intermediate handler."""
-        _LOGGER.info("Scheduler triggering hourly actions at %02d:00", now.hour)
-        await self._handle_solar_charge_block(now)
+    async def _handle_price_change(self, event) -> None:
+        """Run export block control when price sensor value changes."""
         await async_run_export_block_control(
             self.hass,
             entry_id=self.entry.entry_id,
         )
+
+    async def _handle_hourly_actions(self, now: datetime) -> None:
+        """Run all hourly actions via a single intermediate handler."""
+        _LOGGER.info("Scheduler triggering hourly actions at %02d:00", now.hour)
+        await self._handle_solar_charge_block(now)
 
     async def _handle_sell_restore(self, sell_type: str, now: datetime) -> None:
         """Delegate sell restore handling to dedicated handler."""
@@ -242,7 +258,7 @@ class ActionScheduler:
 
     def _schedule_hourly_actions(self) -> None:
         """Schedule hourly action entrypoint from 05:00 to 12:00."""
-        for hour in range(5, 16):
+        for hour in range(5, 17):
             self._listeners.append(
                 async_track_time_change(
                     self.hass,
