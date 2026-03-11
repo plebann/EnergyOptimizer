@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -160,8 +160,10 @@ def test_scheduler_publishes_structured_daily_snapshot(
         assert sink.snapshot is not None
         assert sink.snapshot["date"] == "2026-03-11"
         assert sink.snapshot["timezone"] == "Europe/Warsaw"
-        assert sink.snapshot["summary"]["count"] == 22
-        assert sink.snapshot["summary"]["event_driven_count"] == 1
+        assert sink.snapshot["summary"]["count"] == 11
+        assert sink.snapshot["summary"]["fixed_count"] == 2
+        assert sink.snapshot["summary"]["dynamic_count"] == 7
+        assert sink.snapshot["summary"]["event_driven_count"] == 2
         assert sink.snapshot["next_action"] == {
             "key": "morning_charge",
             "label": "Morning grid charge",
@@ -179,6 +181,13 @@ def test_scheduler_publishes_structured_daily_snapshot(
             for action in actions
         )
         assert any(
+            action["key"] == "solar_charge_block"
+            and action["kind"] == "event_driven"
+            and action["trigger"] == "price_sensor_state_change"
+            and action["time"] is None
+            for action in actions
+        )
+        assert any(
             action["key"] == "export_block_control"
             and action["kind"] == "event_driven"
             and action["trigger"] == "price_sensor_state_change"
@@ -187,3 +196,33 @@ def test_scheduler_publishes_structured_daily_snapshot(
         )
     finally:
         dt_util.set_default_time_zone(original_tz)
+
+
+@pytest.mark.asyncio
+async def test_price_change_handler_runs_export_and_solar_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Price change handler should run both export and solar charge block actions."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    entry = _mock_entry(data={})
+    scheduler = ActionScheduler(hass, entry)
+
+    export_mock = AsyncMock()
+    solar_mock = AsyncMock()
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_run_export_block_control",
+        export_mock,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_run_solar_charge_block",
+        solar_mock,
+    )
+    scheduler._publish_schedule_snapshot = MagicMock()
+
+    await scheduler._handle_price_change(event=MagicMock())
+
+    export_mock.assert_awaited_once_with(hass, entry_id="entry-1")
+    solar_mock.assert_awaited_once_with(hass, entry_id="entry-1")
+    scheduler._publish_schedule_snapshot.assert_called_once()

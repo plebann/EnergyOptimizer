@@ -89,7 +89,6 @@ class ActionScheduler:
         self._schedule_morning_sell()
         self._schedule_evening_sell()
         self._schedule_sell_restores()
-        self._schedule_hourly_solar_charge_block()
         self._schedule_daytime_min_price_restore()
 
         price_sensor = self.entry.data.get(CONF_PRICE_SENSOR)
@@ -103,7 +102,7 @@ class ActionScheduler:
             )
         else:
             _LOGGER.warning(
-                "Export block control: price sensor not configured — export blocking disabled"
+                "Price-driven actions: price sensor not configured — export and solar charge block controls disabled"
             )
 
         tariff_end_entity = self.entry.data.get(CONF_TARIFF_END_HOUR_SENSOR)
@@ -274,15 +273,11 @@ class ActionScheduler:
         self._publish_schedule_snapshot()
 
     async def _handle_price_change(self, event) -> None:
-        """Run export block control when price sensor value changes."""
+        """Run price-driven controls when price sensor value changes."""
         await async_run_export_block_control(
             self.hass,
             entry_id=self.entry.entry_id,
         )
-
-    async def _handle_hourly_solar_charge_block(self, now: datetime) -> None:
-        """Run solar charge block check on the hour."""
-        _LOGGER.info("Scheduler triggering solar charge block check at %02d:00", now.hour)
         await async_run_solar_charge_block(
             self.hass,
             entry_id=self.entry.entry_id,
@@ -308,19 +303,6 @@ class ActionScheduler:
             second=0,
         )
         self._publish_schedule_snapshot()
-
-    def _schedule_hourly_solar_charge_block(self) -> None:
-        """Schedule hourly solar charge block checks from 05:00 to 16:00."""
-        for hour in range(5, 17):
-            self._listeners.append(
-                async_track_time_change(
-                    self.hass,
-                    self._handle_hourly_solar_charge_block,
-                    hour=hour,
-                    minute=0,
-                    second=0,
-                )
-            )
 
     def _schedule_evening_sell(self) -> None:
         """Schedule evening peak sell at configured evening max price hour."""
@@ -505,22 +487,6 @@ class ActionScheduler:
             )
         )
 
-        for block_hour in range(5, 17):
-            actions.append(
-                self._build_action_entry(
-                    key=f"solar_charge_block_{block_hour:02d}",
-                    label="Solar charge block check",
-                    scheduled_for=self._resolve_local_datetime(
-                        hour=block_hour,
-                        minute=0,
-                        now=now,
-                    ),
-                    kind="fixed_recurring",
-                    source="fixed_hourly_window",
-                    order=20 + block_hour,
-                )
-            )
-
         tariff_end_hour = resolve_tariff_end_hour(self.hass, self.entry.data)
         actions.append(
             self._build_action_entry(
@@ -660,6 +626,17 @@ class ActionScheduler:
         )
 
         if self.entry.data.get(CONF_PRICE_SENSOR):
+            actions.append(
+                self._build_action_entry(
+                    key="solar_charge_block",
+                    label="Solar charge block check",
+                    scheduled_for=None,
+                    kind="event_driven",
+                    source="price_sensor",
+                    order=999,
+                    trigger="price_sensor_state_change",
+                )
+            )
             actions.append(
                 self._build_action_entry(
                     key="export_block_control",
