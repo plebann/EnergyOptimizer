@@ -203,7 +203,7 @@ class ScheduledActionsSensor(EnergyOptimizerSensor):
     _attr_icon = "mdi:calendar-clock"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_native_value = 0
-    _unrecorded_attributes = frozenset({"actions", "event_driven_actions", "next_action"})
+    _unrecorded_attributes = frozenset({"actions", "next_action"})
 
     def __init__(
         self,
@@ -219,7 +219,6 @@ class ScheduledActionsSensor(EnergyOptimizerSensor):
             "generated_at": dt_util.now().isoformat(),
             "next_action": None,
             "actions": [],
-            "event_driven_actions": [],
             "summary": {
                 "count": 0,
                 "fixed_count": 0,
@@ -257,7 +256,6 @@ class ScheduledActionsSensor(EnergyOptimizerSensor):
                 "generated_at": now.isoformat(),
                 "next_action": None,
                 "actions": [],
-                "event_driven_actions": [],
                 "summary": {
                     "count": 0,
                     "fixed_count": 0,

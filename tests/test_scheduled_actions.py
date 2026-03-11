@@ -87,10 +87,13 @@ def test_scheduled_actions_sensor_updates_native_value_and_attributes() -> None:
             "label": "Morning grid charge",
             "time": "2026-03-11T04:00:00+01:00",
         },
-        "actions": [{"key": "morning_charge"}, {"key": "afternoon_charge"}],
-        "event_driven_actions": [{"key": "export_block_control"}],
+        "actions": [
+            {"key": "morning_charge"},
+            {"key": "afternoon_charge"},
+            {"key": "export_block_control", "kind": "event_driven"},
+        ],
         "summary": {
-            "count": 2,
+            "count": 3,
             "fixed_count": 1,
             "dynamic_count": 1,
             "event_driven_count": 1,
@@ -99,7 +102,7 @@ def test_scheduled_actions_sensor_updates_native_value_and_attributes() -> None:
 
     sensor.update_schedule(snapshot)
 
-    assert sensor.native_value == 2
+    assert sensor.native_value == 3
     assert sensor.extra_state_attributes == snapshot
     sensor.async_write_ha_state.assert_called_once()
 
@@ -157,7 +160,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
         assert sink.snapshot is not None
         assert sink.snapshot["date"] == "2026-03-11"
         assert sink.snapshot["timezone"] == "Europe/Warsaw"
-        assert sink.snapshot["summary"]["count"] == 21
+        assert sink.snapshot["summary"]["count"] == 22
         assert sink.snapshot["summary"]["event_driven_count"] == 1
         assert sink.snapshot["next_action"] == {
             "key": "morning_charge",
@@ -175,14 +178,12 @@ def test_scheduler_publishes_structured_daily_snapshot(
             and action["source"] == "evening_second_max_price_hour_sensor_plus_1h"
             for action in actions
         )
-        assert sink.snapshot["event_driven_actions"] == [
-            {
-                "key": "export_block_control",
-                "label": "Export block control",
-                "trigger": "price_sensor_state_change",
-                "source": "price_sensor",
-                "enabled": True,
-            }
-        ]
+        assert any(
+            action["key"] == "export_block_control"
+            and action["kind"] == "event_driven"
+            and action["trigger"] == "price_sensor_state_change"
+            and action["time"] is None
+            for action in actions
+        )
     finally:
         dt_util.set_default_time_zone(original_tz)

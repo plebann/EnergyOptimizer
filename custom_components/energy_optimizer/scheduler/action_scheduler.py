@@ -659,26 +659,41 @@ class ActionScheduler:
             )
         )
 
-        actions.sort(key=lambda item: (item["time"], item["order"], item["key"]))
-        next_action = next((action for action in actions if action["time"] >= now.isoformat()), None)
-
-        event_driven_actions: list[dict[str, Any]] = []
         if self.entry.data.get(CONF_PRICE_SENSOR):
-            event_driven_actions.append(
-                {
-                    "key": "export_block_control",
-                    "label": "Export block control",
-                    "trigger": "price_sensor_state_change",
-                    "source": "price_sensor",
-                    "enabled": True,
-                }
+            actions.append(
+                self._build_action_entry(
+                    key="export_block_control",
+                    label="Export block control",
+                    scheduled_for=None,
+                    kind="event_driven",
+                    source="price_sensor",
+                    order=1000,
+                    trigger="price_sensor_state_change",
+                )
             )
+
+        actions.sort(
+            key=lambda item: (
+                item["time"] is None,
+                item["time"] or "",
+                item["order"],
+                item["key"],
+            )
+        )
+        next_action = next(
+            (
+                action
+                for action in actions
+                if action["time"] is not None and action["time"] >= now.isoformat()
+            ),
+            None,
+        )
 
         summary = {
             "count": len(actions),
             "fixed_count": sum(1 for action in actions if action["kind"] in {"fixed", "fixed_recurring"}),
             "dynamic_count": sum(1 for action in actions if action["kind"] in {"dynamic", "derived_restore"}),
-            "event_driven_count": len(event_driven_actions),
+            "event_driven_count": sum(1 for action in actions if action["kind"] == "event_driven"),
         }
 
         return {
@@ -691,7 +706,6 @@ class ActionScheduler:
                 "time": next_action["time"],
             },
             "actions": actions,
-            "event_driven_actions": event_driven_actions,
             "summary": summary,
         }
 
@@ -700,22 +714,28 @@ class ActionScheduler:
         *,
         key: str,
         label: str,
-        scheduled_for: datetime,
+        scheduled_for: datetime | None,
         kind: str,
         source: str,
         order: int,
+        trigger: str | None = None,
     ) -> dict[str, Any]:
         """Build a serializable action entry."""
-        return {
+        entry: dict[str, Any] = {
             "key": key,
             "label": label,
-            "time": scheduled_for.isoformat(),
-            "time_local": scheduled_for.strftime("%H:%M"),
+            "time": scheduled_for.isoformat() if scheduled_for is not None else None,
+            "time_local": (
+                scheduled_for.strftime("%H:%M") if scheduled_for is not None else None
+            ),
             "kind": kind,
             "source": source,
             "enabled": True,
             "order": order,
         }
+        if trigger is not None:
+            entry["trigger"] = trigger
+        return entry
 
     def _resolve_local_datetime(
         self,
