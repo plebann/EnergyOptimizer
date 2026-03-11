@@ -110,6 +110,22 @@ Ensure:
 - Device info: register device via `DeviceInfo` on entities.
 - See `.copilot-tracking/research/20241221-hacs-compatible-integration-research.md` for full examples.
 
+## Energy Optimizer Repo Patterns
+
+- Keep public decision-engine entry points as module-level `async_run_*()` wrappers.
+- Put shared orchestration in thin base strategies; keep scenario-specific rules in subclass hooks.
+- Use `get_required_float_state()` for mandatory numeric entity reads.
+- Use `get_float_state_info()` when logic should degrade gracefully instead of failing hard.
+- For missing or invalid optional sensors, prefer safe no-op or disabling only the dependent feature instead of breaking the whole decision flow.
+- Keep business guards in decision-engine functions so the same protections apply to both scheduler triggers and manual service calls.
+- Use `_schedule_*` methods for time-based or dynamically re-scheduled listeners.
+- For simple state-change listeners created with `async_track_state_change_event(...)`, registering them inline in scheduler `start()` is acceptable and preferred when no time recalculation is needed.
+- For diagnostic sensors, keep `native_value` light and put rich snapshots in `extra_state_attributes`.
+- Exclude heavy diagnostic attributes from recorder with `_unrecorded_attributes` when appropriate.
+- In scheduled-actions style snapshots, represent event-driven actions with `time = None` and a `trigger` field.
+- Keep `DecisionOutcome.key_metrics` concise and text-oriented for history views.
+- Keep `DecisionOutcome.full_details` numeric and diagnostic for deep inspection.
+
 ## Avoid These Mistakes
 
 - ❌ Don't use YAML configuration (use config flow)
@@ -121,6 +137,14 @@ Ensure:
 - ❌ Don't forget to implement `async_unload_entry`
 - ❌ Don't use `setup_platform()` (deprecated)
 
+## Energy Optimizer-Specific Pitfalls
+
+- ❌ Don't move business safety guards only into the scheduler if the same action can also be called from services.
+- ❌ Don't make diagnostic sensor state verbose when the details belong in attributes.
+- ❌ Don't create a `_schedule_*` wrapper for every listener if a simple state-change listener is only registered once in `start()`.
+- ❌ Don't break `DecisionOutcome` structure by mixing user-facing summary data with raw numeric diagnostics.
+- ❌ Don't fail the whole strategy when an optional sensor should only disable one branch of logic.
+
 ## When Generating Code
 
 1. **Check research documents** first: `.copilot-tracking/research/20260212-copilot-instructions-audit-research.md` and `.copilot-tracking/research/20241221-hacs-compatible-integration-research.md`
@@ -130,6 +154,10 @@ Ensure:
 5. **Handle errors** gracefully with try/except
 6. **Log appropriately** using the module logger
 7. **Write tests** alongside implementation code
+8. **Prefer existing project patterns** over introducing new abstractions.
+9. **When touching decision engines**, preserve the public `async_run_*()` API unless migration is explicitly required.
+10. **When adding scheduler logic**, choose event-driven triggers for entity-state-based behavior and time-based triggers only when an actual clock schedule is required.
+11. **When adding diagnostic entities**, prefer lightweight state plus structured attributes over complex text state.
 
 ## Useful Commands
 
