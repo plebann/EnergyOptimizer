@@ -1,11 +1,13 @@
 """Action scheduler for Energy Optimizer."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import logging
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from homeassistant.core import Context
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_change
+from homeassistant.util import dt as dt_util
 
 from ..const import (
     CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
@@ -16,6 +18,7 @@ from ..const import (
     CONF_PRICE_SENSOR,
     CONF_TARIFF_END_HOUR_SENSOR,
     DEFAULT_MAX_CHARGE_CURRENT,
+    DOMAIN,
 )
 from ..controllers.inverter import set_max_charge_current
 from ..decision_engine.evening_sell import async_run_evening_sell
@@ -39,7 +42,6 @@ from ..helpers import (
 )
 
 if TYPE_CHECKING:
-    from datetime import datetime
     from homeassistant.core import HomeAssistant
     from homeassistant.config_entries import ConfigEntry
 
@@ -73,6 +75,15 @@ class ActionScheduler:
         self._listeners.append(
             async_track_time_change(
                 self.hass, self._handle_evening_behavior, hour=22, minute=0, second=0
+            )
+        )
+        self._listeners.append(
+            async_track_time_change(
+                self.hass,
+                self._handle_daily_schedule_refresh,
+                hour=0,
+                minute=0,
+                second=0,
             )
         )
         self._schedule_morning_sell()
@@ -147,6 +158,7 @@ class ActionScheduler:
                 )
             )
 
+        self._publish_schedule_snapshot()
         _LOGGER.info("Energy Optimizer scheduler started for entry %s", self.entry.entry_id)
 
     def stop(self) -> None:
@@ -175,6 +187,7 @@ class ActionScheduler:
         if self._daytime_min_price_listener is not None:
             self._daytime_min_price_listener()
             self._daytime_min_price_listener = None
+        self._clear_schedule_snapshot()
 
     async def _handle_morning_charge(self, now: datetime) -> None:
         """Run morning charge routine at 04:00."""
@@ -183,6 +196,7 @@ class ActionScheduler:
             self.hass,
             entry_id=self.entry.entry_id,
         )
+        self._publish_schedule_snapshot()
 
     async def _handle_evening_behavior(self, now: datetime) -> None:
         """Run evening behavior routine at 22:00."""
@@ -191,6 +205,7 @@ class ActionScheduler:
             self.hass,
             entry_id=self.entry.entry_id,
         )
+        self._publish_schedule_snapshot()
 
     async def _handle_afternoon_charge(self, now: datetime) -> None:
         """Run afternoon charge routine at tariff end hour."""
@@ -199,6 +214,7 @@ class ActionScheduler:
             self.hass,
             entry_id=self.entry.entry_id,
         )
+        self._publish_schedule_snapshot()
 
     async def _handle_evening_sell(self, now: datetime) -> None:
         """Run evening peak sell routine at configured peak hour."""
@@ -207,6 +223,7 @@ class ActionScheduler:
             self.hass,
             entry_id=self.entry.entry_id,
         )
+        self._publish_schedule_snapshot()
 
     async def _handle_morning_sell(self, now: datetime) -> None:
         """Run morning peak sell routine at configured peak hour."""
@@ -215,6 +232,7 @@ class ActionScheduler:
             self.hass,
             entry_id=self.entry.entry_id,
         )
+        self._publish_schedule_snapshot()
 
     async def _handle_evening_sell_second(self, now: datetime) -> None:
         """Run evening second-session sell at configured second-best price hour."""
@@ -224,6 +242,7 @@ class ActionScheduler:
             entry_id=self.entry.entry_id,
             is_second_session=True,
         )
+        self._publish_schedule_snapshot()
 
     async def _handle_tariff_end_change(self, event) -> None:
         """Reschedule afternoon charge when tariff end hour changes."""
@@ -247,10 +266,12 @@ class ActionScheduler:
     async def _handle_morning_restore(self, now: datetime) -> None:
         """Restore inverter state after morning sell window."""
         await async_handle_sell_restore(self.hass, self.entry, "morning")
+        self._publish_schedule_snapshot()
 
     async def _handle_evening_restore(self, now: datetime) -> None:
         """Restore inverter state after evening sell window."""
         await async_handle_sell_restore(self.hass, self.entry, "evening")
+        self._publish_schedule_snapshot()
 
     async def _handle_price_change(self, event) -> None:
         """Run export block control when price sensor value changes."""
@@ -266,6 +287,11 @@ class ActionScheduler:
             self.hass,
             entry_id=self.entry.entry_id,
         )
+        self._publish_schedule_snapshot()
+
+    async def _handle_daily_schedule_refresh(self, now: datetime) -> None:
+        """Refresh the published daily schedule snapshot at midnight."""
+        self._publish_schedule_snapshot()
 
     def _schedule_afternoon_charge(self) -> None:
         """Schedule afternoon charge at current tariff end hour."""
@@ -281,6 +307,7 @@ class ActionScheduler:
             minute=0,
             second=0,
         )
+        self._publish_schedule_snapshot()
 
     def _schedule_hourly_solar_charge_block(self) -> None:
         """Schedule hourly solar charge block checks from 05:00 to 16:00."""
@@ -322,6 +349,7 @@ class ActionScheduler:
                 minute=0,
                 second=0,
             )
+        self._publish_schedule_snapshot()
 
     def _schedule_morning_sell(self) -> None:
         """Schedule morning peak sell at configured morning max price hour."""
@@ -337,6 +365,7 @@ class ActionScheduler:
             minute=0,
             second=0,
         )
+        self._publish_schedule_snapshot()
 
     async def _handle_daytime_min_price_restore(self, now: datetime) -> None:
         """Restore max charge current to configured default at daytime min price hour."""
@@ -370,6 +399,7 @@ class ActionScheduler:
             logger=_LOGGER,
             context=Context(),
         )
+        self._publish_schedule_snapshot()
 
     async def _handle_daytime_min_price_hour_change(self, event) -> None:
         """Reschedule daytime min price restore when the hour sensor changes."""
@@ -383,6 +413,7 @@ class ActionScheduler:
 
         if not self.entry.data.get(CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR):
             _LOGGER.debug("Daytime min price restore: hour sensor not configured — skipping schedule")
+            self._publish_schedule_snapshot()
             return
 
         daytime_min_price_time = resolve_daytime_min_price_time(self.hass, self.entry.data)
@@ -396,6 +427,7 @@ class ActionScheduler:
             second=0,
         )
         _LOGGER.debug("Daytime min price restore scheduled for %02d:%02d", hour, minute)
+        self._publish_schedule_snapshot()
 
     def _schedule_sell_restores(self) -> None:
         """Schedule dedicated restore listeners one hour after sell start hours."""
@@ -429,7 +461,276 @@ class ActionScheduler:
             minute=0,
             second=0,
         )
+        self._publish_schedule_snapshot()
 
         self.hass.async_create_task(
             async_check_pending_sell_restore(self.hass, self.entry)
         )
+
+    def _get_scheduled_actions_sensor(self) -> Any | None:
+        """Return the scheduled actions sensor stored for this entry."""
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id)
+        if not isinstance(entry_data, dict):
+            return None
+        return entry_data.get("scheduled_actions_sensor")
+
+    def _publish_schedule_snapshot(self) -> None:
+        """Publish the current daily schedule snapshot to the diagnostic sensor."""
+        sensor = self._get_scheduled_actions_sensor()
+        if sensor is None:
+            return
+        sensor.update_schedule(self._build_scheduled_actions_snapshot())
+
+    def _clear_schedule_snapshot(self) -> None:
+        """Clear the published daily schedule snapshot."""
+        sensor = self._get_scheduled_actions_sensor()
+        if sensor is None:
+            return
+        sensor.clear_schedule()
+
+    def _build_scheduled_actions_snapshot(self) -> dict[str, Any]:
+        """Build a structured snapshot of today's scheduled actions."""
+        now = dt_util.now()
+        timezone_name = str(now.tzinfo)
+        actions: list[dict[str, Any]] = []
+
+        actions.append(
+            self._build_action_entry(
+                key="morning_charge",
+                label="Morning grid charge",
+                scheduled_for=self._resolve_local_datetime(hour=4, minute=0, now=now),
+                kind="fixed",
+                source="fixed",
+                order=10,
+            )
+        )
+
+        for block_hour in range(5, 17):
+            actions.append(
+                self._build_action_entry(
+                    key=f"solar_charge_block_{block_hour:02d}",
+                    label="Solar charge block check",
+                    scheduled_for=self._resolve_local_datetime(
+                        hour=block_hour,
+                        minute=0,
+                        now=now,
+                    ),
+                    kind="fixed_recurring",
+                    source="fixed_hourly_window",
+                    order=20 + block_hour,
+                )
+            )
+
+        tariff_end_hour = resolve_tariff_end_hour(self.hass, self.entry.data)
+        actions.append(
+            self._build_action_entry(
+                key="afternoon_charge",
+                label="Afternoon charge",
+                scheduled_for=self._resolve_local_datetime(
+                    hour=tariff_end_hour,
+                    minute=0,
+                    now=now,
+                ),
+                kind="dynamic",
+                source="tariff_end_hour_sensor",
+                order=100,
+            )
+        )
+
+        morning_sell_hour = resolve_morning_max_price_hour(
+            self.hass,
+            self.entry.data,
+            default_hour=7,
+        )
+        actions.append(
+            self._build_action_entry(
+                key="morning_sell",
+                label="Morning peak sell",
+                scheduled_for=self._resolve_local_datetime(
+                    hour=morning_sell_hour,
+                    minute=0,
+                    now=now,
+                ),
+                kind="dynamic",
+                source="morning_max_price_hour_sensor",
+                order=110,
+            )
+        )
+        actions.append(
+            self._build_action_entry(
+                key="morning_sell_restore",
+                label="Morning sell restore",
+                scheduled_for=self._resolve_local_datetime(
+                    hour=(morning_sell_hour + 1) % 24,
+                    minute=0,
+                    now=now,
+                ),
+                kind="derived_restore",
+                source="morning_max_price_hour_sensor_plus_1h",
+                order=111,
+            )
+        )
+
+        evening_sell_hour = resolve_evening_max_price_hour(
+            self.hass,
+            self.entry.data,
+            default_hour=17,
+        )
+        actions.append(
+            self._build_action_entry(
+                key="evening_sell",
+                label="Evening peak sell",
+                scheduled_for=self._resolve_local_datetime(
+                    hour=evening_sell_hour,
+                    minute=0,
+                    now=now,
+                ),
+                kind="dynamic",
+                source="evening_max_price_hour_sensor",
+                order=120,
+            )
+        )
+
+        second_evening_sell_hour = resolve_evening_second_max_price_hour(
+            self.hass,
+            self.entry.data,
+        )
+        evening_restore_source = "evening_max_price_hour_sensor_plus_1h"
+        effective_evening_restore_hour = (evening_sell_hour + 1) % 24
+        if second_evening_sell_hour is not None:
+            actions.append(
+                self._build_action_entry(
+                    key="evening_sell_second",
+                    label="Evening second-session sell",
+                    scheduled_for=self._resolve_local_datetime(
+                        hour=second_evening_sell_hour,
+                        minute=0,
+                        now=now,
+                    ),
+                    kind="dynamic",
+                    source="evening_second_max_price_hour_sensor",
+                    order=121,
+                )
+            )
+            if second_evening_sell_hour >= evening_sell_hour:
+                effective_evening_restore_hour = (second_evening_sell_hour + 1) % 24
+                evening_restore_source = "evening_second_max_price_hour_sensor_plus_1h"
+
+        actions.append(
+            self._build_action_entry(
+                key="evening_sell_restore",
+                label="Evening sell restore",
+                scheduled_for=self._resolve_local_datetime(
+                    hour=effective_evening_restore_hour,
+                    minute=0,
+                    now=now,
+                ),
+                kind="derived_restore",
+                source=evening_restore_source,
+                order=122,
+            )
+        )
+
+        if self.entry.data.get(CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR):
+            daytime_min_price_time = resolve_daytime_min_price_time(self.hass, self.entry.data)
+            actions.append(
+                self._build_action_entry(
+                    key="daytime_min_price_restore",
+                    label="Daytime min price restore",
+                    scheduled_for=self._resolve_local_datetime(
+                        hour=daytime_min_price_time.hour,
+                        minute=daytime_min_price_time.minute,
+                        now=now,
+                    ),
+                    kind="dynamic",
+                    source="daytime_min_price_hour_sensor",
+                    order=130,
+                )
+            )
+
+        actions.append(
+            self._build_action_entry(
+                key="evening_behavior",
+                label="Evening behavior",
+                scheduled_for=self._resolve_local_datetime(hour=22, minute=0, now=now),
+                kind="fixed",
+                source="fixed",
+                order=140,
+            )
+        )
+
+        actions.sort(key=lambda item: (item["time"], item["order"], item["key"]))
+        next_action = next((action for action in actions if action["time"] >= now.isoformat()), None)
+
+        event_driven_actions: list[dict[str, Any]] = []
+        if self.entry.data.get(CONF_PRICE_SENSOR):
+            event_driven_actions.append(
+                {
+                    "key": "export_block_control",
+                    "label": "Export block control",
+                    "trigger": "price_sensor_state_change",
+                    "source": "price_sensor",
+                    "enabled": True,
+                }
+            )
+
+        summary = {
+            "count": len(actions),
+            "fixed_count": sum(1 for action in actions if action["kind"] in {"fixed", "fixed_recurring"}),
+            "dynamic_count": sum(1 for action in actions if action["kind"] in {"dynamic", "derived_restore"}),
+            "event_driven_count": len(event_driven_actions),
+        }
+
+        return {
+            "date": now.date().isoformat(),
+            "timezone": timezone_name,
+            "generated_at": now.isoformat(),
+            "next_action": None if next_action is None else {
+                "key": next_action["key"],
+                "label": next_action["label"],
+                "time": next_action["time"],
+            },
+            "actions": actions,
+            "event_driven_actions": event_driven_actions,
+            "summary": summary,
+        }
+
+    def _build_action_entry(
+        self,
+        *,
+        key: str,
+        label: str,
+        scheduled_for: datetime,
+        kind: str,
+        source: str,
+        order: int,
+    ) -> dict[str, Any]:
+        """Build a serializable action entry."""
+        return {
+            "key": key,
+            "label": label,
+            "time": scheduled_for.isoformat(),
+            "time_local": scheduled_for.strftime("%H:%M"),
+            "kind": kind,
+            "source": source,
+            "enabled": True,
+            "order": order,
+        }
+
+    def _resolve_local_datetime(
+        self,
+        *,
+        hour: int,
+        minute: int,
+        now: datetime,
+    ) -> datetime:
+        """Resolve a local datetime for today's snapshot."""
+        scheduled_for = now.replace(
+            hour=hour % 24,
+            minute=minute,
+            second=0,
+            microsecond=0,
+        )
+        if hour >= 24:
+            scheduled_for += timedelta(days=1)
+        return scheduled_for

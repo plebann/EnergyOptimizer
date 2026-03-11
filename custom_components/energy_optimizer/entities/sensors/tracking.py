@@ -10,6 +10,7 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorStateClass,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.helpers.restore_state import ExtraStoredData
 from homeassistant.util import dt as dt_util
 
@@ -192,6 +193,79 @@ class LastOptimizationSensor(EnergyOptimizerSensor, RestoreSensor):
         }
         self.async_write_ha_state()
         _LOGGER.debug("Logged optimization: %s - %s", scenario, details)
+
+
+class ScheduledActionsSensor(EnergyOptimizerSensor):
+    """Diagnostic sensor exposing today's scheduled actions."""
+
+    _attr_translation_key = "scheduled_actions"
+    _attr_unique_id = "scheduled_actions"
+    _attr_icon = "mdi:calendar-clock"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_native_value = 0
+    _unrecorded_attributes = frozenset({"actions", "event_driven_actions", "next_action"})
+
+    def __init__(
+        self,
+        coordinator,
+        config_entry,
+        config: dict[str, Any],
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, config_entry, config)
+        self._attr_extra_state_attributes: dict[str, Any] = {
+            "date": dt_util.now().date().isoformat(),
+            "timezone": str(dt_util.now().tzinfo),
+            "generated_at": dt_util.now().isoformat(),
+            "next_action": None,
+            "actions": [],
+            "event_driven_actions": [],
+            "summary": {
+                "count": 0,
+                "fixed_count": 0,
+                "dynamic_count": 0,
+                "event_driven_count": 0,
+            },
+        }
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of scheduled actions for today."""
+        return int(self._attr_native_value or 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the structured daily schedule snapshot."""
+        return self._attr_extra_state_attributes
+
+    def update_schedule(self, snapshot: dict[str, Any]) -> None:
+        """Store and publish a new schedule snapshot."""
+        summary = snapshot.get("summary", {})
+        count = summary.get("count")
+        actions = snapshot.get("actions", [])
+        self._attr_native_value = int(count if count is not None else len(actions))
+        self._attr_extra_state_attributes = snapshot
+        self.async_write_ha_state()
+
+    def clear_schedule(self) -> None:
+        """Clear the published schedule snapshot."""
+        now = dt_util.now()
+        self.update_schedule(
+            {
+                "date": now.date().isoformat(),
+                "timezone": str(now.tzinfo),
+                "generated_at": now.isoformat(),
+                "next_action": None,
+                "actions": [],
+                "event_driven_actions": [],
+                "summary": {
+                    "count": 0,
+                    "fixed_count": 0,
+                    "dynamic_count": 0,
+                    "event_driven_count": 0,
+                },
+            }
+        )
 
 
 class PvForecastCompensationSensor(EnergyOptimizerSensor, RestoreSensor):

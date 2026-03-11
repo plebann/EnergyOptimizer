@@ -24,6 +24,7 @@ from .entities.sensors import (
     MinSocSensor,
     OptimizationHistorySensor,
     PvForecastCompensationSensor,
+    ScheduledActionsSensor,
     UsableCapacitySensor,
 )
 from .services import check_and_update_balancing_completion
@@ -63,9 +64,15 @@ async def async_setup_entry(
     optimization_history_sensor = OptimizationHistorySensor(
         coordinator, config_entry, config
     )
+    scheduled_actions_sensor = ScheduledActionsSensor(coordinator, config_entry, config)
 
     sensors.extend(
-        [last_balancing_sensor, last_optimization_sensor, optimization_history_sensor]
+        [
+            last_balancing_sensor,
+            last_optimization_sensor,
+            optimization_history_sensor,
+            scheduled_actions_sensor,
+        ]
     )
 
     hass.data.setdefault(DOMAIN, {}).setdefault(config_entry.entry_id, {})[
@@ -77,6 +84,9 @@ async def async_setup_entry(
     hass.data[DOMAIN][config_entry.entry_id][
         "optimization_history_sensor"
     ] = optimization_history_sensor
+    hass.data[DOMAIN][config_entry.entry_id][
+        "scheduled_actions_sensor"
+    ] = scheduled_actions_sensor
     hass.data[DOMAIN][config_entry.entry_id]["battery_space_sensor"] = next(
         sensor for sensor in sensors if isinstance(sensor, BatterySpaceSensor)
     )

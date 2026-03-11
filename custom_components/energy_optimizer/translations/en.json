@@ -256,6 +256,9 @@
       }
     },
     "sensor": {
+      "scheduled_actions": {
+        "name": "Scheduled actions"
+      },
       "pv_forecast_compensation": {
         "name": "PV forecast compensation"
       }
