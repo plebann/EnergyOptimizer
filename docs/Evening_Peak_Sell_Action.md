@@ -2,14 +2,21 @@
 
 ## Cel
 
-Zarządzanie sprzedażą energii z magazynu wieczorem w dwóch trybach:
+Zarządzanie sprzedażą energii z magazynu wieczorem z użyciem dwóch okien sprzedaży:
 
-- **`high_sell`**: klasyczny arbitraż cenowy, gdy cena wieczorna jest powyżej progu.
-- **`sell` (surplus sell)**: sprzedaż nadwyżki, gdy cena nie przekracza progu, ale bateria ma realną nadwyżkę po pokryciu zapotrzebowania do jutrzejszej godziny wystarczalności PV.
+- **okno `A`** — wyższa cena wieczorna,
+- **okno `B`** — niższa cena wieczorna.
+
+Logika działa niezależnie od kolejności czasowej okien (`A First` albo `B First`) i dla każdego wywołania rozstrzyga:
+
+- czy bieżące okno jest korzystniejsze niż cena jutrzejszego poranka,
+- ile energii można sprzedać w jednej pełnej godzinie według `max_export_power`,
+- czy sprzedaż ma zostać rozpoczęta, kontynuowana, czy zakończona przez `sell_restore`.
 
 ## Wyzwalacz
 
-- Godzina z sensora wieczornego szczytu cenowego: `evening_max_price_hour_sensor` (domyślnie 17:00)
+- Godzina głównego okna wieczornego `A`: `evening_max_price_hour_sensor` (domyślnie 17:00)
+- Opcjonalna godzina drugiego okna `B`: `evening_second_max_price_hour_sensor`
 - Możliwość ręcznego wywołania przez serwis `energy_optimizer.evening_peak_sell`
 
 ## Wejścia (koncepcyjne)
@@ -17,7 +24,9 @@ Zarządzanie sprzedażą energii z magazynu wieczorem w dwóch trybach:
 - Aktualny SOC baterii i parametry magazynu (pojemność, napięcie, sprawność)
 - Polityki SOC (limity minimalne/maksymalne)
 - Docelowy SOC programu 5 (rozładowanie do sieci)
-- Cena wieczornego szczytu (`evening_max_price_sensor`)
+- Cena okna `A` (`evening_max_price_sensor`)
+- Cena okna `B` (`evening_second_max_price_sensor`), jeśli skonfigurowana
+- Cena jutrzejszego porannego szczytu (`tomorrow_morning_max_price_sensor`)
 - Minimalna cena arbitrażu (`min_arbitrage_price`, PLN/MWh)
 - Przewidywane zużycie energii w oknie od teraz+1h do startu taryfy niskiej:
   - Zużycie domowe (z czujników w okienkach 4-godzinnych)
@@ -27,96 +36,128 @@ Zarządzanie sprzedażą energii z magazynu wieczorem w dwóch trybach:
 - Straty dzienne falownika
 - Margines bezpieczeństwa (domyślnie 1.1 = +10%)
 - Sensor godziny startu taryfy niskiej: `tariff_start_hour` (domyślnie 22:00)
+- Maksymalna moc eksportu falownika (`max_export_power`) — używana jako cap energii możliwej do sprzedaży w jednej pełnej godzinie:
+   - `hourly_cap_kwh = max_export_power / 1000`
 - Encja trybu pracy falownika (`work_mode_entity`)
 - Encja limitu mocy eksportu (`export_power_entity`)
 - Tryb testowy sprzedaży (`test_sell_mode`)
 
 ## Przebieg decyzji (wysoki poziom)
 
-1. **Rozgałęzienie po cenie**:
-   - `evening_price > min_arbitrage_price` → gałąź **`high_sell`**,
-   - `evening_price <= min_arbitrage_price` → gałąź **`surplus sell`**.
+1. Scheduler uruchamia jedno lub dwa okna wieczorne, przekazując do logiki tylko metadane:
+   - czy bieżące okno to `A` czy `B`,
+   - czy jest to pierwsze czy drugie okno chronologicznie.
+2. Logika sprzedaży dla każdego wywołania:
+   - rozpoznaje bieżące okno (`A/B`) i jego pozycję (`first/second`),
+   - porównuje bieżącą cenę z ceną jutrzejszego poranka,
+   - oblicza bazowy `surplus_kwh`,
+   - dzieli sprzedaż pomiędzy okna zgodnie z regułami `A First` / `B First`,
+   - w drugim oknie może aktywnie zakończyć sprzedaż przez `sell_restore`.
 
-### Gałąź 1: `high_sell` (cena > threshold)
+### Wspólne reguły
 
-1. Obliczenie rezerwy energii powyżej min SOC.
-2. Obliczenie zapotrzebowania od `now+1h` do `tariff_start_hour` (zużycie + HP + straty, z marginesem).
-3. Obliczenie PV forecast dla tego samego okna.
-4. Nadwyżka: `max(0, rezerwa + PV - zapotrzebowanie)`.
-5. Clamp do dzisiejszej produkcji PV (`pv_production_sensor`).
-6. Wyliczenie `target_soc`, `export_power` i zapis do falownika (poza test mode).
+1. **Wczesne wyjście względem ceny jutro rano**
+   - Jeśli cena bieżącego okna nie jest wyższa niż cena jutro rano:
+     - w **pierwszym** oknie → `no_action`,
+     - w **drugim** oknie, jeśli sprzedaż jest aktywna → `sell_restore`.
 
-### Gałąź 2: `sell` (surplus sell, cena <= threshold)
+2. **Bazowe wyliczenie nadwyżki**
+   - Gdy `current_window_price > min_arbitrage_price` używana jest ścieżka `high_sell`.
+   - Gdy `current_window_price <= min_arbitrage_price` używana jest ścieżka `sell` (surplus sell).
 
-Algorytm two-window z granicą na północy:
+3. **Cap jednej godziny sprzedaży**
+   - `hourly_cap_kwh = max_export_power / 1000`
+   - To ograniczenie służy do podziału energii między okna `A` i `B`.
 
-1. **OKNO 2 (najpierw):** `00:00 -> tariff_end` (jutro) i `calculate_sufficiency_window(...)`.
-   - Jeśli `sufficiency_reached = False` → **`no_action`**.
-   - `tomorrow_net = max(0, required_to_suff - pv_to_suff)`.
-2. **OKNO 1:** `now+1 -> 24:00` (dzisiaj).
-   - `today_net = max(0, today_demand - today_pv)`.
-3. `total_needed = today_net + tomorrow_net`.
-4. `surplus = max(0, reserve_kwh - total_needed)`.
-   - Jeśli `surplus <= 0` → **`no_action`**.
-5. Clamp do dzisiejszej produkcji PV, wyliczenie `target_soc` i `export_power`, zapis do falownika (poza test mode).
+### Reguły podziału energii między okna
+
+#### `A First`
+
+- W pierwszym oknie `A` sprzedawane jest:
+  - `min(surplus_kwh, hourly_cap_kwh)`
+- W drugim oknie `B` sprzedawana jest tylko pozostałość.
+- Jeśli w drugim oknie nie ma już nadwyżki, a sprzedaż jest aktywna, uruchamiany jest `sell_restore`.
+- Jeśli `B` nie jest korzystniejsze niż jutro rano, `B` nie kontynuuje sprzedaży i przy aktywnej sprzedaży następuje `sell_restore`.
+
+#### `B First`
+
+- W pierwszym oknie `B` zachowywana jest energia na późniejsze lepsze okno `A`:
+  - `reserved_for_A = min(surplus_kwh, hourly_cap_kwh)`
+  - `overflow_for_B = max(0, surplus_kwh - reserved_for_A)`
+- `B` sprzedaje tylko `overflow_for_B`.
+- Późniejsze okno `A` sprzedaje:
+  - `min(surplus_kwh, hourly_cap_kwh)`
+- Jeśli w późniejszym `A` nie ma już nic do sprzedaży, a sprzedaż jest aktywna, uruchamiany jest `sell_restore`.
 
 ## Diagram (Mermaid)
 
 ```mermaid
 flowchart TD
-   ES_start([Run evening peak sell]) --> ES_mode{Second session active?}
-   ES_mode -->|no| ES_branch{Price > threshold?}
-   ES_mode -->|yes| ES_case{Session mode}
+   ES_start([Run evening peak sell window]) --> ES_meta[Resolve window metadata: A/B and first/second]
+   ES_meta --> ES_price{Current price > tomorrow morning?}
 
-   ES_case -->|Case A first| AB_common[High sell or surplus evaluation]
-   ES_case -->|Case A second| AB_common
-   ES_case -->|Case B early| B1[High sell eval in window first_hour+1 -> 22]
-   ES_case -->|Case B main| AB_common
+   ES_price -->|no, first window| ES_no_action[No action]
+   ES_price -->|no, second window and sell active| ES_restore[Run sell_restore]
+   ES_price -->|yes| ES_branch{Current price > arbitrage threshold?}
 
-   B1 --> B1_guard{surplus <= max_sell_energy?}
-   B1_guard -->|yes| ES_no_action[No action: surplus covered by main session]
-   B1_guard -->|no| B1_overflow[Sell only overflow: surplus - max_sell_energy]
+   ES_branch -->|yes| HP_inputs[High sell base evaluation]
+   ES_branch -->|no| SP_window2[Surplus sell base evaluation]
 
-   ES_branch -->|yes| HP_inputs[High sell window: now+1 -> 22]
-   HP_inputs --> ES_surplus
+   HP_inputs --> ES_base[Base sellable surplus_kwh]
+   SP_window2 --> ES_base
 
-   ES_branch -->|no| SP_window2[WINDOW 2: tomorrow 00:00 -> tariff_end sufficiency]
-   SP_window2 --> SP_suff{Sufficiency reached?}
-   SP_suff -->|no| ES_no_action2[No action]
-   SP_suff -->|yes| SP_window1[WINDOW 1: today now+1 -> 24:00]
-   SP_window1 --> ES_surplus
+   ES_base --> ES_order{Window order?}
 
-   AB_common --> ES_surplus
-   B1_overflow --> ES_surplus
+   ES_order -->|A First, current A| A1[Sell min surplus and hourly cap]
+   ES_order -->|A First, current B| A2[Sell remaining surplus only]
+   ES_order -->|B First, current B| B1[Sell only overflow above reserve for A]
+   ES_order -->|B First, current A| B2[Sell min surplus and hourly cap]
 
-   ES_surplus{Surplus > 0?} -->|no| ES_no_action3[No action]
-   ES_surplus -->|yes| ES_clamp_pv[Clamp to PV production]
-   ES_clamp_pv --> ES_clamp_max[Clamp to max_sell_energy if configured]
-   ES_clamp_max --> ES_target{Target SOC < Current SOC?}
-   ES_target -->|no| ES_no_action4[No action]
-   ES_target -->|yes| ES_restore{Skip restore persistence?}
-   ES_restore -->|yes| ES_sell_skip[Sell scheduled without restore persistence]
-   ES_restore -->|no| ES_sell_persist[Sell scheduled with restore persistence]
+   A1 --> ES_exec
+   A2 --> ES_second{Sellable amount > 0?}
+   B1 --> ES_second
+   B2 --> ES_second
+
+   ES_second -->|no and second window sell active| ES_restore
+   ES_second -->|no and no active sell| ES_no_action2[No action]
+   ES_second -->|yes| ES_exec[Clamp to PV production and execute sell]
+
+   ES_exec --> ES_target{Target SOC < Current SOC?}
+   ES_target -->|no| ES_no_action3[No action]
+   ES_target -->|yes| ES_sell[Persist restore and write inverter settings]
 ```
 
 ### Szczegóły decyzyjne
 
 **`high_sell`:**
 
-- Okno: `(bieżąca_godzina + 1) -> tariff_start_hour`.
-- Nadwyżka: `max(0, rezerwa + prognoza_PV - zapotrzebowanie)`.
+- Okno bazowe: `(bieżąca_godzina + 1) -> tariff_start_hour`.
+- Nadwyżka bazowa: `max(0, rezerwa + prognoza_PV - zapotrzebowanie)`.
+- Po obliczeniu nadwyżki stosowany jest podział `A/B` według `A First` / `B First`.
 - `action_type`: `high_sell`.
 
 **`surplus sell`:**
 
 - OKNO 2: `00:00 -> tariff_end`, z wyznaczeniem jutrzejszej godziny wystarczalności PV.
 - OKNO 1: `now+1 -> 24:00`, bilans dzisiejszego wieczoru.
-- Nadwyżka: `max(0, reserve_kwh - (today_net + tomorrow_net))`.
+- Nadwyżka bazowa: `max(0, reserve_kwh - (today_net + tomorrow_net))`.
+- Po obliczeniu nadwyżki stosowany jest podział `A/B` według `A First` / `B First`.
 - `action_type`: `sell`.
 
 **Ograniczenie nadwyżki do produkcji PV:**
 - Jeśli dostępny `pv_production_sensor` i nadwyżka przekracza dzisiejszą produkcję PV, nadwyżka jest ograniczana.
 - Celem jest uniknięcie sprzedaży energii, która mogła pochodzić z ładowania z sieci.
+
+**Podział energii między okna:**
+- `A First`:
+   - `A = min(surplus_kwh, hourly_cap_kwh)`
+   - `B = pozostałość`, jeśli nadal opłacalna względem jutra rano
+- `B First`:
+   - `B = max(0, surplus_kwh - min(surplus_kwh, hourly_cap_kwh))`
+   - `A = min(surplus_kwh, hourly_cap_kwh)`
+
+**Zatrzymanie sprzedaży w drugim oknie:**
+- Jeśli drugie okno nie ma już korzystnej ceny lub nie ma sellable surplus, a sprzedaż jest aktywna, wywoływany jest `sell_restore`.
 
 **Docelowy SOC:**
 - `target_soc = max(current_soc - kwh_to_soc(nadwyżka), min_soc)`.
@@ -128,24 +169,29 @@ flowchart TD
 
 ## Wpływ na maszynę stanów
 
-- NORMAL → SELLING_TO_GRID dla obu gałęzi (`high_sell` i `sell`), gdy aktywowany jest eksport energii (`Export First`) i ustawiony docelowy SOC programu 5.
+- `NORMAL → SELLING_TO_GRID`, gdy bieżące okno uruchamia sprzedaż (`Export First` + docelowy SOC programu 5).
+- `SELLING_TO_GRID → NORMAL`, gdy drugie okno wywoła `sell_restore` albo gdy zadziała fallback restore z harmonogramu.
 
 ## Efekty sterowania (koncepcyjne)
 
 - Ustawienie trybu pracy falownika na `Export First`
 - Ustawienie docelowego SOC programu 5
-- Ustawienie limitu mocy eksportu
+- Ustawienie limitu mocy eksportu dla wyliczonej ilości energii w danym oknie
+- Wywołanie `sell_restore`, gdy drugie okno kończy aktywną sprzedaż
 - W trybie testowym (`test_sell_mode`) wyłącznie logowanie decyzji bez zapisu do falownika
 
 ## Obsługa błędów
 
 **Aktualny stan (implementacja):**
-- Brak ceny wieczornej → brak akcji i log z powodem
-- Cena wieczorna poniżej progu arbitrażu:
+- Brak ceny bieżącego okna → fallback do gałęzi `surplus sell`
+- Cena bieżącego okna poniżej progu arbitrażu:
    - nie kończy od razu,
    - uruchamia gałąź `surplus sell`
+- Cena bieżącego okna nie wyższa niż cena jutro rano:
+   - w pierwszym oknie → `no_action`
+   - w drugim oknie przy aktywnej sprzedaży → `sell_restore`
 - W `surplus sell`: brak osiągnięcia godziny wystarczalności jutro → brak akcji
-- W `surplus sell`: brak nadwyżki (`reserve <= total_needed`) → brak akcji
+- W `surplus sell`: brak nadwyżki (`reserve <= total_needed`) → brak akcji lub `sell_restore` w drugim oknie przy aktywnej sprzedaży
 - Brak wymaganych encji SOC → zakończenie na etapie walidacji wejścia
 - Brak `tariff_start_hour` → fallback do 22:00
 - Brak prognozy PV/HP lub strat → przyjmowane wartości 0 zgodnie z helperami
@@ -153,9 +199,11 @@ flowchart TD
 
 ## Logowanie i powiadomienia
 
-- Zaloguj typ decyzji: `high_sell` / `sell` / `no_action`
-- Zaloguj kluczowe parametry: `current_soc`, `target_soc`, `surplus_kwh`, `export_power_w`, cena i próg
+- Zaloguj typ decyzji: `high_sell` / `sell` / `no_action` / `sell_restore`
+- Zaloguj metadane okna: `A/B`, `first/second`, godzina bieżącego okna
+- Zaloguj kluczowe parametry: `current_soc`, `target_soc`, `surplus_kwh`, `export_power_w`, cena bieżącego okna, cena jutro rano i próg arbitrażu
 - Dla `high_sell`: `reserve_kwh`, `required_kwh`, `pv_forecast_kwh`, `heat_pump_kwh`, `losses_kwh`, okno godzinowe
 - Dla `surplus sell`: `today_net_kwh`, `tomorrow_net_kwh`, `total_needed_kwh`, `sufficiency_hour`
+- Zaloguj `hourly_cap_kwh` oraz ilość energii przydzieloną bieżącemu oknu
 - Dodaj informację o `test_sell_mode`
 - Użyj ujednoliconego systemu logowania `log_decision_unified`

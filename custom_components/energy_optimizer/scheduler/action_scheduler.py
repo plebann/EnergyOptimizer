@@ -215,12 +215,22 @@ class ActionScheduler:
         )
         self._publish_schedule_snapshot()
 
+    def _primary_evening_window_is_first(self) -> bool:
+        """Return whether the primary evening window occurs before the secondary one."""
+        primary_hour = resolve_evening_max_price_hour(self.hass, self.entry.data, default_hour=17)
+        secondary_hour = resolve_evening_second_max_price_hour(self.hass, self.entry.data)
+        if secondary_hour is None:
+            return True
+        return primary_hour <= secondary_hour
+
     async def _handle_evening_sell(self, now: datetime) -> None:
-        """Run evening peak sell routine at configured peak hour."""
-        _LOGGER.info("Scheduler triggering evening peak sell")
+        """Run the primary (`A`) evening sell window."""
+        _LOGGER.info("Scheduler triggering evening primary sell window")
         await async_run_evening_sell(
             self.hass,
             entry_id=self.entry.entry_id,
+            is_primary=True,
+            is_first=self._primary_evening_window_is_first(),
         )
         self._publish_schedule_snapshot()
 
@@ -234,12 +244,13 @@ class ActionScheduler:
         self._publish_schedule_snapshot()
 
     async def _handle_evening_sell_second(self, now: datetime) -> None:
-        """Run evening second-session sell at configured second-best price hour."""
-        _LOGGER.info("Scheduler triggering evening second-session sell")
+        """Run the secondary (`B`) evening sell window."""
+        _LOGGER.info("Scheduler triggering evening secondary sell window")
         await async_run_evening_sell(
             self.hass,
             entry_id=self.entry.entry_id,
-            is_second_session=True,
+            is_primary=False,
+            is_first=not self._primary_evening_window_is_first(),
         )
         self._publish_schedule_snapshot()
 

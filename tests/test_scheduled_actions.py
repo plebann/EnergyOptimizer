@@ -226,3 +226,40 @@ async def test_price_change_handler_runs_export_and_solar_block(
     export_mock.assert_awaited_once_with(hass, entry_id="entry-1")
     solar_mock.assert_awaited_once_with(hass, entry_id="entry-1")
     scheduler._publish_schedule_snapshot.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_evening_scheduler_passes_primary_and_first_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Evening scheduler should pass A/B metadata without embedding price logic."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    entry = _mock_entry(
+        data={
+            CONF_EVENING_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak",
+            CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak_2",
+        }
+    )
+    scheduler = ActionScheduler(hass, entry)
+    scheduler._publish_schedule_snapshot = MagicMock()
+
+    states = {
+        "sensor.evening_peak": _state("19:00"),
+        "sensor.evening_peak_2": _state("18:00"),
+    }
+    hass.states.get.side_effect = states.get
+
+    evening_mock = AsyncMock()
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_run_evening_sell",
+        evening_mock,
+    )
+
+    await scheduler._handle_evening_sell(now=datetime(2026, 3, 11, 19, 0, 0))
+    await scheduler._handle_evening_sell_second(now=datetime(2026, 3, 11, 18, 0, 0))
+
+    assert evening_mock.await_args_list[0].kwargs["is_primary"] is True
+    assert evening_mock.await_args_list[0].kwargs["is_first"] is False
+    assert evening_mock.await_args_list[1].kwargs["is_primary"] is False
+    assert evening_mock.await_args_list[1].kwargs["is_first"] is True
