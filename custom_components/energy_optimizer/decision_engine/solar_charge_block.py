@@ -11,15 +11,20 @@ from ..const import (
     CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
     CONF_DAYTIME_MIN_PRICE_SENSOR,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
+    CONF_MIN_SOC,
     CONF_PRICE_SENSOR,
+    CONF_WORK_MODE_ENTITY,
+    DEFAULT_MIN_SOC,
     DOMAIN,
     SUN_ABOVE_HORIZON,
     SUN_ENTITY,
+    WORK_MODE_EXPORT_FIRST,
+    WORK_MODE_ZERO_EXPORT_TO_LOAD,
 )
-from ..controllers.inverter import set_max_charge_current
-from ..helpers import get_float_state_info, get_required_float_state, resolve_daytime_min_price_time
+from ..controllers.inverter import set_max_charge_current, set_program_soc, set_work_mode
+from ..helpers import get_active_program_entity, get_float_state_info, get_required_float_state, resolve_daytime_min_price_time
 from ..utils.forecast import get_pv_forecast_window
-from .common import get_entry_data, resolve_entry
+from .common import get_entry_data, get_required_current_soc_state, resolve_entry
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -107,17 +112,36 @@ async def async_run_solar_charge_block(
         return
 
     if current_price <= 0:
-        if max_charge_value is not None and max_charge_value == 0:
-            _LOGGER.debug("Solar charge block: current price %.4f zero or negative and charging blocked - unblocking", current_price)
-            await set_max_charge_current(
-                hass,
-                max_charge_entity,
-                23,
-                entry=entry,
-                logger=_LOGGER,
-                context=Context(),
-            )
-            return
+        # If inverter is in Export First mode, switch to Zero Export to Load
+        # and restore max charge current to full
+        work_mode_entity = config.get(CONF_WORK_MODE_ENTITY)
+        if work_mode_entity:
+            wm_state = hass.states.get(str(work_mode_entity))
+            if wm_state is not None and wm_state.state == WORK_MODE_EXPORT_FIRST:
+                _LOGGER.info(
+                    "Solar charge block: price %.4f zero or negative, switching %s from Export First to Zero Export to Load",
+                    current_price,
+                    work_mode_entity,
+                )
+                ctx = Context()
+                await set_work_mode(
+                    hass,
+                    str(work_mode_entity),
+                    WORK_MODE_ZERO_EXPORT_TO_LOAD,
+                    entry=entry,
+                    logger=_LOGGER,
+                    context=ctx,
+                )
+                await set_max_charge_current(
+                    hass,
+                    max_charge_entity,
+                    23,
+                    entry=entry,
+                    logger=_LOGGER,
+                    context=ctx,
+                )
+                return
+        return
 
     # Price gate: proceed only when current price is significantly above minimum
     _PRICE_MARGIN = max(100, _PRICE_BLOCK_FACTOR * current_price)  # Avoid blocking at very low prices
@@ -182,20 +206,76 @@ async def async_run_solar_charge_block(
         )
         return
 
-    _LOGGER.info(
-        "Solar charge block: BLOCKING — PV surplus %.2f kWh > free space %.2f kWh "
-        "(price %.4f, min %.4f, sunset %02d:00)",
-        pv_surplus_kwh,
-        free_space_kwh,
-        current_price,
-        min_price,
-        sunset_hour,
-    )
-    await set_max_charge_current(
-        hass,
-        max_charge_entity,
-        0,
-        entry=entry,
-        logger=_LOGGER,
-        context=Context(),
-    )
+    # Read current SOC to decide how to limit charging
+    current_soc_state = get_required_current_soc_state(hass, config)
+    if current_soc_state is None:
+        _LOGGER.warning("Solar charge block: battery SOC unavailable — skip")
+        return
+    _, current_soc = current_soc_state
+    min_soc = config.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
+
+    if current_soc < min_soc:
+        _LOGGER.info(
+            "Solar charge block: BLOCKING (1A) — PV surplus %.2f kWh > free space %.2f kWh, "
+            "SOC %.1f%% < min_soc %.1f%% (price %.4f, min %.4f, sunset %02d:00)",
+            pv_surplus_kwh,
+            free_space_kwh,
+            current_soc,
+            min_soc,
+            current_price,
+            min_price,
+            sunset_hour,
+        )
+        await set_max_charge_current(
+            hass,
+            max_charge_entity,
+            1,
+            entry=entry,
+            logger=_LOGGER,
+            context=Context(),
+        )
+    else:
+        # SOC >= min_soc: unblock charging but switch to Export First with target SOC locked
+        # at current SOC so the inverter exports PV surplus instead of charging the battery
+        prog_soc_entity = get_active_program_entity(hass, config, now)
+        _LOGGER.info(
+            "Solar charge block: EXPORT FIRST — PV surplus %.2f kWh > free space %.2f kWh, "
+            "SOC %.1f%% >= min_soc %.1f%%, target SOC locked at %.1f%% "
+            "(price %.4f, min %.4f, sunset %02d:00)",
+            pv_surplus_kwh,
+            free_space_kwh,
+            current_soc,
+            min_soc,
+            current_soc,
+            current_price,
+            min_price,
+            sunset_hour,
+        )
+        ctx = Context()
+        await set_max_charge_current(
+            hass,
+            max_charge_entity,
+            23,
+            entry=entry,
+            logger=_LOGGER,
+            context=ctx,
+        )
+        await set_work_mode(
+            hass,
+            config.get(CONF_WORK_MODE_ENTITY),
+            WORK_MODE_EXPORT_FIRST,
+            entry=entry,
+            logger=_LOGGER,
+            context=ctx,
+        )
+        if prog_soc_entity:
+            await set_program_soc(
+                hass,
+                prog_soc_entity,
+                current_soc,
+                entry=entry,
+                logger=_LOGGER,
+                context=ctx,
+            )
+        else:
+            _LOGGER.debug("Solar charge block: no active program SOC entity — target SOC not set")

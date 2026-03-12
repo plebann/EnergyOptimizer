@@ -12,12 +12,17 @@ from custom_components.energy_optimizer.const import (
     CONF_DAYTIME_MIN_PRICE_SENSOR,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_MAX_SOC,
+    CONF_MIN_SOC,
     CONF_PRICE_SENSOR,
     CONF_PV_FORECAST_TODAY,
+    CONF_WORK_MODE_ENTITY,
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_VOLTAGE,
     DEFAULT_MAX_SOC,
+    DEFAULT_MIN_SOC,
     DOMAIN,
+    WORK_MODE_EXPORT_FIRST,
+    WORK_MODE_ZERO_EXPORT_TO_LOAD,
 )
 from custom_components.energy_optimizer.decision_engine.solar_charge_block import (
     async_run_solar_charge_block,
@@ -39,6 +44,10 @@ def _state(value: str, attributes: dict | None = None) -> MagicMock:
     return s
 
 
+_WORK_MODE_ENTITY = "select.work_mode"
+_PROG1_SOC_ENTITY = "number.prog1_soc"
+
+
 def _setup_hass(
     *,
     sun_state: str = "above_horizon",
@@ -50,6 +59,10 @@ def _setup_hass(
     pv_forecast_kwh: float = 5.0,
     max_charge_entity: str = _MAX_CHARGE_ENTITY,
     max_charge_current_state: str = "23",
+    soc_value: str = "80",
+    min_soc: int = DEFAULT_MIN_SOC,
+    work_mode_entity: str | None = None,
+    prog1_soc_entity: str | None = None,
 ) -> MagicMock:
     hass = MagicMock()
     entry = MagicMock()
@@ -63,8 +76,10 @@ def _setup_hass(
         CONF_BATTERY_CAPACITY_AH: DEFAULT_BATTERY_CAPACITY_AH,
         CONF_BATTERY_VOLTAGE: DEFAULT_BATTERY_VOLTAGE,
         CONF_MAX_SOC: DEFAULT_MAX_SOC,
+        CONF_MIN_SOC: min_soc,
         CONF_MAX_CHARGE_CURRENT_ENTITY: max_charge_entity,
         CONF_PV_FORECAST_TODAY: None,
+        **({CONF_WORK_MODE_ENTITY: work_mode_entity} if work_mode_entity else {}),
     }
     hass.config_entries.async_entries.return_value = [entry]
     hass.config_entries.async_get_entry.return_value = entry
@@ -80,6 +95,8 @@ def _setup_hass(
         _PRICE_ENTITY: _state(current_price),
         _MIN_PRICE_ENTITY: _state(min_price),
         _MAX_CHARGE_ENTITY: _state(max_charge_current_state),
+        _SOC_ENTITY: _state(soc_value),
+        **({_WORK_MODE_ENTITY: _state("General Mode")} if work_mode_entity else {}),
     }
     hass.states.get.side_effect = lambda eid: states.get(eid)
     hass.services.async_call = AsyncMock()
@@ -176,11 +193,18 @@ async def test_skip_when_surplus_fits_in_battery() -> None:
 
 
 @pytest.mark.asyncio
-async def test_blocks_when_surplus_exceeds_space() -> None:
-    """Sets max charge current to 0 when PV surplus > free battery space."""
+async def test_blocks_at_1A_when_soc_below_min_soc() -> None:
+    """Sets max charge current to 1A when PV surplus > free space and SOC < min_soc."""
     # price gate: 0.7 * 800 = 560 >= 400 → passes
-    # surplus 8.0 > free_space 2.0 → BLOCK
-    hass = _setup_hass(current_price="800", min_price="400", battery_space_value=2.0)
+    # surplus 8.0 > free_space 2.0 → BLOCK branch
+    # SOC 10% < default min_soc 15% → limit to 1A
+    hass = _setup_hass(
+        current_price="800",
+        min_price="400",
+        battery_space_value=2.0,
+        soc_value="10",
+        min_soc=DEFAULT_MIN_SOC,
+    )
     p_now, p_pv = _patch_now_and_pv(hass, pv_kwh=8.0)
     with p_now, p_pv:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
@@ -188,10 +212,55 @@ async def test_blocks_when_surplus_exceeds_space() -> None:
     hass.services.async_call.assert_called_once_with(
         "number",
         "set_value",
-        {"entity_id": _MAX_CHARGE_ENTITY, "value": 0},
+        {"entity_id": _MAX_CHARGE_ENTITY, "value": 1},
         blocking=True,
         context=ANY,
     )
+
+
+@pytest.mark.asyncio
+async def test_export_first_when_soc_above_min_soc() -> None:
+    """Sets Export First + target SOC when PV surplus > free space and SOC >= min_soc."""
+    # price gate: 0.7 * 800 = 560 >= 400 → passes
+    # surplus 8.0 > free_space 2.0 → BLOCK branch
+    # SOC 80% >= default min_soc 15% → Export First path
+    hass = _setup_hass(
+        current_price="800",
+        min_price="400",
+        battery_space_value=2.0,
+        soc_value="80",
+        min_soc=DEFAULT_MIN_SOC,
+        work_mode_entity=_WORK_MODE_ENTITY,
+    )
+    p_now, p_pv = _patch_now_and_pv(hass, pv_kwh=8.0)
+    with p_now, p_pv:
+        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+
+    calls = hass.services.async_call.call_args_list
+    # Expect: set max charge to 23A + set work mode to Export First
+    # (no program SOC entity configured → only 2 calls)
+    assert len(calls) == 2
+    assert calls[0] == (
+        ("number", "set_value", {"entity_id": _MAX_CHARGE_ENTITY, "value": 23}),
+        {"blocking": True, "context": ANY},
+    )
+    assert calls[1] == (
+        ("select", "select_option", {"entity_id": _WORK_MODE_ENTITY, "option": WORK_MODE_EXPORT_FIRST}),
+        {"blocking": True, "context": ANY},
+    )
+
+
+@pytest.mark.asyncio
+async def test_skip_when_soc_unavailable_at_block_decision() -> None:
+    """Skip blocking when battery SOC sensor unavailable."""
+    hass = _setup_hass(current_price="800", min_price="400", battery_space_value=2.0)
+    # Remove SOC sensor from states
+    original_side_effect = hass.states.get.side_effect
+    hass.states.get.side_effect = lambda eid: None if eid == _SOC_ENTITY else original_side_effect(eid)
+    p_now, p_pv = _patch_now_and_pv(hass, pv_kwh=8.0)
+    with p_now, p_pv:
+        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+    hass.services.async_call.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -206,3 +275,82 @@ async def test_skip_when_min_price_sensor_not_configured() -> None:
     with p_now, p_pv:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
     hass.services.async_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_zero_price_switches_export_first_to_zero_export_to_load() -> None:
+    """When price <= 0 and inverter is in Export First, switch mode and restore max charge to 23A."""
+    hass = _setup_hass(
+        current_price="0",
+        min_price="400",
+        work_mode_entity=_WORK_MODE_ENTITY,
+        max_charge_current_state="23",
+    )
+    # Override work mode state to Export First
+    states_map = {eid: hass.states.get(eid) for eid in [
+        "sun.sun", _PRICE_ENTITY, _MIN_PRICE_ENTITY, _MAX_CHARGE_ENTITY, _SOC_ENTITY,
+    ]}
+    states_map[_WORK_MODE_ENTITY] = _state(WORK_MODE_EXPORT_FIRST)
+    hass.states.get.side_effect = lambda eid: states_map.get(eid)
+
+    p_now, p_pv = _patch_now_and_pv(hass, pv_kwh=10.0)
+    with p_now, p_pv:
+        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+
+    calls = hass.services.async_call.call_args_list
+    assert len(calls) == 2
+    assert calls[0] == (
+        ("select", "select_option", {"entity_id": _WORK_MODE_ENTITY, "option": WORK_MODE_ZERO_EXPORT_TO_LOAD}),
+        {"blocking": True, "context": ANY},
+    )
+    assert calls[1] == (
+        ("number", "set_value", {"entity_id": _MAX_CHARGE_ENTITY, "value": 23}),
+        {"blocking": True, "context": ANY},
+    )
+
+
+@pytest.mark.asyncio
+async def test_zero_price_no_action_when_work_mode_not_export_first() -> None:
+    """When price <= 0 and inverter is NOT in Export First, no work mode change."""
+    hass = _setup_hass(
+        current_price="0",
+        min_price="400",
+        work_mode_entity=_WORK_MODE_ENTITY,
+        max_charge_current_state="23",
+    )
+    # Work mode is already General Mode (default in _setup_hass)
+    p_now, p_pv = _patch_now_and_pv(hass, pv_kwh=10.0)
+    with p_now, p_pv:
+        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+    hass.services.async_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_zero_price_unblocks_charging_and_switches_work_mode() -> None:
+    """When price <= 0, charging limited to 1A (new block value), and inverter in Export First: both actions fire."""
+    hass = _setup_hass(
+        current_price="0",
+        min_price="400",
+        work_mode_entity=_WORK_MODE_ENTITY,
+        max_charge_current_state="1",  # new blocking value (set by SOC < min_soc path)
+    )
+    states_map = {eid: hass.states.get(eid) for eid in [
+        "sun.sun", _PRICE_ENTITY, _MIN_PRICE_ENTITY, _MAX_CHARGE_ENTITY, _SOC_ENTITY,
+    ]}
+    states_map[_WORK_MODE_ENTITY] = _state(WORK_MODE_EXPORT_FIRST)
+    hass.states.get.side_effect = lambda eid: states_map.get(eid)
+
+    p_now, p_pv = _patch_now_and_pv(hass, pv_kwh=10.0)
+    with p_now, p_pv:
+        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+
+    calls = hass.services.async_call.call_args_list
+    assert len(calls) == 2
+    assert calls[0] == (
+        ("select", "select_option", {"entity_id": _WORK_MODE_ENTITY, "option": WORK_MODE_ZERO_EXPORT_TO_LOAD}),
+        {"blocking": True, "context": ANY},
+    )
+    assert calls[1] == (
+        ("number", "set_value", {"entity_id": _MAX_CHARGE_ENTITY, "value": 23}),
+        {"blocking": True, "context": ANY},
+    )

@@ -16,6 +16,7 @@ from ..const import (
     DOMAIN,
     STORAGE_KEY_SELL_RESTORE,
     STORAGE_VERSION_SELL_RESTORE,
+    WORK_MODE_ZERO_EXPORT_TO_LOAD,
 )
 from ..controllers.inverter import set_export_power, set_program_soc, set_work_mode
 
@@ -48,17 +49,20 @@ async def async_handle_sell_restore(
 
     _LOGGER.info("Restoring inverter state after %s sell", sell_type)
     integration_context = Context()
-
+    work_mode = WORK_MODE_ZERO_EXPORT_TO_LOAD
     if restore.get("work_mode"):
         work_mode_entity = entry.data.get(CONF_WORK_MODE_ENTITY)
-        await set_work_mode(
-            hass,
-            str(work_mode_entity) if work_mode_entity else None,
-            str(restore["work_mode"]),
-            entry=entry,
-            logger=_LOGGER,
-            context=integration_context,
-        )
+        work_mode = restore["work_mode"]
+    else:
+        work_mode_entity = None
+    await set_work_mode(
+        hass,
+        str(work_mode_entity) if work_mode_entity else None,
+        str(work_mode),
+        entry=entry,
+        logger=_LOGGER,
+        context=integration_context,
+    )
 
     prog_soc_entity = restore.get("prog_soc_entity")
     prog_soc_value = restore.get("prog_soc_value")

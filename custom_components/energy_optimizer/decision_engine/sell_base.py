@@ -22,6 +22,7 @@ from ..const import (
     DOMAIN,
     STORAGE_KEY_SELL_RESTORE,
     STORAGE_VERSION_SELL_RESTORE,
+    WORK_MODE_EXPORT_FIRST,
 )
 from ..controllers.inverter import set_export_power, set_program_soc, set_work_mode
 from ..helpers import get_float_state_info, is_test_sell_mode
@@ -246,7 +247,7 @@ class BaseSellStrategy(ABC):
             await set_work_mode(
                 self.hass,
                 str(work_mode_entity) if work_mode_entity else None,
-                "Export First",
+                WORK_MODE_EXPORT_FIRST,
                 entry=self.entry,
                 logger=_LOGGER,
                 context=self.integration_context,
@@ -295,7 +296,7 @@ class BaseSellStrategy(ABC):
             ]
             if work_mode_entity:
                 outcome.entities_changed.append(
-                    {"entity_id": str(work_mode_entity), "option": "Export First"}
+                    {"entity_id": str(work_mode_entity), "option": WORK_MODE_EXPORT_FIRST}
                 )
             if export_power_entity:
                 outcome.entities_changed.append(
