@@ -132,6 +132,9 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, outcomes: list) -> None:
         async def async_save(self, _data: dict[str, object]) -> None:
             return None
 
+        async def async_load(self) -> dict[str, object] | None:
+            return None
+
     monkeypatch.setattr(
         f"{SELL_BASE}.Store",
         _StoreStub,
@@ -156,6 +159,20 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, outcomes: list) -> None:
         f"{EVENING}.resolve_tariff_end_hour",
         lambda hass, config, default_hour=13: 13,
     )
+
+
+class _CountingStoreStub:
+    save_calls: list[dict[str, object]] = []
+    load_data: dict[str, object] | None = None
+
+    def __init__(self, *_args, **_kwargs) -> None:
+        pass
+
+    async def async_save(self, data: dict[str, object]) -> None:
+        self.__class__.save_calls.append(dict(data))
+
+    async def async_load(self) -> dict[str, object] | None:
+        return self.__class__.load_data
 
 
 def _sell_request(surplus_kwh: float) -> SellRequest:
@@ -543,6 +560,9 @@ async def test_evening_sell_a_first_splits_primary_then_secondary(
 
     monkeypatch.setattr(f"{EVENING}.EveningSellStrategy._compute_base_evaluation", _compute_base)
     monkeypatch.setattr(f"{SELL_BASE}.calculate_export_power", lambda *args, **kwargs: 1100.0)
+    _CountingStoreStub.save_calls = []
+    _CountingStoreStub.load_data = None
+    monkeypatch.setattr(f"{SELL_BASE}.Store", _CountingStoreStub)
 
     kwh_calls: list[float] = []
 
@@ -568,6 +588,7 @@ async def test_evening_sell_a_first_splits_primary_then_secondary(
     )
 
     assert kwh_calls == [9.0, 3.0]
+    assert len(_CountingStoreStub.save_calls) == 1
 
 
 @pytest.mark.asyncio
@@ -597,6 +618,9 @@ async def test_evening_sell_b_first_sells_only_overflow_before_primary_window(
 
     monkeypatch.setattr(f"{EVENING}.EveningSellStrategy._compute_base_evaluation", _compute_base)
     monkeypatch.setattr(f"{SELL_BASE}.calculate_export_power", lambda *args, **kwargs: 900.0)
+    _CountingStoreStub.save_calls = []
+    _CountingStoreStub.load_data = None
+    monkeypatch.setattr(f"{SELL_BASE}.Store", _CountingStoreStub)
 
     kwh_calls: list[float] = []
 
@@ -622,6 +646,7 @@ async def test_evening_sell_b_first_sells_only_overflow_before_primary_window(
     )
 
     assert kwh_calls == [3.0, 9.0]
+    assert len(_CountingStoreStub.save_calls) == 1
 
 
 @pytest.mark.asyncio

@@ -133,6 +133,25 @@ class BaseSellStrategy(ABC):
             logger=_LOGGER,
         )
 
+    async def _get_existing_restore_payload(self) -> dict[str, Any] | None:
+        """Return existing restore payload from memory or persisted storage."""
+        entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
+        existing_restore = entry_data.get("sell_restore")
+        if isinstance(existing_restore, dict):
+            return existing_restore
+
+        store = Store(
+            self.hass,
+            STORAGE_VERSION_SELL_RESTORE,
+            f"{STORAGE_KEY_SELL_RESTORE}.{self.entry.entry_id}",
+        )
+        stored_restore = await store.async_load()
+        if isinstance(stored_restore, dict):
+            entry_data["sell_restore"] = stored_restore
+            return stored_restore
+
+        return None
+
     async def run(self) -> None:
         """Execute common sell workflow and delegate decision logic to subclass."""
         self.integration_context = Context()
@@ -254,21 +273,28 @@ class BaseSellStrategy(ABC):
             )
 
             if not skip_restore:
-                restore_data = {
-                    "work_mode": original_work_mode,
-                    "prog_soc_entity": self.prog_soc_entity,
-                    "prog_soc_value": self.original_prog_soc,
-                    "restore_hour": self.restore_hour,
-                    "sell_type": self.sell_type,
-                    "timestamp": dt_util.utcnow().isoformat(),
-                }
-                self.hass.data[DOMAIN][self.entry.entry_id]["sell_restore"] = restore_data
-                store = Store(
-                    self.hass,
-                    STORAGE_VERSION_SELL_RESTORE,
-                    f"{STORAGE_KEY_SELL_RESTORE}.{self.entry.entry_id}",
-                )
-                await store.async_save(restore_data)
+                existing_restore = await self._get_existing_restore_payload()
+                if existing_restore is None or existing_restore.get("sell_type") != self.sell_type:
+                    restore_data = {
+                        "work_mode": original_work_mode,
+                        "prog_soc_entity": self.prog_soc_entity,
+                        "prog_soc_value": self.original_prog_soc,
+                        "restore_hour": self.restore_hour,
+                        "sell_type": self.sell_type,
+                        "timestamp": dt_util.utcnow().isoformat(),
+                    }
+                    self.hass.data[DOMAIN][self.entry.entry_id]["sell_restore"] = restore_data
+                    store = Store(
+                        self.hass,
+                        STORAGE_VERSION_SELL_RESTORE,
+                        f"{STORAGE_KEY_SELL_RESTORE}.{self.entry.entry_id}",
+                    )
+                    await store.async_save(restore_data)
+                else:
+                    _LOGGER.debug(
+                        "Preserving existing %s sell restore baseline; skip overwrite",
+                        self.sell_type,
+                    )
 
             await set_program_soc(
                 self.hass,

@@ -46,6 +46,7 @@ class _FakeStore:
     saved_data: dict | None = None
     load_data: dict | None = None
     removed: bool = False
+    save_calls: int = 0
 
     def __init__(self, hass, version, key):
         self.hass = hass
@@ -54,6 +55,7 @@ class _FakeStore:
 
     async def async_save(self, data: dict) -> None:
         self.__class__.saved_data = data
+        self.__class__.save_calls += 1
 
     async def async_load(self):
         return self.__class__.load_data
@@ -106,6 +108,7 @@ async def test_execute_sell_saves_restore_data(monkeypatch: pytest.MonkeyPatch) 
     _FakeStore.saved_data = None
     _FakeStore.load_data = None
     _FakeStore.removed = False
+    _FakeStore.save_calls = 0
 
     outcome = SimpleNamespace(details={}, entities_changed=[])
     strategy = _TestSellStrategy(hass, entry_id="entry-1", margin=1.0)
@@ -137,6 +140,173 @@ async def test_execute_sell_saves_restore_data(monkeypatch: pytest.MonkeyPatch) 
     assert restore["restore_hour"] == 18
     assert restore["sell_type"] == "evening"
     assert _FakeStore.saved_data == restore
+    assert _FakeStore.save_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_sell_preserves_existing_restore_baseline_in_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not overwrite an existing same-type restore baseline already in memory."""
+    existing_restore = {
+        "work_mode": "Zero Export to Load",
+        "prog_soc_entity": "number.prog5_soc",
+        "prog_soc_value": 65.0,
+        "restore_hour": 20,
+        "sell_type": "evening",
+        "timestamp": "2026-03-12T18:00:00+00:00",
+    }
+    hass = MagicMock()
+    work_mode_state = MagicMock()
+    work_mode_state.state = "Export First"
+    hass.states.get.return_value = work_mode_state
+    hass.data = {DOMAIN: {"entry-1": {"sell_restore": dict(existing_restore)}}}
+
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.Store",
+        _FakeStore,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_work_mode",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_program_soc",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_export_power",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.calculate_export_power",
+        lambda _surplus: 1200.0,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
+        lambda _hass, _entry: False,
+    )
+
+    _FakeStore.saved_data = None
+    _FakeStore.load_data = None
+    _FakeStore.removed = False
+    _FakeStore.save_calls = 0
+
+    outcome = SimpleNamespace(details={}, entities_changed=[])
+    strategy = _TestSellStrategy(hass, entry_id="entry-1", margin=1.0)
+    strategy.entry = entry
+    strategy.config = {
+        "work_mode_entity": "select.work_mode",
+        "export_power_entity": "number.export_power",
+    }
+    strategy.battery_config = SimpleNamespace(min_soc=15.0, capacity_ah=37.0, voltage=640.0)
+    strategy.current_soc = 90.0
+    strategy.prog_soc_entity = "number.prog5_soc"
+    strategy.original_prog_soc = 40.0
+    strategy.restore_hour = 21
+    strategy.integration_context = SimpleNamespace()
+
+    await strategy._execute_sell(
+        SellRequest(
+            surplus_kwh=3.0,
+            build_outcome_fn=lambda _target, _surplus, _export: outcome,
+            build_no_action_fn=lambda _surplus: outcome,
+        )
+    )
+
+    assert hass.data[DOMAIN]["entry-1"]["sell_restore"] == existing_restore
+    assert _FakeStore.saved_data is None
+    assert _FakeStore.save_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_sell_preserves_existing_restore_baseline_from_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not overwrite same-type restore baseline loaded from persisted storage."""
+    stored_restore = {
+        "work_mode": "Zero Export to Load",
+        "prog_soc_entity": "number.prog5_soc",
+        "prog_soc_value": 60.0,
+        "restore_hour": 20,
+        "sell_type": "evening",
+        "timestamp": "2026-03-12T18:00:00+00:00",
+    }
+    hass = MagicMock()
+    work_mode_state = MagicMock()
+    work_mode_state.state = "Export First"
+    hass.states.get.return_value = work_mode_state
+    hass.data = {DOMAIN: {"entry-1": {}}}
+
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.Store",
+        _FakeStore,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_work_mode",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_program_soc",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_export_power",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.calculate_export_power",
+        lambda _surplus: 1200.0,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
+        lambda _hass, _entry: False,
+    )
+
+    _FakeStore.saved_data = None
+    _FakeStore.load_data = dict(stored_restore)
+    _FakeStore.removed = False
+    _FakeStore.save_calls = 0
+
+    outcome = SimpleNamespace(details={}, entities_changed=[])
+    strategy = _TestSellStrategy(hass, entry_id="entry-1", margin=1.0)
+    strategy.entry = entry
+    strategy.config = {
+        "work_mode_entity": "select.work_mode",
+        "export_power_entity": "number.export_power",
+    }
+    strategy.battery_config = SimpleNamespace(min_soc=15.0, capacity_ah=37.0, voltage=640.0)
+    strategy.current_soc = 90.0
+    strategy.prog_soc_entity = "number.prog5_soc"
+    strategy.original_prog_soc = 35.0
+    strategy.restore_hour = 22
+    strategy.integration_context = SimpleNamespace()
+
+    await strategy._execute_sell(
+        SellRequest(
+            surplus_kwh=3.0,
+            build_outcome_fn=lambda _target, _surplus, _export: outcome,
+            build_no_action_fn=lambda _surplus: outcome,
+        )
+    )
+
+    assert hass.data[DOMAIN]["entry-1"]["sell_restore"] == stored_restore
+    assert _FakeStore.saved_data is None
+    assert _FakeStore.save_calls == 0
 
 
 @pytest.mark.asyncio
@@ -193,6 +363,7 @@ async def test_restore_callback_restores_work_mode_and_soc(
     _FakeStore.saved_data = None
     _FakeStore.load_data = None
     _FakeStore.removed = False
+    _FakeStore.save_calls = 0
 
     await scheduler._handle_evening_restore(datetime(2026, 2, 27, 18, 0, 0))
 
@@ -246,6 +417,7 @@ async def test_startup_recovery_restores_immediately_when_overdue(
         "sell_type": "morning",
         "timestamp": "2026-02-27T07:00:00+00:00",
     }
+    _FakeStore.save_calls = 0
 
     await async_check_pending_sell_restore(hass, entry)
 
