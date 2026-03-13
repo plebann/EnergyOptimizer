@@ -119,6 +119,10 @@ class BaseSellStrategy(ABC):
         """Optional early-exit hook executed before evaluation."""
         return None
 
+    def _get_battery_config(self) -> BatteryConfig:
+        """Return strategy battery configuration."""
+        return get_battery_config(self.config)
+
     @abstractmethod
     async def _evaluate_sell(self) -> DecisionOutcome | SellRequest:
         """Evaluate branch logic and return outcome or execution request."""
@@ -184,7 +188,7 @@ class BaseSellStrategy(ABC):
 
         self.threshold_price = float(self.config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0)
         self.margin = self._raw_margin if self._raw_margin is not None else 1.1
-        self.battery_config = get_battery_config(self.config)
+        self.battery_config = self._get_battery_config()
         self._now_hour = dt_util.as_local(dt_util.utcnow()).hour
 
         early_outcome = await self._check_early_exit()

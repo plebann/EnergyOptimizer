@@ -48,6 +48,7 @@ from .const import (
     CONF_MAX_SOC,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MIN_SOC,
+    CONF_MIN_SOC_PV,
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
@@ -88,6 +89,7 @@ from .const import (
     DEFAULT_MAX_EXPORT_POWER,
     DEFAULT_MIN_ARBITRAGE_PRICE,
     DEFAULT_MIN_SOC,
+    DEFAULT_MIN_SOC_PV,
     DEFAULT_PV_EFFICIENCY,
     DEFAULT_TODAY_LOAD_SENSOR,
     DOMAIN,
@@ -255,6 +257,9 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_BATTERY_EFFICIENCY, default=DEFAULT_BATTERY_EFFICIENCY
                 ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
                 vol.Required(CONF_MIN_SOC, default=DEFAULT_MIN_SOC): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=100)
+                ),
+                vol.Required(CONF_MIN_SOC_PV, default=DEFAULT_MIN_SOC_PV): vol.All(
                     vol.Coerce(int), vol.Range(min=0, max=100)
                 ),
                 vol.Required(CONF_MAX_SOC, default=DEFAULT_MAX_SOC): vol.All(
@@ -628,6 +633,9 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input[CONF_MIN_SOC] >= user_input[CONF_MAX_SOC]:
             errors[CONF_MIN_SOC] = "min_greater_than_max"
 
+        if user_input[CONF_MIN_SOC_PV] > user_input[CONF_MIN_SOC]:
+            errors[CONF_MIN_SOC_PV] = "min_pv_greater_than_min"
+
         return errors
 
     async def _validate_control_entities(
@@ -872,6 +880,8 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             if user_input[CONF_MIN_SOC] >= user_input[CONF_MAX_SOC]:
                 errors["base"] = "min_greater_than_max"
+            elif user_input[CONF_MIN_SOC_PV] > user_input[CONF_MIN_SOC]:
+                errors["base"] = "min_pv_greater_than_min"
             else:
                 self._data.update(user_input)
                 return await self.async_step_control_entities()
@@ -908,6 +918,12 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_MIN_SOC,
                     default=self._config_entry.data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC),
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+                vol.Optional(
+                    CONF_MIN_SOC_PV,
+                    default=self._config_entry.data.get(
+                        CONF_MIN_SOC_PV, DEFAULT_MIN_SOC_PV
+                    ),
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
                 vol.Optional(
                     CONF_MAX_SOC,

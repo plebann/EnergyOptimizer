@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 
@@ -15,6 +15,8 @@ from custom_components.energy_optimizer.const import (
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_EXPORT_POWER_ENTITY,
     CONF_MIN_ARBITRAGE_PRICE,
+    CONF_MIN_SOC,
+    CONF_MIN_SOC_PV,
     CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_PROG3_SOC_ENTITY,
     CONF_PV_PRODUCTION_SENSOR,
@@ -45,6 +47,7 @@ def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
     entry.entry_id = "entry-1"
     entry.domain = DOMAIN
     entry.data = config
+    entry.options = {}
     hass.config_entries.async_entries.return_value = [entry]
     hass.config_entries.async_get_entry.return_value = entry
     hass.states.get.side_effect = lambda entity_id: (
@@ -87,6 +90,8 @@ def _base_config() -> dict[str, object]:
         CONF_BATTERY_CAPACITY_AH: 37,
         CONF_BATTERY_VOLTAGE: 640,
         CONF_BATTERY_EFFICIENCY: 0.9,
+        CONF_MIN_SOC: 20,
+        CONF_MIN_SOC_PV: 12,
         CONF_TEST_MODE: False,
     }
 
@@ -106,9 +111,23 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, outcomes: list) -> None:
     async def _capture_log(hass, entry, outcome, context, logger):
         outcomes.append(outcome)
 
+    class _FakeStore:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def async_load(self):
+            return None
+
+        async def async_save(self, data):
+            return None
+
     monkeypatch.setattr(
         f"{SELL_BASE}.log_decision_unified",
         _capture_log,
+    )
+    monkeypatch.setattr(
+        f"{SELL_BASE}.Store",
+        _FakeStore,
     )
     monkeypatch.setattr(
         f"{SELL_BASE}.set_work_mode",
@@ -429,5 +448,143 @@ async def test_morning_sell_caps_window_by_sufficiency(monkeypatch: pytest.Monke
     assert outcomes[-1].action_type == "sell"
     assert outcomes[-1].details["end_hour"] == 13
     assert outcomes[-1].details["sufficiency_hour"] == 10
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_uses_min_soc_pv_for_reserve(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _base_config()
+    states = _base_states()
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    captured: dict[str, float] = {}
+
+    async def _hp(*args, **kwargs):
+        return 1.0, {}
+
+    monkeypatch.setattr(f"{MORNING}.get_heat_pump_forecast_window", _hp)
+    monkeypatch.setattr(
+        f"{MORNING}.get_pv_forecast_window",
+        lambda *args, **kwargs: (1.0, {}),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_losses",
+        lambda *args, **kwargs: (0.0, 0.0),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_sufficiency_window",
+        lambda **kwargs: (3.0, 2.0, 1.0, 13, False),
+    )
+
+    def _capture_reserve(current_soc, min_soc, *args, **kwargs):
+        captured["min_soc"] = min_soc
+        return 3.0
+
+    monkeypatch.setattr(f"{MORNING}.calculate_battery_reserve", _capture_reserve)
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_surplus_energy",
+        lambda reserve, required, pv: 0.0,
+    )
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes
+    assert captured["min_soc"] == 12.0
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_clamps_target_soc_to_min_soc_pv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    states = _base_states()
+    states["sensor.battery_soc"] = "50"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+
+    set_work_mode = AsyncMock()
+    set_program_soc = AsyncMock()
+    set_export_power = AsyncMock()
+
+    async def _capture_log(hass, entry, outcome, context, logger):
+        outcomes.append(outcome)
+
+    class _FakeStore:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def async_load(self):
+            return None
+
+        async def async_save(self, data):
+            return None
+
+    monkeypatch.setattr(f"{SELL_BASE}.log_decision_unified", _capture_log)
+    monkeypatch.setattr(f"{SELL_BASE}.Store", _FakeStore)
+    monkeypatch.setattr(f"{SELL_BASE}.set_work_mode", set_work_mode)
+    monkeypatch.setattr(f"{SELL_BASE}.set_program_soc", set_program_soc)
+    monkeypatch.setattr(f"{SELL_BASE}.set_export_power", set_export_power)
+    monkeypatch.setattr(
+        f"{SELL_BASE}.dt_util.utcnow",
+        lambda: datetime(2026, 2, 24, 7, 0, 0),
+    )
+    monkeypatch.setattr(
+        f"{SELL_BASE}.dt_util.as_local",
+        lambda _dt: SimpleNamespace(hour=7),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.build_hourly_usage_array",
+        lambda config, get_state, daily_load_fallback=None: [0.0] * 24,
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.resolve_tariff_end_hour",
+        lambda hass, config, default_hour=13: 13,
+    )
+
+    async def _hp(*args, **kwargs):
+        return 1.0, {}
+
+    monkeypatch.setattr(f"{MORNING}.get_heat_pump_forecast_window", _hp)
+    monkeypatch.setattr(
+        f"{MORNING}.get_pv_forecast_window",
+        lambda *args, **kwargs: (2.0, {}),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_losses",
+        lambda *args, **kwargs: (0.0, 0.0),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_sufficiency_window",
+        lambda **kwargs: (3.0, 2.0, 1.0, 13, False),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_battery_reserve",
+        lambda *args, **kwargs: 10.0,
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_surplus_energy",
+        lambda reserve, required, pv: 8.0,
+    )
+    monkeypatch.setattr(
+        f"{SELL_BASE}.calculate_export_power",
+        lambda *args, **kwargs: 1200.0,
+    )
+    monkeypatch.setattr(
+        f"{SELL_BASE}.kwh_to_soc",
+        lambda *args, **kwargs: 50.0,
+    )
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes
+    set_program_soc.assert_any_await(
+        hass,
+        "number.prog3_soc",
+        12.0,
+        entry=hass.config_entries.async_get_entry.return_value,
+        logger=ANY,
+        context=ANY,
+    )
 
 

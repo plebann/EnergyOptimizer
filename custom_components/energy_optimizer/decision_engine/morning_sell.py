@@ -1,6 +1,7 @@
 """Morning peak sell decision logic."""
 from __future__ import annotations
 
+from dataclasses import replace
 import logging
 from typing import TYPE_CHECKING
 
@@ -15,7 +16,9 @@ from ..calculations.energy import (
 from ..calculations.utils import build_hourly_usage_array
 from ..const import (
     CONF_EVENING_MAX_PRICE_SENSOR,
+    CONF_MIN_SOC_PV,
     CONF_MORNING_MAX_PRICE_SENSOR,
+    DEFAULT_MIN_SOC_PV,
     DOMAIN,
     SUN_ENTITY,
 )
@@ -56,6 +59,12 @@ class MorningSellStrategy(BaseSellStrategy):
     def sell_type(self) -> str:
         """Sell type persisted for restore."""
         return "morning"
+
+    def _get_battery_config(self):
+        """Return morning-sell-specific battery configuration."""
+        battery_config = super()._get_battery_config()
+        min_soc_pv = float(self.config.get(CONF_MIN_SOC_PV, DEFAULT_MIN_SOC_PV))
+        return replace(battery_config, min_soc=min_soc_pv)
 
     def _get_prog_soc_state(self) -> tuple[str, float] | None:
         """Resolve program SOC entity/value for morning sell."""
