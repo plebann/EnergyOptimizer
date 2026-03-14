@@ -245,7 +245,7 @@ class BaseSellStrategy(ABC):
                 )
 
         target_soc = max(
-            self.current_soc - kwh_to_soc(surplus_kwh, self.battery_config.capacity_ah, self.battery_config.voltage),
+            self.current_soc - kwh_to_soc(surplus_kwh, self.battery_config.capacity_ah, self.battery_config.voltage) - 5,
             self.battery_config.min_soc,
         )
         if target_soc >= self.current_soc:
