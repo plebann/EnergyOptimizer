@@ -11,6 +11,7 @@ from homeassistant.util import dt as dt_util
 from ..const import (
     CONF_EXPORT_POWER_ENTITY,
     CONF_MAX_EXPORT_POWER,
+    CONF_PROG3_SOC_ENTITY,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_MAX_EXPORT_POWER,
     DOMAIN,
@@ -49,12 +50,13 @@ async def async_handle_sell_restore(
 
     _LOGGER.info("Restoring inverter state after %s sell", sell_type)
     integration_context = Context()
-    work_mode = WORK_MODE_ZERO_EXPORT_TO_LOAD
+    work_mode_entity = entry.data.get(CONF_WORK_MODE_ENTITY)
+
     if restore.get("work_mode"):
-        work_mode_entity = entry.data.get(CONF_WORK_MODE_ENTITY)
         work_mode = restore["work_mode"]
     else:
-        work_mode_entity = None
+        work_mode = WORK_MODE_ZERO_EXPORT_TO_LOAD
+
     await set_work_mode(
         hass,
         str(work_mode_entity) if work_mode_entity else None,
@@ -64,8 +66,13 @@ async def async_handle_sell_restore(
         context=integration_context,
     )
 
-    prog_soc_entity = restore.get("prog_soc_entity")
-    prog_soc_value = restore.get("prog_soc_value")
+    prog_soc_entity = entry.data.get(CONF_PROG3_SOC_ENTITY)
+    
+    if restore.get("prog_soc_value"):
+        prog_soc_value = restore["prog_soc_value"]
+    else:
+        prog_soc_value = 11
+    
     if prog_soc_entity is not None and prog_soc_value is not None:
         await set_program_soc(
             hass,
