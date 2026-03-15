@@ -15,7 +15,6 @@ from ..const import (
     CONF_PRICE_SENSOR,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_MIN_SOC,
-    DOMAIN,
     SUN_ABOVE_HORIZON,
     SUN_ENTITY,
     WORK_MODE_EXPORT_FIRST,
@@ -32,8 +31,6 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 _PRICE_BLOCK_FACTOR = 0.3
-_NOON_HOUR = 12
-
 
 async def async_run_solar_charge_block(
     hass: HomeAssistant,
@@ -58,11 +55,7 @@ async def async_run_solar_charge_block(
         _LOGGER.debug("Solar charge block: sun not above horizon — skip")
         return
 
-    # Guard: only before noon
     now = dt_util.now()
-    if now.hour >= _NOON_HOUR:
-        _LOGGER.debug("Solar charge block: past noon (%02d:xx) — skip", now.hour)
-        return
 
     # When min price hour sensor is not configured, skip if charging is already blocked
     # (avoids redundant service calls)

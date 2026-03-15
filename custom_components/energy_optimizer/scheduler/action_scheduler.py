@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
+from time import sleep
 from typing import TYPE_CHECKING, Any, Callable
 
 from homeassistant.core import Context
@@ -285,11 +286,12 @@ class ActionScheduler:
 
     async def _handle_price_change(self, event) -> None:
         """Run price-driven controls when price sensor value changes."""
-        await async_run_export_block_control(
+        await async_run_solar_charge_block(
             self.hass,
             entry_id=self.entry.entry_id,
         )
-        await async_run_solar_charge_block(
+        sleep(5)
+        await async_run_export_block_control(
             self.hass,
             entry_id=self.entry.entry_id,
         )
