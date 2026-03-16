@@ -12,6 +12,7 @@ from ..const import (
     CONF_EXPORT_POWER_ENTITY,
     CONF_MAX_EXPORT_POWER,
     CONF_PROG3_SOC_ENTITY,
+    CONF_PROG5_SOC_ENTITY,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_MAX_EXPORT_POWER,
     DOMAIN,
@@ -66,9 +67,15 @@ async def async_handle_sell_restore(
         context=integration_context,
     )
 
-    prog_soc_entity = entry.data.get(CONF_PROG3_SOC_ENTITY)
+    restore_prog_soc_entity = restore.get("prog_soc_entity")
+    if restore_prog_soc_entity:
+        prog_soc_entity = str(restore_prog_soc_entity)
+    elif sell_type == "evening":
+        prog_soc_entity = entry.data.get(CONF_PROG5_SOC_ENTITY)
+    else:
+        prog_soc_entity = entry.data.get(CONF_PROG3_SOC_ENTITY)
     
-    if restore.get("prog_soc_value"):
+    if restore.get("prog_soc_value") is not None:
         prog_soc_value = restore["prog_soc_value"]
     else:
         prog_soc_value = 11
