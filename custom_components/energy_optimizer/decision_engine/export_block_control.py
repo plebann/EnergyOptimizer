@@ -68,26 +68,28 @@ async def async_run_export_block_control(
         "on" if is_enabled else "off",
     )
 
-    if price <= 0 and is_enabled:
+    desired_is_enabled = price > 0
+
+    if desired_is_enabled != is_enabled:
+        if desired_is_enabled:
+            _LOGGER.info(
+                "Export block control: unblocking export (price %.4f, switch off -> on)",
+                price,
+            )
+            await turn_on_switch(
+                hass,
+                str(export_surplus_switch),
+                entry=entry,
+                logger=_LOGGER,
+                context=Context(),
+            )
+            return
+
         _LOGGER.info(
             "Export block control: blocking export (price %.4f, switch on -> off)",
             price,
         )
         await turn_off_switch(
-            hass,
-            str(export_surplus_switch),
-            entry=entry,
-            logger=_LOGGER,
-            context=Context(),
-        )
-        return
-
-    if price > 0 and not is_enabled:
-        _LOGGER.info(
-            "Export block control: unblocking export (price %.4f, switch off -> on)",
-            price,
-        )
-        await turn_on_switch(
             hass,
             str(export_surplus_switch),
             entry=entry,
