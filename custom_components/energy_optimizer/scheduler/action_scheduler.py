@@ -6,7 +6,6 @@ import logging
 from time import sleep
 from typing import TYPE_CHECKING, Any, Callable
 
-from homeassistant.core import Context
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_change
 from homeassistant.util import dt as dt_util
 
@@ -14,19 +13,17 @@ from ..const import (
     CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
     CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
     CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
-    CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_TARIFF_END_HOUR_SENSOR,
-    DEFAULT_MAX_CHARGE_CURRENT,
     DOMAIN,
 )
-from ..controllers.inverter import set_max_charge_current
 from ..decision_engine.evening_sell import async_run_evening_sell
 from ..decision_engine.morning_sell import async_run_morning_sell
 from ..decision_engine.evening_behavior import async_run_evening_behavior
 from ..decision_engine.afternoon_charge import async_run_afternoon_charge
 from ..decision_engine.morning_charge import async_run_morning_charge
+from ..decision_engine.daytime_min_price_restore import async_run_daytime_min_price_restore
 from ..decision_engine.solar_charge_block import async_run_solar_charge_block
 from ..decision_engine.export_block_control import async_run_export_block_control
 from ..service_handlers.sell_restore import (
@@ -34,7 +31,6 @@ from ..service_handlers.sell_restore import (
     async_handle_sell_restore,
 )
 from ..helpers import (
-    get_float_state_info,
     resolve_daytime_min_price_time,
     resolve_evening_max_price_hour,
     resolve_evening_second_max_price_hour,
@@ -301,6 +297,14 @@ class ActionScheduler:
         """Refresh the published daily schedule snapshot at midnight."""
         self._publish_schedule_snapshot()
 
+    async def _handle_daytime_min_price_restore(self, now: datetime) -> None:
+        """Run daytime min price restore decision engine at scheduled time."""
+        _LOGGER.info("Scheduler triggering daytime min price restore at %02d:00", now.hour)
+        await async_run_daytime_min_price_restore(
+            self.hass,
+            entry_id=self.entry.entry_id,
+        )
+
     def _schedule_afternoon_charge(self) -> None:
         """Schedule afternoon charge at current tariff end hour."""
         if self._afternoon_listener is not None:
@@ -359,40 +363,6 @@ class ActionScheduler:
             hour=hour,
             minute=0,
             second=0,
-        )
-        self._publish_schedule_snapshot()
-
-    async def _handle_daytime_min_price_restore(self, now: datetime) -> None:
-        """Restore max charge current to configured default at daytime min price hour."""
-        _LOGGER.info("Scheduler triggering daytime min price restore at %02d:00", now.hour)
-        config = self.entry.data
-        max_charge_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
-        max_charge_value, _raw, error = get_float_state_info(self.hass, max_charge_entity)
-        if error is not None:
-            _LOGGER.warning(
-                "Daytime min price restore: cannot read max charge current (%s) — skip", error
-            )
-            return
-        if max_charge_value is None:
-            _LOGGER.warning("Daytime min price restore: max charge current has no value — skip")
-            return
-        if max_charge_value >= DEFAULT_MAX_CHARGE_CURRENT:
-            _LOGGER.debug(
-                "Daytime min price restore: max charge current already %.0f — skip", max_charge_value
-            )
-            return
-        _LOGGER.info(
-            "Daytime min price restore: setting max charge current to %.0f (was %.0f)",
-            float(DEFAULT_MAX_CHARGE_CURRENT),
-            max_charge_value,
-        )
-        await set_max_charge_current(
-            self.hass,
-            max_charge_entity,
-            DEFAULT_MAX_CHARGE_CURRENT,
-            entry=self.entry,
-            logger=_LOGGER,
-            context=Context(),
         )
         self._publish_schedule_snapshot()
 
