@@ -32,32 +32,9 @@ async def async_run_daytime_min_price_restore(
     if entry is None:
         return
 
-    config = entry.data
-    max_charge_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
-    max_charge_value, _, error = get_float_state_info(hass, max_charge_entity)
-    if error is not None:
-        _LOGGER.warning(
-            "Daytime min price restore: cannot read max charge current (%s) — skip",
-            error,
-        )
-        return
-    if max_charge_value is None:
-        _LOGGER.warning("Daytime min price restore: max charge current has no value — skip")
-        return
-    if max_charge_value >= DEFAULT_MAX_CHARGE_CURRENT:
-        _LOGGER.debug(
-            "Daytime min price restore: max charge current already %.0f — skip",
-            max_charge_value,
-        )
-        return
-
-    _LOGGER.info(
-        "Daytime min price restore: setting max charge current to %.0f (was %.0f)",
-        float(DEFAULT_MAX_CHARGE_CURRENT),
-        max_charge_value,
-    )
-
     integration_context = Context()
+    config = entry.data
+
     work_mode_entity = config.get(CONF_WORK_MODE_ENTITY)
     if not work_mode_entity:
         _LOGGER.warning(
@@ -73,11 +50,17 @@ async def async_run_daytime_min_price_restore(
             context=integration_context,
         )
 
-    await set_max_charge_current(
-        hass,
-        max_charge_entity,
-        DEFAULT_MAX_CHARGE_CURRENT,
-        entry=entry,
-        logger=_LOGGER,
-        context=integration_context,
-    )
+    max_charge_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
+    if not max_charge_entity:
+        _LOGGER.warning(
+            "Daytime min price restore: max charge current entity not configured — skip charge current restore"
+        )
+    else:
+        await set_max_charge_current(
+            hass,
+            max_charge_entity,
+            DEFAULT_MAX_CHARGE_CURRENT,
+            entry=entry,
+            logger=_LOGGER,
+            context=integration_context,
+        )
