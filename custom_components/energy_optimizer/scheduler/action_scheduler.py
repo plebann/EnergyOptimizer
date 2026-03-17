@@ -1,9 +1,9 @@
 """Action scheduler for Energy Optimizer."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 import logging
-from time import sleep
 from typing import TYPE_CHECKING, Any, Callable
 
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_change
@@ -286,7 +286,7 @@ class ActionScheduler:
             self.hass,
             entry_id=self.entry.entry_id,
         )
-        sleep(5)
+        await asyncio.sleep(5)
         await async_run_export_block_control(
             self.hass,
             entry_id=self.entry.entry_id,
