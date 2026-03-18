@@ -75,13 +75,13 @@ class ActionScheduler:
         """Start scheduling fixed actions."""
         self._listeners.append(
             async_track_time_change(
-                self.hass, self._handle_morning_charge, hour=4, minute=0, second=0
+                self.hass, self._handle_morning_charge, hour=4, minute=0, second=1
             )
         )
         self._schedule_afternoon_charge()
         self._listeners.append(
             async_track_time_change(
-                self.hass, self._handle_evening_behavior, hour=22, minute=0, second=0
+                self.hass, self._handle_evening_behavior, hour=22, minute=0, second=1
             )
         )
         self._listeners.append(
@@ -90,7 +90,7 @@ class ActionScheduler:
                 self._handle_daily_schedule_refresh,
                 hour=0,
                 minute=0,
-                second=0,
+                second=1,
             )
         )
         self._schedule_morning_sell()
@@ -356,7 +356,7 @@ class ActionScheduler:
             self._handle_afternoon_charge,
             hour=hour,
             minute=0,
-            second=0,
+            second=1,
         )
         self._publish_schedule_snapshot()
 
@@ -375,7 +375,7 @@ class ActionScheduler:
             self._handle_evening_sell,
             hour=hour,
             minute=0,
-            second=0,
+            second=1,
         )
 
         second_hour = resolve_evening_second_max_price_hour(self.hass, self.entry.data)
@@ -385,7 +385,7 @@ class ActionScheduler:
                 self._handle_evening_sell_second,
                 hour=second_hour,
                 minute=0,
-                second=0,
+                second=1,
             )
         self._publish_schedule_snapshot()
 
@@ -401,7 +401,7 @@ class ActionScheduler:
             self._handle_morning_sell,
             hour=hour,
             minute=0,
-            second=0,
+            second=1,
         )
         self._publish_schedule_snapshot()
 
@@ -428,7 +428,7 @@ class ActionScheduler:
             self._handle_daytime_min_price_restore,
             hour=hour,
             minute=minute,
-            second=0,
+            second=1,
         )
         _LOGGER.debug("Daytime min price restore scheduled for %02d:%02d", hour, minute)
         self._publish_schedule_snapshot()
@@ -447,7 +447,7 @@ class ActionScheduler:
             self.hass,
             self._handle_price_hourly,
             hour="*",
-            minute=0,
+            minute=1,
             second=0,
         )
 
@@ -474,7 +474,7 @@ class ActionScheduler:
             self._handle_morning_restore,
             hour=(morning_hour + 1) % 24,
             minute=0,
-            second=0,
+            second=1,
         )
 
         evening_hour = resolve_evening_max_price_hour(self.hass, self.entry.data, default_hour=17)
@@ -489,7 +489,7 @@ class ActionScheduler:
             self._handle_evening_restore,
             hour=effective_evening_restore_hour,
             minute=0,
-            second=0,
+            second=1,
         )
         self._publish_schedule_snapshot()
 
