@@ -94,6 +94,10 @@ class BaseSellStrategy(ABC):
         """Whether to clamp surplus by today's PV production."""
         return False
 
+    def _get_target_soc_floor(self, *, surplus_kwh: float) -> float:
+        """Return minimal target SOC clamp for current strategy context."""
+        return self.battery_config.min_soc
+
     @abstractmethod
     def _get_prog_soc_state(self) -> tuple[str, float] | None:
         """Return configured program SOC entity and current value."""
@@ -244,9 +248,16 @@ class BaseSellStrategy(ABC):
                     max_sell_error,
                 )
 
+        target_soc_floor = self._get_target_soc_floor(surplus_kwh=surplus_kwh)
         target_soc = max(
-            self.current_soc - kwh_to_soc(surplus_kwh, self.battery_config.capacity_ah, self.battery_config.voltage) - 5,
-            self.battery_config.min_soc,
+            self.current_soc
+            - kwh_to_soc(
+                surplus_kwh,
+                self.battery_config.capacity_ah,
+                self.battery_config.voltage,
+            )
+            - 5,
+            target_soc_floor,
         )
         if target_soc >= self.current_soc:
             outcome = request.build_no_action_fn(surplus_kwh)

@@ -29,6 +29,7 @@ from ..const import (
     CONF_BATTERY_VOLTAGE,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
+    CONF_MIN_SOC_PV,
     CONF_PROG3_SOC_ENTITY,
     CONF_PROG2_SOC_ENTITY,
     CONF_PROG4_SOC_ENTITY,
@@ -38,6 +39,7 @@ from ..const import (
     DEFAULT_BATTERY_VOLTAGE,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_SOC,
+    DEFAULT_MIN_SOC_PV,
     DOMAIN,
 )
 from ..helpers import get_required_float_state
@@ -59,6 +61,7 @@ class BatteryConfig:
     capacity_ah: float
     voltage: float
     min_soc: float
+    min_soc_pv: float
     max_soc: float
     efficiency: float
 
@@ -119,6 +122,7 @@ def get_battery_config(config: dict[str, Any]) -> BatteryConfig:
         capacity_ah=config.get(CONF_BATTERY_CAPACITY_AH, DEFAULT_BATTERY_CAPACITY_AH),
         voltage=config.get(CONF_BATTERY_VOLTAGE, DEFAULT_BATTERY_VOLTAGE),
         min_soc=config.get(CONF_MIN_SOC, DEFAULT_MIN_SOC),
+        min_soc_pv=config.get(CONF_MIN_SOC_PV, DEFAULT_MIN_SOC_PV),
         max_soc=config.get(CONF_MAX_SOC, DEFAULT_MAX_SOC),
         efficiency=config.get(CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY),
     )

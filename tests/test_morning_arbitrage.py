@@ -44,7 +44,8 @@ def _bc(capacity_ah: float = 100.0, voltage: float = 50.0) -> BatteryConfig:
     return BatteryConfig(
         capacity_ah=capacity_ah,
         voltage=voltage,
-        min_soc=10.0,
+        min_soc=20.0,
+        min_soc_pv=15.0,
         max_soc=100.0,
         efficiency=100.0,
     )

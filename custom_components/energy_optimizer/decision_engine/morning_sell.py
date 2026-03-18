@@ -50,6 +50,17 @@ _LOGGER = logging.getLogger(__name__)
 class MorningSellStrategy(BaseSellStrategy):
     """Morning sell strategy using single surplus branch."""
 
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        *,
+        entry_id: str | None,
+        margin: float | None,
+    ) -> None:
+        """Initialize morning sell strategy."""
+        super().__init__(hass, entry_id=entry_id, margin=margin)
+        self._allow_min_soc_pv = False
+
     @property
     def scenario_name(self) -> str:
         """Scenario display name."""
@@ -60,11 +71,11 @@ class MorningSellStrategy(BaseSellStrategy):
         """Sell type persisted for restore."""
         return "morning"
 
-    def _get_battery_config(self):
-        """Return morning-sell-specific battery configuration."""
-        battery_config = super()._get_battery_config()
-        min_soc_pv = float(self.config.get(CONF_MIN_SOC_PV, DEFAULT_MIN_SOC_PV))
-        return replace(battery_config, min_soc=min_soc_pv)
+    def _get_target_soc_floor(self, *, surplus_kwh: float) -> float:
+        """Use PV floor only when sufficiency is confirmed for morning sell."""
+        if self._allow_min_soc_pv:
+            return self.battery_config.min_soc_pv
+        return self.battery_config.min_soc
 
     def _get_prog_soc_state(self) -> tuple[str, float] | None:
         """Resolve program SOC entity/value for morning sell."""
@@ -93,6 +104,7 @@ class MorningSellStrategy(BaseSellStrategy):
 
     async def _evaluate_sell(self) -> DecisionOutcome | SellRequest:
         """Run morning sell logic using a single surplus branch."""
+        self._allow_min_soc_pv = False
         start_hour = (self._now_hour + 1) % 24
         base_end_hour = resolve_tariff_end_hour(self.hass, self.config, default_hour=13)
 
@@ -187,6 +199,7 @@ class MorningSellStrategy(BaseSellStrategy):
         )
 
         required_kwh, pv_forecast_kwh, sufficiency = _resolve_required_and_pv(base_forecasts)
+        self._allow_min_soc_pv = sufficiency.sufficiency_reached
 
         heat_pump_kwh = base_heat_pump_kwh
         losses_kwh = base_forecasts.losses_kwh
@@ -201,7 +214,7 @@ class MorningSellStrategy(BaseSellStrategy):
             )
         reserve_kwh = calculate_battery_reserve(
             self.current_soc,
-            self.battery_config.min_soc,
+            self.battery_config.min_soc_pv,
             self.battery_config.capacity_ah,
             self.battery_config.voltage,
             efficiency=self.battery_config.efficiency,
@@ -234,7 +247,7 @@ class MorningSellStrategy(BaseSellStrategy):
             battery_space_entity_id = getattr(battery_space_sensor, "entity_id", None)
 
         if battery_space_entity_id:
-            free_space_kwh_raw, _space_raw_state, free_space_error = get_float_state_info(
+            free_space_kwh_raw, _, free_space_error = get_float_state_info(
                 self.hass,
                 battery_space_entity_id,
             )
