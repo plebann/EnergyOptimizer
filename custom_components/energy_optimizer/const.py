@@ -122,7 +122,7 @@ DEFAULT_DISCHARGE_CURRENT_RESET = 12
 SUN_ENTITY = "sun.sun"
 SUN_ABOVE_HORIZON = "above_horizon"
 WORK_MODE_EXPORT_FIRST = "Export First"
-WORK_MODE_ZERO_EXPORT_TO_LOAD = "Zero Export to Load"
+WORK_MODE_ZERO_EXPORT_TO_LOAD = "Zero Export To Load"
 
 # Sell restore persistence
 STORAGE_KEY_SELL_RESTORE = f"{DOMAIN}.sell_restore"
