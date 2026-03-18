@@ -6,7 +6,12 @@ from datetime import datetime, timedelta
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
-from homeassistant.helpers.event import async_track_state_change_event, async_track_time_change
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_sunrise,
+    async_track_sunset,
+    async_track_time_change,
+)
 from homeassistant.util import dt as dt_util
 
 from ..const import (
@@ -17,6 +22,8 @@ from ..const import (
     CONF_PRICE_SENSOR,
     CONF_TARIFF_END_HOUR_SENSOR,
     DOMAIN,
+    SUN_ABOVE_HORIZON,
+    SUN_ENTITY,
 )
 from ..decision_engine.evening_sell import async_run_evening_sell
 from ..decision_engine.morning_sell import async_run_morning_sell
@@ -60,6 +67,9 @@ class ActionScheduler:
         self._morning_restore_listener: Callable[[], None] | None = None
         self._evening_restore_listener: Callable[[], None] | None = None
         self._daytime_min_price_listener: Callable[[], None] | None = None
+        self._price_hourly_listener: Callable[[], None] | None = None
+        self._sunrise_listener: Callable[[], None] | None = None
+        self._sunset_listener: Callable[[], None] | None = None
 
     def start(self) -> None:
         """Start scheduling fixed actions."""
@@ -88,18 +98,19 @@ class ActionScheduler:
         self._schedule_sell_restores()
         self._schedule_daytime_min_price_restore()
 
-        price_sensor = self.entry.data.get(CONF_PRICE_SENSOR)
-        if price_sensor:
-            self._listeners.append(
-                async_track_state_change_event(
-                    self.hass,
-                    [str(price_sensor)],
-                    self._handle_price_change,
-                )
-            )
+        self._sunrise_listener = async_track_sunrise(
+            self.hass,
+            self._handle_sunrise,
+        )
+        self._sunset_listener = async_track_sunset(
+            self.hass,
+            self._handle_sunset,
+        )
+        if self._is_sun_above_horizon():
+            self._start_price_hourly_listener()
         else:
-            _LOGGER.warning(
-                "Price-driven actions: price sensor not configured — export and solar charge block controls disabled"
+            _LOGGER.debug(
+                "Price-driven actions: sun not above horizon at startup — hourly trigger inactive"
             )
 
         tariff_end_entity = self.entry.data.get(CONF_TARIFF_END_HOUR_SENSOR)
@@ -183,6 +194,13 @@ class ActionScheduler:
         if self._daytime_min_price_listener is not None:
             self._daytime_min_price_listener()
             self._daytime_min_price_listener = None
+        self._stop_price_hourly_listener()
+        if self._sunrise_listener is not None:
+            self._sunrise_listener()
+            self._sunrise_listener = None
+        if self._sunset_listener is not None:
+            self._sunset_listener()
+            self._sunset_listener = None
         self._clear_schedule_snapshot()
 
     async def _handle_morning_charge(self, now: datetime) -> None:
@@ -280,8 +298,29 @@ class ActionScheduler:
         await async_handle_sell_restore(self.hass, self.entry, "evening")
         self._publish_schedule_snapshot()
 
-    async def _handle_price_change(self, event) -> None:
-        """Run price-driven controls when price sensor value changes."""
+    async def _handle_sunrise(self, now: datetime) -> None:
+        """Activate hourly daytime price controls after sunrise."""
+        _LOGGER.debug("Price-driven actions: sunrise detected — enabling hourly trigger")
+        self._start_price_hourly_listener()
+        self._publish_schedule_snapshot()
+
+    async def _handle_sunset(self, now: datetime) -> None:
+        """Deactivate hourly daytime price controls after sunset."""
+        _LOGGER.debug("Price-driven actions: sunset detected — disabling hourly trigger")
+        self._stop_price_hourly_listener()
+        self._publish_schedule_snapshot()
+
+    async def _handle_price_hourly(self, now: datetime) -> None:
+        """Run price-driven controls on the hour during daylight."""
+        if not self._is_sun_above_horizon():
+            _LOGGER.debug(
+                "Price-driven actions: hourly trigger fired outside daylight window — skip"
+            )
+            return
+        await self._handle_price_change(now)
+
+    async def _handle_price_change(self, event_or_now: Any) -> None:
+        """Run daytime price-driven controls."""
         await async_run_solar_charge_block(
             self.hass,
             entry_id=self.entry.entry_id,
@@ -393,6 +432,32 @@ class ActionScheduler:
         )
         _LOGGER.debug("Daytime min price restore scheduled for %02d:%02d", hour, minute)
         self._publish_schedule_snapshot()
+
+    def _is_sun_above_horizon(self) -> bool:
+        """Return whether the sun entity currently reports daylight."""
+        sun_state = self.hass.states.get(SUN_ENTITY)
+        return sun_state is not None and sun_state.state == SUN_ABOVE_HORIZON
+
+    def _start_price_hourly_listener(self) -> None:
+        """Ensure the hourly daytime price-control listener is active."""
+        if self._price_hourly_listener is not None:
+            return
+
+        self._price_hourly_listener = async_track_time_change(
+            self.hass,
+            self._handle_price_hourly,
+            hour="*",
+            minute=0,
+            second=0,
+        )
+
+    def _stop_price_hourly_listener(self) -> None:
+        """Ensure the hourly daytime price-control listener is inactive."""
+        if self._price_hourly_listener is None:
+            return
+
+        self._price_hourly_listener()
+        self._price_hourly_listener = None
 
     def _schedule_sell_restores(self) -> None:
         """Schedule dedicated restore listeners one hour after sell start hours."""
@@ -617,7 +682,7 @@ class ActionScheduler:
                     kind="event_driven",
                     source="price_sensor",
                     order=999,
-                    trigger="price_sensor_state_change",
+                    trigger="hourly_between_sunrise_and_sunset",
                 )
             )
             actions.append(
@@ -628,7 +693,7 @@ class ActionScheduler:
                     kind="event_driven",
                     source="price_sensor",
                     order=1000,
-                    trigger="price_sensor_state_change",
+                    trigger="hourly_between_sunrise_and_sunset",
                 )
             )
 

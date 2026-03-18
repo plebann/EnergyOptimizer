@@ -98,15 +98,10 @@ async def async_run_export_block_control(
         )
         return
 
-    if price < 0:
+    if price <= 0:
         _LOGGER.info(
-            "Export block control: no change — price negative (%.4f) but switch already off",
+            "Export block control: no change — price negative or zero (%.4f) but switch already off",
             price,
-        )
-    elif price == 0:
-        _LOGGER.info(
-            "Export block control: no change — price is zero, switch is %s",
-            "on" if is_enabled else "off",
         )
     else:
         _LOGGER.debug(

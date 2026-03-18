@@ -52,6 +52,10 @@ def _state(state: str) -> SimpleNamespace:
     return SimpleNamespace(state=state)
 
 
+def _sun_state(state: str) -> SimpleNamespace:
+    return SimpleNamespace(state=state, attributes={})
+
+
 @pytest.mark.asyncio
 async def test_sensor_setup_registers_scheduled_actions_sensor() -> None:
     """Sensor platform stores the scheduled actions sensor in hass.data."""
@@ -124,12 +128,21 @@ def test_scheduler_publishes_structured_daily_snapshot(
         lambda *args, **kwargs: (lambda: None),
     )
     monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_sunrise",
+        lambda *args, **kwargs: (lambda: None),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_sunset",
+        lambda *args, **kwargs: (lambda: None),
+    )
+    monkeypatch.setattr(
         "custom_components.energy_optimizer.scheduler.action_scheduler.dt_util.now",
         lambda: datetime(2026, 3, 11, 0, 5, tzinfo=tz),
     )
 
     sink = _FakeScheduledActionsSink()
     states = {
+        "sun.sun": _sun_state("above_horizon"),
         "sensor.tariff_end": _state("13:00"),
         "sensor.morning_peak": _state("07:00"),
         "sensor.evening_peak": _state("18:00"),
@@ -183,14 +196,14 @@ def test_scheduler_publishes_structured_daily_snapshot(
         assert any(
             action["key"] == "solar_charge_block"
             and action["kind"] == "event_driven"
-            and action["trigger"] == "price_sensor_state_change"
+            and action["trigger"] == "hourly_between_sunrise_and_sunset"
             and action["time"] is None
             for action in actions
         )
         assert any(
             action["key"] == "export_block_control"
             and action["kind"] == "event_driven"
-            and action["trigger"] == "price_sensor_state_change"
+            and action["trigger"] == "hourly_between_sunrise_and_sunset"
             and action["time"] is None
             for action in actions
         )
@@ -199,12 +212,13 @@ def test_scheduler_publishes_structured_daily_snapshot(
 
 
 @pytest.mark.asyncio
-async def test_price_change_handler_runs_export_and_solar_block(
+async def test_price_hourly_handler_runs_export_and_solar_block_during_daylight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Price change handler should run both export and solar charge block actions."""
+    """Hourly daytime handler should run both export and solar charge block actions."""
     hass = MagicMock()
     hass.data = {DOMAIN: {"entry-1": {}}}
+    hass.states.get.return_value = _sun_state("above_horizon")
     entry = _mock_entry(data={})
     scheduler = ActionScheduler(hass, entry)
 
@@ -221,11 +235,74 @@ async def test_price_change_handler_runs_export_and_solar_block(
     )
     scheduler._publish_schedule_snapshot = MagicMock()
 
-    await scheduler._handle_price_change(event=MagicMock())
+    await scheduler._handle_price_hourly(now=datetime(2026, 3, 11, 10, 0, 0))
 
     export_mock.assert_awaited_once_with(hass, entry_id="entry-1")
     solar_mock.assert_awaited_once_with(hass, entry_id="entry-1")
     scheduler._publish_schedule_snapshot.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_price_hourly_handler_skips_outside_daylight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hourly daytime handler should skip when the sun is below horizon."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    hass.states.get.return_value = _sun_state("below_horizon")
+    entry = _mock_entry(data={})
+    scheduler = ActionScheduler(hass, entry)
+
+    export_mock = AsyncMock()
+    solar_mock = AsyncMock()
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_run_export_block_control",
+        export_mock,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_run_solar_charge_block",
+        solar_mock,
+    )
+    scheduler._publish_schedule_snapshot = MagicMock()
+
+    await scheduler._handle_price_hourly(now=datetime(2026, 3, 11, 22, 0, 0))
+
+    export_mock.assert_not_awaited()
+    solar_mock.assert_not_awaited()
+    scheduler._publish_schedule_snapshot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sunrise_and_sunset_toggle_hourly_price_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sunrise enables and sunset disables the hourly price-control listener."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    entry = _mock_entry(data={})
+    scheduler = ActionScheduler(hass, entry)
+    scheduler._publish_schedule_snapshot = MagicMock()
+
+    removed: list[str] = []
+
+    def _fake_track_time_change(*args, **kwargs):
+        return lambda: removed.append("hourly")
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
+        _fake_track_time_change,
+    )
+
+    await scheduler._handle_sunrise(now=datetime(2026, 3, 11, 5, 0, 0))
+
+    assert scheduler._price_hourly_listener is not None
+
+    await scheduler._handle_sunset(now=datetime(2026, 3, 11, 18, 0, 0))
+
+    assert scheduler._price_hourly_listener is None
+    assert removed == ["hourly"]
+    assert scheduler._publish_schedule_snapshot.call_count == 2
 
 
 @pytest.mark.asyncio
