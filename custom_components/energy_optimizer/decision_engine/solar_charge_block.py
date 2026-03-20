@@ -1,6 +1,7 @@
 ﻿"""Solar charge blocking decision logic (pre-noon PV surplus check)."""
 from __future__ import annotations
 
+from datetime import time
 import logging
 from typing import TYPE_CHECKING
 
@@ -18,9 +19,15 @@ from ..const import (
     SUN_ABOVE_HORIZON,
     SUN_ENTITY,
     WORK_MODE_EXPORT_FIRST,
+    WORK_MODE_ZERO_EXPORT_TO_LOAD,
 )
 from ..controllers.inverter import set_max_charge_current, set_program_soc, set_work_mode
-from ..helpers import get_active_program_entity, get_required_float_state, resolve_daytime_min_price_time
+from ..helpers import (
+    get_active_program_entity,
+    get_required_float_state,
+    resolve_daytime_min_price_time,
+    resolve_morning_max_price_hour,
+)
 from ..utils.forecast import get_pv_forecast_window
 from .common import get_entry_data, get_required_current_soc_state, resolve_entry
 
@@ -43,7 +50,6 @@ async def async_run_solar_charge_block(
     config = entry.data
 
     max_charge_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
-    work_mode_entity = config.get(CONF_WORK_MODE_ENTITY)
 
     # Guard: only run while sun is above horizon
     sun_state = hass.states.get(SUN_ENTITY)
@@ -53,18 +59,19 @@ async def async_run_solar_charge_block(
 
     now = dt_util.now()
 
-    # Guard: when blocking already reached Export First state, wait for the
-    # daytime minimum-price restore logic to revert settings.
-    if work_mode_entity:
-        work_mode_state = hass.states.get(str(work_mode_entity))
-        if (
-            work_mode_state is not None
-            and work_mode_state.state == WORK_MODE_EXPORT_FIRST
-        ):
-            _LOGGER.debug(
-                "Solar charge block: work mode already Export First — skip"
-            )
-            return
+    morning_max_price_hour = resolve_morning_max_price_hour(
+        hass,
+        config,
+        default_hour=7,
+    )
+    morning_max_price_time = time(morning_max_price_hour, 0)
+    if now.time() < morning_max_price_time:
+        _LOGGER.debug(
+            "Solar charge block: current time %s is before morning max price time %s — skip",
+            now.time(),
+            morning_max_price_time,
+        )
+        return
 
     # Current price
     current_price = get_required_float_state(
@@ -190,10 +197,17 @@ async def async_run_solar_charge_block(
     _, current_soc = current_soc_state
     min_soc_pv = float(config.get(CONF_MIN_SOC_PV, DEFAULT_MIN_SOC_PV))
 
-    if current_soc < min_soc_pv:
+    work_mode_entity = config.get(CONF_WORK_MODE_ENTITY)
+    # Guard: when blocking already reached Export First state, wait for the
+    # daytime minimum-price restore logic to revert settings.
+    work_mode_state = hass.states.get(str(work_mode_entity))
+    ctx = Context()
+    prog_soc_entity = get_active_program_entity(hass, config, now)
+
+    if current_soc <= min_soc_pv:
         _LOGGER.info(
-            "Solar charge block: BLOCKING (1A) — PV surplus %.2f kWh > free space %.2f kWh, "
-            "SOC %.1f%% < min_soc_pv %.1f%% (price %.4f, min %.4f, sunset %02d:00)",
+            "Solar charge block: BLOCKING — PV surplus %.2f kWh > free space %.2f kWh, "
+            "SOC %.1f%% <= min_soc_pv %.1f%% (price %.4f, min %.4f, sunset %02d:00)",
             pv_surplus_kwh,
             free_space_kwh,
             current_soc,
@@ -205,15 +219,35 @@ async def async_run_solar_charge_block(
         await set_max_charge_current(
             hass,
             max_charge_entity,
-            1,
+            0,
             entry=entry,
             logger=_LOGGER,
-            context=Context(),
+            context=ctx,
+        )
+        await set_program_soc(
+            hass,
+            prog_soc_entity,
+            11,
+            entry=entry,
+            logger=_LOGGER,
+            context=ctx,
+        )
+        await set_work_mode(
+            hass,
+            config.get(CONF_WORK_MODE_ENTITY),
+            WORK_MODE_ZERO_EXPORT_TO_LOAD,
+            entry=entry,
+            logger=_LOGGER,
+            context=ctx,
         )
     else:
-        # SOC >= min_soc_pv: unblock charging and switch to Export First while
+        if (work_mode_state.state == WORK_MODE_EXPORT_FIRST):
+            _LOGGER.debug(
+                "Solar charge block: work mode already Export First — skip"
+            )
+            return
+        # SOC >= min_soc_pv: switch to Export First while
         # locking target SOC to min_soc_pv.
-        prog_soc_entity = get_active_program_entity(hass, config, now)
         _LOGGER.info(
             "Solar charge block: EXPORT FIRST — PV surplus %.2f kWh > free space %.2f kWh, "
             "SOC %.1f%% >= min_soc_pv %.1f%%, target SOC locked at %.1f%% "
@@ -227,15 +261,6 @@ async def async_run_solar_charge_block(
             min_price,
             sunset_hour,
         )
-        ctx = Context()
-        await set_max_charge_current(
-            hass,
-            max_charge_entity,
-            23,
-            entry=entry,
-            logger=_LOGGER,
-            context=ctx,
-        )
         await set_work_mode(
             hass,
             config.get(CONF_WORK_MODE_ENTITY),
@@ -244,14 +269,11 @@ async def async_run_solar_charge_block(
             logger=_LOGGER,
             context=ctx,
         )
-        if prog_soc_entity:
-            await set_program_soc(
-                hass,
-                prog_soc_entity,
-                min_soc_pv,
-                entry=entry,
-                logger=_LOGGER,
-                context=ctx,
-            )
-        else:
-            _LOGGER.debug("Solar charge block: no active program SOC entity — target SOC not set")
+        await set_program_soc(
+            hass,
+            prog_soc_entity,
+            min_soc_pv,
+            entry=entry,
+            logger=_LOGGER,
+            context=ctx,
+        )

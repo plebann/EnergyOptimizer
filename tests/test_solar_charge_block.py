@@ -14,6 +14,7 @@ from custom_components.energy_optimizer.const import (
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_MAX_SOC,
     CONF_MIN_SOC_PV,
+    CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_PROG3_SOC_ENTITY,
     CONF_PROG3_TIME_START_ENTITY,
@@ -36,6 +37,7 @@ _ENTRY_ID = "entry-solar"
 _PRICE_ENTITY = "sensor.price"
 _MIN_PRICE_ENTITY = "sensor.min_price"
 _MIN_PRICE_HOUR_ENTITY = "sensor.min_price_hour"
+_MORNING_MAX_PRICE_HOUR_ENTITY = "sensor.morning_max_price_hour"
 _SOC_ENTITY = "sensor.soc"
 _MAX_CHARGE_ENTITY = "number.max_charge"
 
@@ -59,6 +61,7 @@ def _setup_hass(
     current_price: str = "800",
     min_price: str = "400",
     min_price_hour: str | None = "12:00",
+    morning_max_price_hour: str | None = "07:00",
     battery_space_value: float | None = 2.0,
     max_charge_entity: str = _MAX_CHARGE_ENTITY,
     max_charge_current_state: str = "23",
@@ -88,6 +91,11 @@ def _setup_hass(
             if min_price_hour is not None
             else {}
         ),
+        **(
+            {CONF_MORNING_MAX_PRICE_HOUR_SENSOR: _MORNING_MAX_PRICE_HOUR_ENTITY}
+            if morning_max_price_hour is not None
+            else {}
+        ),
         **({CONF_WORK_MODE_ENTITY: work_mode_entity} if work_mode_entity else {}),
         **({CONF_PROG3_SOC_ENTITY: prog3_soc_entity} if prog3_soc_entity else {}),
         **(
@@ -110,6 +118,11 @@ def _setup_hass(
         _PRICE_ENTITY: _state(current_price),
         _MIN_PRICE_ENTITY: _state(min_price),
         **({_MIN_PRICE_HOUR_ENTITY: _state(min_price_hour)} if min_price_hour is not None else {}),
+        **(
+            {_MORNING_MAX_PRICE_HOUR_ENTITY: _state(morning_max_price_hour)}
+            if morning_max_price_hour is not None
+            else {}
+        ),
         _MAX_CHARGE_ENTITY: _state(max_charge_current_state),
         _SOC_ENTITY: _state(soc_value),
         **({_WORK_MODE_ENTITY: _state("General Mode")} if work_mode_entity else {}),
@@ -200,6 +213,16 @@ async def test_skip_when_work_mode_already_export_first() -> None:
 
 
 @pytest.mark.asyncio
+async def test_skip_when_before_morning_max_price_hour() -> None:
+    """No action when current time is earlier than morning max price hour."""
+    hass = _setup_hass(now_hour=6, morning_max_price_hour="07:00")
+    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=10.0)
+    with p_now, p_pv:
+        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+    hass.services.async_call.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_skip_when_past_noon() -> None:
     """No action when current time is at or past the daytime min price time."""
     hass = _setup_hass(now_hour=12)
@@ -248,10 +271,10 @@ async def test_skip_when_current_hour_pv_not_positive() -> None:
 
 @pytest.mark.asyncio
 async def test_blocks_at_1A_when_soc_below_min_soc() -> None:
-    """Sets max charge current to 1A when PV surplus > free space and SOC < min_soc_pv."""
+    """Sets max charge current to 0A when PV surplus > free space and SOC <= min_soc_pv."""
     # price gate: 0.7 * 800 = 560 >= 400 → passes
     # surplus 8.0 > free_space 2.0 → BLOCK branch
-    # SOC 10% < default min_soc 15% → limit to 1A
+    # SOC 10% <= default min_soc 15% → limit to 0A
     hass = _setup_hass(
         current_price="800",
         min_price="400",
@@ -266,7 +289,7 @@ async def test_blocks_at_1A_when_soc_below_min_soc() -> None:
     hass.services.async_call.assert_called_once_with(
         "number",
         "set_value",
-        {"entity_id": _MAX_CHARGE_ENTITY, "value": 1},
+        {"entity_id": _MAX_CHARGE_ENTITY, "value": 0},
         blocking=True,
         context=ANY,
     )
@@ -274,10 +297,10 @@ async def test_blocks_at_1A_when_soc_below_min_soc() -> None:
 
 @pytest.mark.asyncio
 async def test_export_first_when_soc_above_min_soc() -> None:
-    """Sets Export First + target SOC when PV surplus > free space and SOC >= min_soc_pv."""
+    """Sets Export First + target SOC when PV surplus > free space and SOC > min_soc_pv."""
     # price gate: 0.7 * 800 = 560 >= 400 → passes
     # surplus 8.0 > free_space 2.0 → BLOCK branch
-    # SOC 80% >= default min_soc 15% → Export First path
+    # SOC 80% > default min_soc 15% → Export First path
     hass = _setup_hass(
         current_price="800",
         min_price="400",
@@ -293,16 +316,12 @@ async def test_export_first_when_soc_above_min_soc() -> None:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
 
     calls = hass.services.async_call.call_args_list
-    assert len(calls) == 3
+    assert len(calls) == 2
     assert calls[0] == (
-        ("number", "set_value", {"entity_id": _MAX_CHARGE_ENTITY, "value": 23}),
-        {"blocking": True, "context": ANY},
-    )
-    assert calls[1] == (
         ("select", "select_option", {"entity_id": _WORK_MODE_ENTITY, "option": WORK_MODE_EXPORT_FIRST}),
         {"blocking": True, "context": ANY},
     )
-    assert calls[2] == (
+    assert calls[1] == (
         ("number", "set_value", {"entity_id": "number.prog3_soc", "value": float(DEFAULT_MIN_SOC_PV)}),
         {"blocking": True, "context": ANY},
     )
