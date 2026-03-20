@@ -281,7 +281,7 @@ def _calculate_morning_balance(
     """Calculate morning reserve/gap values."""
     reserve_kwh = calculate_battery_reserve(
         current_soc,
-        bc.min_soc,
+        bc.min_soc_pv if sufficiency.sufficiency_reached else bc.min_soc,
         bc.capacity_ah,
         bc.voltage,
         efficiency=bc.efficiency,
