@@ -65,7 +65,7 @@ async def async_run_solar_charge_block(
         default_hour=7,
     )
     morning_max_price_time = time(morning_max_price_hour, 0)
-    if now.time() < morning_max_price_time:
+    if now.time().hour <= morning_max_price_time.hour:
         _LOGGER.debug(
             "Solar charge block: current time %s is before morning max price time %s — skip",
             now.time(),
@@ -94,13 +94,6 @@ async def async_run_solar_charge_block(
         entity_name="Daytime min price sensor",
     )
     if min_price is None:
-        return
-
-    min_price_hour_entity = config.get(CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR)
-    if not min_price_hour_entity:
-        _LOGGER.debug(
-            "Solar charge block: daytime min price hour sensor not configured — skip"
-        )
         return
 
     min_price_time = resolve_daytime_min_price_time(hass, config)
@@ -175,17 +168,17 @@ async def async_run_solar_charge_block(
         )
         return
 
-    pv_surplus_current_hour_kwh, _ = get_pv_forecast_window(
+    pv_production_current_hour_kwh, _ = get_pv_forecast_window(
         hass,
         config,
         start_hour=now.hour,
         end_hour=now.hour + 1,
         apply_efficiency=True,
     )
-    if pv_surplus_current_hour_kwh <= 0:
+    if pv_production_current_hour_kwh <= 0:
         _LOGGER.info(
             "Solar charge block: no action — current hour PV forecast %.2f kWh <= 0",
-            pv_surplus_current_hour_kwh,
+            pv_production_current_hour_kwh,
         )
         return
 
@@ -241,7 +234,11 @@ async def async_run_solar_charge_block(
             context=ctx,
         )
     else:
-        if (work_mode_state.state == WORK_MODE_EXPORT_FIRST):
+        if work_mode_state is None:
+            _LOGGER.debug(
+                "Solar charge block: work mode state unavailable — continue"
+            )
+        elif work_mode_state.state == WORK_MODE_EXPORT_FIRST:
             _LOGGER.debug(
                 "Solar charge block: work mode already Export First — skip"
             )
@@ -249,10 +246,10 @@ async def async_run_solar_charge_block(
         # SOC >= min_soc_pv: switch to Export First while
         # locking target SOC to min_soc_pv.
         _LOGGER.info(
-            "Solar charge block: EXPORT FIRST — PV surplus %.2f kWh > free space %.2f kWh, "
+            "Solar charge block: EXPORT FIRST — PV production %.2f kWh > free space %.2f kWh, "
             "SOC %.1f%% >= min_soc_pv %.1f%%, target SOC locked at %.1f%% "
             "(price %.4f, min %.4f, sunset %02d:00)",
-            pv_surplus_kwh,
+            pv_production_current_hour_kwh,
             free_space_kwh,
             current_soc,
             min_soc_pv,
