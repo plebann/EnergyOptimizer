@@ -175,9 +175,9 @@ async def async_run_solar_charge_block(
         end_hour=now.hour + 1,
         apply_efficiency=True,
     )
-    if pv_production_current_hour_kwh <= 0:
+    if pv_production_current_hour_kwh <= 1.0:
         _LOGGER.info(
-            "Solar charge block: no action — current hour PV forecast %.2f kWh <= 0",
+            "Solar charge block: no action — current hour PV forecast %.2f kWh <= 1.0",
             pv_production_current_hour_kwh,
         )
         return
