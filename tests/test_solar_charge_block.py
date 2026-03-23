@@ -282,7 +282,7 @@ async def test_blocks_at_1A_when_soc_below_min_soc() -> None:
         soc_value="10",
         min_soc_pv=DEFAULT_MIN_SOC_PV,
     )
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=1.0)
+    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=1.1)
     with p_now, p_pv:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
 
@@ -311,7 +311,7 @@ async def test_export_first_when_soc_above_min_soc() -> None:
         prog3_soc_entity="number.prog3_soc",
         prog3_time_start="08:00",
     )
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=1.0)
+    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=1.1)
     with p_now, p_pv:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
 
@@ -334,7 +334,7 @@ async def test_skip_when_soc_unavailable_at_block_decision() -> None:
     # Remove SOC sensor from states
     original_side_effect = hass.states.get.side_effect
     hass.states.get.side_effect = lambda eid: None if eid == _SOC_ENTITY else original_side_effect(eid)
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=1.0)
+    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=1.1)
     with p_now, p_pv:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
     hass.services.async_call.assert_not_called()

@@ -294,15 +294,61 @@ async def test_sunrise_and_sunset_toggle_hourly_price_listener(
         _fake_track_time_change,
     )
 
-    await scheduler._handle_sunrise(now=datetime(2026, 3, 11, 5, 0, 0))
+    await scheduler._handle_sunrise()
 
     assert scheduler._price_hourly_listener is not None
 
-    await scheduler._handle_sunset(now=datetime(2026, 3, 11, 18, 0, 0))
+    await scheduler._handle_sunset()
 
     assert scheduler._price_hourly_listener is None
     assert removed == ["hourly"]
     assert scheduler._publish_schedule_snapshot.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_start_registers_sunrise_callback_that_runs_without_datetime_argument(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sunrise listener callback registered in start() should work without now arg."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    hass.states.get.return_value = _sun_state("below_horizon")
+    hass.async_create_task.side_effect = lambda coro: coro.close()
+    entry = _mock_entry(data={})
+
+    captured_sunrise_callback = None
+
+    def _fake_track_sunrise(_hass, callback):
+        nonlocal captured_sunrise_callback
+        captured_sunrise_callback = callback
+        return lambda: None
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_sunrise",
+        _fake_track_sunrise,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_sunset",
+        lambda *args, **kwargs: (lambda: None),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
+        lambda *args, **kwargs: (lambda: None),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_state_change_event",
+        lambda *args, **kwargs: (lambda: None),
+    )
+
+    scheduler = ActionScheduler(hass, entry)
+    scheduler._publish_schedule_snapshot = MagicMock()
+    scheduler.start()
+
+    assert captured_sunrise_callback is not None
+
+    await captured_sunrise_callback()
+
+    assert scheduler._price_hourly_listener is not None
 
 
 @pytest.mark.asyncio

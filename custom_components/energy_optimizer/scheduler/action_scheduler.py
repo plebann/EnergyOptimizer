@@ -298,13 +298,13 @@ class ActionScheduler:
         await async_handle_sell_restore(self.hass, self.entry, "evening")
         self._publish_schedule_snapshot()
 
-    async def _handle_sunrise(self, now: datetime) -> None:
+    async def _handle_sunrise(self) -> None:
         """Activate hourly daytime price controls after sunrise."""
         _LOGGER.debug("Price-driven actions: sunrise detected — enabling hourly trigger")
         self._start_price_hourly_listener()
         self._publish_schedule_snapshot()
 
-    async def _handle_sunset(self, now: datetime) -> None:
+    async def _handle_sunset(self) -> None:
         """Deactivate hourly daytime price controls after sunset."""
         _LOGGER.debug("Price-driven actions: sunset detected — disabling hourly trigger")
         self._stop_price_hourly_listener()
