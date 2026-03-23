@@ -129,7 +129,7 @@ class MorningSellStrategy(BaseSellStrategy):
             start_hour=start_hour,
             end_hour=base_end_hour,
             apply_efficiency=True,
-            compensate=True,
+            compensate=False,
             entry_id=self.entry.entry_id,
         )
         base_losses_hourly, _ = calculate_losses(
@@ -328,7 +328,7 @@ class MorningSellStrategy(BaseSellStrategy):
                 start_hour=start_hour,
                 end_hour=surplus_end_hour,
                 apply_efficiency=True,
-                compensate=True,
+                compensate=False,
                 entry_id=self.entry.entry_id,
             )
             surplus_losses_hourly, _ = calculate_losses(
