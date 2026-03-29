@@ -24,6 +24,7 @@ from ..const import (
 from ..controllers.inverter import set_max_charge_current, set_program_soc, set_work_mode
 from ..helpers import (
     get_active_program_entity,
+    get_float_state_info,
     get_required_float_state,
     resolve_daytime_min_price_time,
     resolve_morning_max_price_hour,
@@ -243,13 +244,29 @@ async def async_run_solar_charge_block(
                 "Solar charge block: work mode already Export First — skip"
             )
             return
+        else:
+            max_charge_value, max_charge_raw, max_charge_error = get_float_state_info(
+                hass,
+                str(max_charge_entity) if max_charge_entity else None,
+            )
+            if max_charge_error is None and max_charge_value is not None and max_charge_value == 0:
+                _LOGGER.debug(
+                    "Solar charge block: max charge current already 0 — skip"
+                )
+                return
+            if max_charge_error is not None:
+                _LOGGER.debug(
+                    "Solar charge block: cannot read max charge current (%s, raw=%s) — continue",
+                    max_charge_error,
+                    max_charge_raw,
+                )
         # SOC >= min_soc_pv: switch to Export First while
         # locking target SOC to min_soc_pv.
         _LOGGER.info(
-            "Solar charge block: EXPORT FIRST — PV production %.2f kWh > free space %.2f kWh, "
+            "Solar charge block: EXPORT FIRST — PV surplus %.2f kWh > free space %.2f kWh, "
             "SOC %.1f%% >= min_soc_pv %.1f%%, target SOC locked at %.1f%% "
             "(price %.4f, min %.4f, sunset %02d:00)",
-            pv_production_current_hour_kwh,
+            pv_surplus_kwh,
             free_space_kwh,
             current_soc,
             min_soc_pv,
