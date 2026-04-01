@@ -256,13 +256,27 @@ async def test_skip_when_surplus_fits_in_battery() -> None:
 
 
 @pytest.mark.asyncio
-async def test_skip_when_current_hour_pv_not_positive() -> None:
-    """No action when current-hour PV forecast is not positive."""
+async def test_skip_when_current_hour_pv_not_above_current_hour_demand() -> None:
+    """No action when current-hour PV forecast does not exceed current-hour demand."""
     hass = _setup_hass(current_price="800", min_price="400", battery_space_value=2.0)
     p_now, p_pv = _patch_now_and_pv(
         hass,
         pv_total_kwh=8.0,
         pv_current_hour_kwh=0.0,
+    )
+    with p_now, p_pv:
+        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+    hass.services.async_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_skip_when_current_hour_pv_below_current_hour_demand() -> None:
+    """No action when current-hour PV forecast is positive but below demand."""
+    hass = _setup_hass(current_price="800", min_price="400", battery_space_value=2.0)
+    p_now, p_pv = _patch_now_and_pv(
+        hass,
+        pv_total_kwh=8.0,
+        pv_current_hour_kwh=1.1,
     )
     with p_now, p_pv:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
@@ -282,7 +296,7 @@ async def test_blocks_at_1A_when_soc_below_min_soc() -> None:
         soc_value="10",
         min_soc_pv=DEFAULT_MIN_SOC_PV,
     )
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=1.1)
+    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=3.0)
     with p_now, p_pv:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
 
@@ -311,7 +325,7 @@ async def test_export_first_when_soc_above_min_soc() -> None:
         prog3_soc_entity="number.prog3_soc",
         prog3_time_start="08:00",
     )
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=1.1)
+    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=3.0)
     with p_now, p_pv:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
 
@@ -334,7 +348,7 @@ async def test_skip_when_soc_unavailable_at_block_decision() -> None:
     # Remove SOC sensor from states
     original_side_effect = hass.states.get.side_effect
     hass.states.get.side_effect = lambda eid: None if eid == _SOC_ENTITY else original_side_effect(eid)
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=1.1)
+    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=3.0)
     with p_now, p_pv:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
     hass.services.async_call.assert_not_called()

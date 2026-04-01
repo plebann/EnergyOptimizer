@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from homeassistant.core import Context
 from homeassistant.util import dt as dt_util
 
+from ..calculations.energy import calculate_losses, hourly_demand
+from ..calculations.utils import build_hourly_usage_array
 from ..const import (
     CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
     CONF_DAYTIME_MIN_PRICE_SENSOR,
@@ -29,7 +31,7 @@ from ..helpers import (
     resolve_daytime_min_price_time,
     resolve_morning_max_price_hour,
 )
-from ..utils.forecast import get_pv_forecast_window
+from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from .common import get_entry_data, get_required_current_soc_state, resolve_entry
 
 if TYPE_CHECKING:
@@ -176,10 +178,30 @@ async def async_run_solar_charge_block(
         end_hour=now.hour + 1,
         apply_efficiency=True,
     )
-    if pv_production_current_hour_kwh <= 1.0:
+    hourly_usage = build_hourly_usage_array(
+        config,
+        hass.states.get,
+        daily_load_fallback=None,
+    )
+    _, heat_pump_hourly = await get_heat_pump_forecast_window(
+        hass,
+        config,
+        start_hour=now.hour,
+        end_hour=now.hour + 1,
+    )
+    losses_hourly, _ = calculate_losses(hass, config, hours=1)
+    current_hour_required_kwh = hourly_demand(
+        now.hour,
+        hourly_usage=hourly_usage,
+        heat_pump_hourly=heat_pump_hourly,
+        losses_hourly=losses_hourly,
+        margin=1.1,
+    )
+    if pv_production_current_hour_kwh <= current_hour_required_kwh:
         _LOGGER.info(
-            "Solar charge block: no action — current hour PV forecast %.2f kWh <= 1.0",
+            "Solar charge block: no action — current hour PV forecast %.2f kWh <= current hour demand %.2f kWh",
             pv_production_current_hour_kwh,
+            current_hour_required_kwh,
         )
         return
 
