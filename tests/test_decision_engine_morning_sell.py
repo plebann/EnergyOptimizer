@@ -210,7 +210,7 @@ async def test_morning_sell_executes_with_surplus_below_threshold(
 
 
 @pytest.mark.asyncio
-async def test_morning_sell_surplus_above_free_space_but_morning_not_higher_no_action(
+async def test_morning_sell_surplus_above_free_space_but_morning_not_higher_sells_overflow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _base_config()
@@ -253,8 +253,9 @@ async def test_morning_sell_surplus_above_free_space_but_morning_not_higher_no_a
     await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
 
     assert outcomes
-    assert outcomes[-1].action_type == "no_action"
-    assert outcomes[-1].details["surplus_selection_reason"] == "pv_fit_fallback_from_free_space"
+    assert outcomes[-1].action_type == "sell"
+    assert outcomes[-1].details["surplus_selection_reason"] == "overflow_above_free_space"
+    assert outcomes[-1].details["selected_surplus_kwh"] == 2.0
 
 
 @pytest.mark.asyncio
@@ -400,7 +401,9 @@ async def test_morning_sell_no_surplus_no_action(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.asyncio
-async def test_morning_sell_caps_window_by_sufficiency(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_morning_sell_keeps_full_window_surplus_when_sufficiency_reached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = _base_config()
     states = _base_states()
     hass = _setup_hass(config, states)
@@ -433,10 +436,13 @@ async def test_morning_sell_caps_window_by_sufficiency(monkeypatch: pytest.Monke
         f"{MORNING}.calculate_battery_reserve",
         lambda *args, **kwargs: 10.0,
     )
-    monkeypatch.setattr(
-        f"{MORNING}.calculate_surplus_energy",
-        lambda reserve, required, pv: 4.0,
-    )
+    captured_surplus_inputs: list[tuple[float, float, float]] = []
+
+    def _surplus(reserve: float, required: float, pv: float) -> float:
+        captured_surplus_inputs.append((reserve, required, pv))
+        return max(reserve + pv - required, 0.0)
+
+    monkeypatch.setattr(f"{MORNING}.calculate_surplus_energy", _surplus)
     monkeypatch.setattr(
         f"{SELL_BASE}.calculate_export_power",
         lambda *args, **kwargs: 1400.0,
@@ -448,6 +454,11 @@ async def test_morning_sell_caps_window_by_sufficiency(monkeypatch: pytest.Monke
     assert outcomes[-1].action_type == "sell"
     assert outcomes[-1].details["end_hour"] == 13
     assert outcomes[-1].details["sufficiency_hour"] == 10
+    assert captured_surplus_inputs == [(10.0, 5.0, 5.0)]
+    assert outcomes[-1].details["base_required_kwh_full"] == 5.0
+    assert outcomes[-1].details["base_pv_forecast_kwh_full"] == 5.0
+    assert outcomes[-1].details["required_sufficiency_kwh"] == 2.0
+    assert outcomes[-1].details["pv_sufficiency_kwh"] == 1.0
 
 
 @pytest.mark.asyncio

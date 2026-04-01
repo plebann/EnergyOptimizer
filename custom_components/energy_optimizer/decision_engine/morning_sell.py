@@ -1,7 +1,6 @@
 """Morning peak sell decision logic."""
 from __future__ import annotations
 
-from dataclasses import replace
 import logging
 from typing import TYPE_CHECKING
 
@@ -14,14 +13,7 @@ from ..calculations.energy import (
     calculate_surplus_energy,
 )
 from ..calculations.utils import build_hourly_usage_array
-from ..const import (
-    CONF_EVENING_MAX_PRICE_SENSOR,
-    CONF_MIN_SOC_PV,
-    CONF_MORNING_MAX_PRICE_SENSOR,
-    DEFAULT_MIN_SOC_PV,
-    DOMAIN,
-    SUN_ENTITY,
-)
+from ..const import CONF_EVENING_MAX_PRICE_SENSOR, CONF_MORNING_MAX_PRICE_SENSOR, DOMAIN, SUN_ENTITY
 from ..decision_engine.common import (
     ForecastData,
     build_evening_sell_outcome,
@@ -168,20 +160,14 @@ class MorningSellStrategy(BaseSellStrategy):
             _LOGGER.debug("Morning sell heat pump hourly base: %s", base_heat_pump_hourly_map)
             _LOGGER.debug("Morning sell PV hourly base: %s", base_pv_hourly_map)
 
-        def _resolve_required_and_pv(
+        def _resolve_sufficiency(
             forecasts: ForecastData,
-        ) -> tuple[float, float, object]:
+        ) -> object:
             suff = compute_sufficiency(
                 forecasts,
                 calculator=calculate_sufficiency_window,
             )
-            if suff.sufficiency_reached:
-                required = suff.required_sufficiency_kwh
-                pv_kwh = suff.pv_sufficiency_kwh
-            else:
-                required = suff.required_kwh
-                pv_kwh = forecasts.pv_forecast_kwh
-            return required, pv_kwh, suff
+            return suff
 
         base_forecasts = ForecastData(
             start_hour=start_hour,
@@ -198,7 +184,11 @@ class MorningSellStrategy(BaseSellStrategy):
             margin=self.margin,
         )
 
-        required_kwh, pv_forecast_kwh, sufficiency = _resolve_required_and_pv(base_forecasts)
+        sufficiency = _resolve_sufficiency(base_forecasts)
+        required_kwh = sufficiency.required_kwh
+        pv_forecast_kwh = base_forecasts.pv_forecast_kwh
+        required_sufficiency_kwh = sufficiency.required_sufficiency_kwh
+        pv_sufficiency_kwh = sufficiency.pv_sufficiency_kwh
         self._allow_min_soc_pv = sufficiency.sufficiency_reached
 
         heat_pump_kwh = base_heat_pump_kwh
@@ -206,11 +196,11 @@ class MorningSellStrategy(BaseSellStrategy):
 
         if _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug(
-                "Morning sell sufficiency | reached=%s sufficiency_hour=%s required_kwh=%.3f pv_forecast_kwh=%.3f",
+                "Morning sell sufficiency | reached=%s sufficiency_hour=%s required_sufficiency_kwh=%.3f pv_sufficiency_kwh=%.3f",
                 sufficiency.sufficiency_reached,
                 sufficiency.sufficiency_hour,
-                required_kwh,
-                pv_forecast_kwh,
+                required_sufficiency_kwh,
+                pv_sufficiency_kwh,
             )
         reserve_kwh = calculate_battery_reserve(
             self.current_soc,
@@ -225,7 +215,7 @@ class MorningSellStrategy(BaseSellStrategy):
             pv_forecast_kwh,
         )
         _LOGGER.debug(
-            "Morning sell calculation | required_kwh=%.3f (from sufficiency model) | "
+            "Morning sell calculation | required_kwh=%.3f (full window) | "
             "base_usage_kwh=%.3f base_heat_pump_kwh=%.3f losses_kwh=%.3f margin=%.3f | "
             "available=(reserve %.3f + pv %.3f)=%.3f kWh | surplus=%.3f kWh",
             required_kwh,
@@ -284,8 +274,8 @@ class MorningSellStrategy(BaseSellStrategy):
                 selected_surplus_kwh = surplus_kwh
                 selection_reason = "morning_price_higher_than_evening"
             else:
-                selected_surplus_kwh = max(free_space_kwh - surplus_kwh, 0.0)
-                selection_reason = "pv_fit_fallback_from_free_space"
+                selected_surplus_kwh = max(surplus_kwh - free_space_kwh, 0.0)
+                selection_reason = "overflow_above_free_space"
         else:
             surplus_end_hour = 19
             sun_state = self.hass.states.get(SUN_ENTITY)
@@ -350,9 +340,9 @@ class MorningSellStrategy(BaseSellStrategy):
                 losses_kwh=surplus_losses_hourly * surplus_hours,
                 margin=self.margin,
             )
-            required_to_sunset_kwh, pv_to_sunset_kwh, _suff_to_sunset = _resolve_required_and_pv(
-                forecasts_to_sunset
-            )
+            sufficiency_to_sunset = _resolve_sufficiency(forecasts_to_sunset)
+            required_to_sunset_kwh = sufficiency_to_sunset.required_kwh
+            pv_to_sunset_kwh = forecasts_to_sunset.pv_forecast_kwh
             surplus_to_sunset = calculate_surplus_energy(
                 reserve_kwh,
                 required_to_sunset_kwh,
@@ -389,6 +379,10 @@ class MorningSellStrategy(BaseSellStrategy):
                     "surplus_kwh": round(surplus_kwh, 2),
                     "selected_surplus_kwh": round(selected_surplus_kwh, 2),
                     "free_space_kwh": round(free_space_kwh, 2),
+                    "base_required_kwh_full": round(required_kwh, 2),
+                    "base_pv_forecast_kwh_full": round(pv_forecast_kwh, 2),
+                    "required_sufficiency_kwh": round(required_sufficiency_kwh, 2),
+                    "pv_sufficiency_kwh": round(pv_sufficiency_kwh, 2),
                     "surplus_to_sunset_kwh": (
                         round(surplus_to_sunset, 2)
                         if surplus_to_sunset is not None
@@ -429,6 +423,10 @@ class MorningSellStrategy(BaseSellStrategy):
             outcome.details["free_space_kwh"] = round(free_space_kwh, 2)
             outcome.details["surplus_kwh_base"] = round(surplus_kwh, 2)
             outcome.details["selected_surplus_kwh"] = round(surplus, 2)
+            outcome.details["base_required_kwh_full"] = round(required_kwh, 2)
+            outcome.details["base_pv_forecast_kwh_full"] = round(pv_forecast_kwh, 2)
+            outcome.details["required_sufficiency_kwh"] = round(required_sufficiency_kwh, 2)
+            outcome.details["pv_sufficiency_kwh"] = round(pv_sufficiency_kwh, 2)
             outcome.details["surplus_to_sunset_kwh"] = (
                 round(surplus_to_sunset, 2)
                 if surplus_to_sunset is not None
@@ -458,6 +456,10 @@ class MorningSellStrategy(BaseSellStrategy):
                     "surplus_kwh": round(current_surplus_kwh, 2),
                     "surplus_kwh_base": round(surplus_kwh, 2),
                     "free_space_kwh": round(free_space_kwh, 2),
+                    "base_required_kwh_full": round(required_kwh, 2),
+                    "base_pv_forecast_kwh_full": round(pv_forecast_kwh, 2),
+                    "required_sufficiency_kwh": round(required_sufficiency_kwh, 2),
+                    "pv_sufficiency_kwh": round(pv_sufficiency_kwh, 2),
                     "surplus_to_sunset_kwh": (
                         round(surplus_to_sunset, 2)
                         if surplus_to_sunset is not None
