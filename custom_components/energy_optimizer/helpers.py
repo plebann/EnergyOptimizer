@@ -343,7 +343,7 @@ def resolve_tariff_start_hour(
     hass: HomeAssistant,
     config: dict[str, object],
     *,
-    default_hour: int = 6,
+    default_hour: int = 15,
 ) -> int:
     """Resolve tariff start hour from configured sensor with fallback."""
     from .const import CONF_TARIFF_START_HOUR_SENSOR

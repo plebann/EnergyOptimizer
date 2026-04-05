@@ -15,7 +15,7 @@ from custom_components.energy_optimizer.const import (
     CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_PRICE_SENSOR,
-    CONF_TARIFF_END_HOUR_SENSOR,
+    CONF_TARIFF_START_HOUR_SENSOR,
     DOMAIN,
 )
 from custom_components.energy_optimizer.entities.sensors.tracking import ScheduledActionsSensor
@@ -143,7 +143,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
     sink = _FakeScheduledActionsSink()
     states = {
         "sun.sun": _sun_state("above_horizon"),
-        "sensor.tariff_end": _state("13:00"),
+        "sensor.tariff_start": _state("15:00"),
         "sensor.morning_peak": _state("07:00"),
         "sensor.evening_peak": _state("18:00"),
         "sensor.evening_peak_2": _state("20:00"),
@@ -158,7 +158,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
     entry = _mock_entry(
         data={
             CONF_PRICE_SENSOR: "sensor.price",
-            CONF_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end",
+            CONF_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start",
             CONF_MORNING_MAX_PRICE_HOUR_SENSOR: "sensor.morning_peak",
             CONF_EVENING_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak",
             CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak_2",

@@ -300,8 +300,8 @@ def test_resolve_tariff_end_hour_from_timestamp_sensor() -> None:
 def test_resolve_tariff_start_hour_from_time_string_sensor() -> None:
     """Resolve tariff start hour from HH:MM sensor state."""
     hass = create_mock_hass()
-    hass.states.get.return_value = create_time_state("06:00", domain="sensor")
+    hass.states.get.return_value = create_time_state("15:00", domain="sensor")
 
     config = {CONF_TARIFF_START_HOUR_SENSOR: "sensor.today_min_price_hour_start"}
 
-    assert resolve_tariff_start_hour(hass, config, default_hour=6) == 6
+    assert resolve_tariff_start_hour(hass, config, default_hour=15) == 15

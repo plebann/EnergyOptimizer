@@ -20,7 +20,7 @@ from ..const import (
     CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_PRICE_SENSOR,
-    CONF_TARIFF_END_HOUR_SENSOR,
+    CONF_TARIFF_START_HOUR_SENSOR,
     DOMAIN,
     SUN_ABOVE_HORIZON,
     SUN_ENTITY,
@@ -42,7 +42,7 @@ from ..helpers import (
     resolve_evening_max_price_hour,
     resolve_evening_second_max_price_hour,
     resolve_morning_max_price_hour,
-    resolve_tariff_end_hour,
+    resolve_tariff_start_hour,
 )
 
 if TYPE_CHECKING:
@@ -113,13 +113,13 @@ class ActionScheduler:
                 "Price-driven actions: sun not above horizon at startup — hourly trigger inactive"
             )
 
-        tariff_end_entity = self.entry.data.get(CONF_TARIFF_END_HOUR_SENSOR)
-        if tariff_end_entity:
+        tariff_start_entity = self.entry.data.get(CONF_TARIFF_START_HOUR_SENSOR)
+        if tariff_start_entity:
             self._listeners.append(
                 async_track_state_change_event(
                     self.hass,
-                    [str(tariff_end_entity)],
-                    self._handle_tariff_end_change,
+                    [str(tariff_start_entity)],
+                    self._handle_tariff_start_change,
                 )
             )
 
@@ -269,8 +269,8 @@ class ActionScheduler:
         )
         self._publish_schedule_snapshot()
 
-    async def _handle_tariff_end_change(self, event) -> None:
-        """Reschedule afternoon charge when tariff end hour changes."""
+    async def _handle_tariff_start_change(self, event) -> None:
+        """Reschedule afternoon charge when tariff start hour changes."""
         self._schedule_afternoon_charge()
 
     async def _handle_evening_peak_hour_change(self, event) -> None:
@@ -345,12 +345,13 @@ class ActionScheduler:
         )
 
     def _schedule_afternoon_charge(self) -> None:
-        """Schedule afternoon charge at current tariff end hour."""
+        """Schedule afternoon charge two hours before tariff start hour."""
         if self._afternoon_listener is not None:
             self._afternoon_listener()
             self._afternoon_listener = None
 
-        hour = resolve_tariff_end_hour(self.hass, self.entry.data)
+        tariff_start_hour = resolve_tariff_start_hour(self.hass, self.entry.data)
+        hour = (tariff_start_hour - 2) % 24
         self._afternoon_listener = async_track_time_change(
             self.hass,
             self._handle_afternoon_charge,
@@ -535,18 +536,19 @@ class ActionScheduler:
             )
         )
 
-        tariff_end_hour = resolve_tariff_end_hour(self.hass, self.entry.data)
+        tariff_start_hour = resolve_tariff_start_hour(self.hass, self.entry.data)
+        afternoon_charge_hour = (tariff_start_hour - 2) % 24
         actions.append(
             self._build_action_entry(
                 key="afternoon_charge",
                 label="Afternoon charge",
                 scheduled_for=self._resolve_local_datetime(
-                    hour=tariff_end_hour,
+                    hour=afternoon_charge_hour,
                     minute=0,
                     now=now,
                 ),
                 kind="dynamic",
-                source="tariff_end_hour_sensor",
+                source="tariff_start_hour_sensor_minus_2h",
                 order=100,
             )
         )

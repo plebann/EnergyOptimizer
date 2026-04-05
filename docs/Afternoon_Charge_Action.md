@@ -1,14 +1,14 @@
-# Zachowanie popołudniowe (koniec taryfy) — Opis akcji
+# Zachowanie popołudniowe (przed startem taryfy) — Opis akcji
 
 ## Cel
 
-Zapewnienie odpowiedniego poziomu energii w magazynie na wieczór i noc (do 22:00) poprzez planowanie ładowania z sieci po zakończeniu taryfy dziennej.
+Zapewnienie odpowiedniego poziomu energii w magazynie na wieczór i noc (do 22:00) poprzez planowanie ładowania z sieci uruchamianego 2 godziny przed startem taryfy dziennej.
 
 Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w szczycie cenowym. Arbitraż jest aktywowany tylko, gdy cena sprzedaży przekracza `min_arbitrage_price`.
 
 ## Wyzwalacz
 
-- Godzina z sensora końca taryfy: `tariff_end_hour`
+- Godzina wyliczana z sensora startu taryfy: `tariff_start_hour - 2h`
 - Możliwość ręcznego wywołania przez dedykowany serwis (do ustalenia)
 
 ## Wejścia (koncepcyjne)
@@ -32,7 +32,7 @@ Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w
    - przy wyznaczaniu energii do załadowania uwzględnia straty **na ładowaniu i rozładowaniu**
 - Margines bezpieczeństwa (domyślnie 1.1 = +10%)
 - Sensor godziny startu taryfy: `tariff_start_hour` **(nowy, wymagany do okna obliczeń)**
-- Sensor godziny końca taryfy: `tariff_end_hour` (wyzwalacz akcji)
+- Wyzwalacz czasowy akcji: `tariff_start_hour - 2h`
 - Ustawienie włączenia Pompy Ciepła (jeśli wyłączone, zużycie PC = 0)
 - Sensor wsparcia z sieci po południu (afternoon grid assist)
 
