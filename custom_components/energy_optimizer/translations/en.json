@@ -140,8 +140,8 @@
           "pv_production_sensor": "PV Production (Optional)",
           "pv_peak_forecast": "PV Peak Forecast (Optional)",
           "weather_forecast": "Weather Forecast (Optional)",
-          "tariff_start_hour_sensor": "Tariff Start Hour (Optional)",
-          "tariff_end_hour_sensor": "Tariff End Hour (Optional)"
+          "high_tariff_start_hour_sensor": "High Tariff Start Hour (Optional)",
+          "high_tariff_end_hour_sensor": "High Tariff End Hour (Optional)"
         },
         "data_description": {
           "daily_load_sensor": "Sensor tracking daily energy consumption",
@@ -151,8 +151,8 @@
           "pv_production_sensor": "Actual PV production to date (kWh)",
           "pv_peak_forecast": "Peak PV power forecast (kW)",
           "weather_forecast": "Weather entity for temperature-based calculations",
-          "tariff_start_hour_sensor": "Sensor indicating tariff start hour",
-          "tariff_end_hour_sensor": "Sensor indicating tariff end hour"
+          "high_tariff_start_hour_sensor": "Sensor indicating high tariff start hour",
+          "high_tariff_end_hour_sensor": "Sensor indicating high tariff end hour"
         }
       },
       "heat_pump": {

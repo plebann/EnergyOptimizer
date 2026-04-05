@@ -72,8 +72,8 @@ from .const import (
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PEAK_FORECAST,
     CONF_PV_PRODUCTION_SENSOR,
-    CONF_TARIFF_START_HOUR_SENSOR,
-    CONF_TARIFF_END_HOUR_SENSOR,
+    CONF_HIGH_TARIFF_START_HOUR_SENSOR,
+    CONF_HIGH_TARIFF_END_HOUR_SENSOR,
     CONF_TODAY_LOAD_SENSOR,
     CONF_TOMORROW_PRICE_SENSOR,
     CONF_WEATHER_FORECAST,
@@ -399,10 +399,10 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_DAILY_LOSSES_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
-                vol.Optional(CONF_TARIFF_END_HOUR_SENSOR): selector.EntitySelector(
+                vol.Optional(CONF_HIGH_TARIFF_END_HOUR_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
-                vol.Optional(CONF_TARIFF_START_HOUR_SENSOR): selector.EntitySelector(
+                vol.Optional(CONF_HIGH_TARIFF_START_HOUR_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(CONF_PV_FORECAST_SENSOR): selector.EntitySelector(
@@ -1127,14 +1127,14 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(
-                    CONF_TARIFF_END_HOUR_SENSOR,
-                    default=self._config_entry.data.get(CONF_TARIFF_END_HOUR_SENSOR),
+                    CONF_HIGH_TARIFF_END_HOUR_SENSOR,
+                    default=self._config_entry.data.get(CONF_HIGH_TARIFF_END_HOUR_SENSOR),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),
                 vol.Optional(
-                    CONF_TARIFF_START_HOUR_SENSOR,
-                    default=self._config_entry.data.get(CONF_TARIFF_START_HOUR_SENSOR),
+                    CONF_HIGH_TARIFF_START_HOUR_SENSOR,
+                    default=self._config_entry.data.get(CONF_HIGH_TARIFF_START_HOUR_SENSOR),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
                 ),

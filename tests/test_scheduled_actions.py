@@ -15,7 +15,7 @@ from custom_components.energy_optimizer.const import (
     CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_PRICE_SENSOR,
-    CONF_TARIFF_START_HOUR_SENSOR,
+    CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     DOMAIN,
 )
 from custom_components.energy_optimizer.entities.sensors.tracking import ScheduledActionsSensor
@@ -158,7 +158,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
     entry = _mock_entry(
         data={
             CONF_PRICE_SENSOR: "sensor.price",
-            CONF_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start",
+            CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start",
             CONF_MORNING_MAX_PRICE_HOUR_SENSOR: "sensor.morning_peak",
             CONF_EVENING_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak",
             CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak_2",
@@ -184,7 +184,12 @@ def test_scheduler_publishes_structured_daily_snapshot(
         }
 
         actions = sink.snapshot["actions"]
-        assert any(action["key"] == "afternoon_charge" and action["time_local"] == "13:00" for action in actions)
+        assert any(
+            action["key"] == "afternoon_charge"
+            and action["time_local"] == "13:00"
+            and action["source"] == "high_tariff_start_hour_sensor_minus_2h"
+            for action in actions
+        )
         assert any(action["key"] == "daytime_min_price_restore" and action["time_local"] == "12:30" for action in actions)
         assert any(action["key"] == "evening_sell_second" and action["time_local"] == "20:00" for action in actions)
         assert any(

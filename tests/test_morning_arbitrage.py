@@ -18,7 +18,7 @@ from custom_components.energy_optimizer.const import (
     CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_PROG2_SOC_ENTITY,
     CONF_PV_FORECAST_REMAINING,
-    CONF_TARIFF_END_HOUR_SENSOR,
+    CONF_HIGH_TARIFF_END_HOUR_SENSOR,
     CONF_TEST_MODE,
     DOMAIN,
 )
@@ -354,7 +354,7 @@ async def test_morning_charge_arbitrage_increases_gap() -> None:
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
-        CONF_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",
+        CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",
         CONF_BATTERY_CAPACITY_AH: 100,
         CONF_BATTERY_VOLTAGE: 50,
         CONF_MIN_SOC: 10,

@@ -297,11 +297,11 @@ def resolve_tariff_end_hour(
     *,
     default_hour: int = 13,
 ) -> int:
-    """Resolve tariff end hour from configured sensor with fallback."""
-    from .const import CONF_TARIFF_END_HOUR_SENSOR
+    """Resolve high tariff end hour from configured sensor with fallback."""
+    from .const import CONF_HIGH_TARIFF_END_HOUR_SENSOR
 
     tariff_end_hour = default_hour
-    tariff_end_entity = config.get(CONF_TARIFF_END_HOUR_SENSOR)
+    tariff_end_entity = config.get(CONF_HIGH_TARIFF_END_HOUR_SENSOR)
     if tariff_end_entity:
         tariff_end_state = hass.states.get(str(tariff_end_entity))
         if tariff_end_state is None:
@@ -324,7 +324,7 @@ def resolve_tariff_end_hour(
                 )
     else:
         _LOGGER.warning(
-            "Tariff end hour sensor not configured, using default %s",
+            "High tariff end hour sensor not configured, using default %s",
             default_hour,
         )
 
@@ -345,11 +345,11 @@ def resolve_tariff_start_hour(
     *,
     default_hour: int = 15,
 ) -> int:
-    """Resolve tariff start hour from configured sensor with fallback."""
-    from .const import CONF_TARIFF_START_HOUR_SENSOR
+    """Resolve high tariff start hour from configured sensor with fallback."""
+    from .const import CONF_HIGH_TARIFF_START_HOUR_SENSOR
 
     tariff_start_hour = default_hour
-    tariff_start_entity = config.get(CONF_TARIFF_START_HOUR_SENSOR)
+    tariff_start_entity = config.get(CONF_HIGH_TARIFF_START_HOUR_SENSOR)
     if tariff_start_entity:
         tariff_start_state = hass.states.get(str(tariff_start_entity))
         if tariff_start_state is None:
@@ -372,7 +372,7 @@ def resolve_tariff_start_hour(
                 )
     else:
         _LOGGER.warning(
-            "Tariff start hour sensor not configured, using default %s",
+            "High tariff start hour sensor not configured, using default %s",
             default_hour,
         )
 

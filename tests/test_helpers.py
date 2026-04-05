@@ -8,8 +8,8 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.energy_optimizer.const import (
     CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
-    CONF_TARIFF_END_HOUR_SENSOR,
-    CONF_TARIFF_START_HOUR_SENSOR,
+    CONF_HIGH_TARIFF_END_HOUR_SENSOR,
+    CONF_HIGH_TARIFF_START_HOUR_SENSOR,
 )
 from custom_components.energy_optimizer.helpers import (
     get_active_program_entity,
@@ -282,14 +282,14 @@ def test_resolve_evening_max_price_hour_from_timestamp_sensor() -> None:
         dt_util.set_default_time_zone(original_tz)
 
 
-def test_resolve_tariff_end_hour_from_timestamp_sensor() -> None:
-    """Resolve tariff end hour from ISO timestamp sensor state."""
+def test_resolve_high_tariff_end_hour_from_timestamp_sensor() -> None:
+    """Resolve high tariff end hour from ISO timestamp sensor state."""
     original_tz = dt_util.get_default_time_zone()
     dt_util.set_default_time_zone(ZoneInfo("Europe/Warsaw"))
     hass = create_mock_hass()
     hass.states.get.return_value = create_time_state("2026-02-26T13:00:00+01:00", domain="sensor")
 
-    config = {CONF_TARIFF_END_HOUR_SENSOR: "sensor.today_min_price_hour_end_timestamp"}
+    config = {CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.today_min_price_hour_end_timestamp"}
 
     try:
         assert resolve_tariff_end_hour(hass, config, default_hour=13) == 13
@@ -297,11 +297,11 @@ def test_resolve_tariff_end_hour_from_timestamp_sensor() -> None:
         dt_util.set_default_time_zone(original_tz)
 
 
-def test_resolve_tariff_start_hour_from_time_string_sensor() -> None:
-    """Resolve tariff start hour from HH:MM sensor state."""
+def test_resolve_high_tariff_start_hour_from_time_string_sensor() -> None:
+    """Resolve high tariff start hour from HH:MM sensor state."""
     hass = create_mock_hass()
     hass.states.get.return_value = create_time_state("15:00", domain="sensor")
 
-    config = {CONF_TARIFF_START_HOUR_SENSOR: "sensor.today_min_price_hour_start"}
+    config = {CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.today_min_price_hour_start"}
 
     assert resolve_tariff_start_hour(hass, config, default_hour=15) == 15

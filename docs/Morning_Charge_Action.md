@@ -24,7 +24,7 @@ Zapewnienie wystarczającej ilości energii w magazynie na pokrycie zapotrzebowa
 - Straty dzienne falownika
 - Sprawność magazynu (domyślnie 90%)
 - Margines bezpieczeństwa (domyślnie 1.1 = +10%)
-- Sensor godziny końca wysokiej taryfy (używany do wyznaczenia okna obliczeń)
+- Sensor godziny końca wysokiej taryfy: `high_tariff_end_hour_sensor` (używany do wyznaczenia okna obliczeń)
 - Ustawienie włączenia Pompy Ciepła (jeśli wyłączone, zużycie PC = 0)
 
 ## Przebieg decyzji (wysoki poziom)

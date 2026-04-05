@@ -5,6 +5,17 @@ All notable changes to Energy Optimizer will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Breaking change: renamed config keys `tariff_start_hour_sensor` and `tariff_end_hour_sensor` to `high_tariff_start_hour_sensor` and `high_tariff_end_hour_sensor`.
+- Updated config flow translations, scheduler diagnostics, tests, and action documentation to use the new high-tariff naming.
+
+### For Users
+
+- Existing Energy Optimizer entries using the old tariff hour sensor fields must be reconfigured in the UI because this rename is intentionally not migrated automatically.
+
 ## [1.0.0] - 2024-12-21
 
 ### Major Internal Refactorization

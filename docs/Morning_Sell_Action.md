@@ -28,7 +28,7 @@ Sprzedaż następuje tylko przy dodatnim `selected_surplus_kwh` i możliwości o
 - Przewidywana produkcja PV (Solcast) z efektywnością PV (w tej akcji bez kompensacji prognozy)
 - Straty dzienne falownika
 - Margines bezpieczeństwa (domyślnie 1.1 = +10%)
-- Sensor godziny końca taryfy dziennej: `tariff_end_hour_sensor` (domyślnie 13:00)
+- Sensor godziny końca wysokiej taryfy dziennej: `high_tariff_end_hour_sensor` (domyślnie 13:00)
 - Encja trybu pracy falownika (`work_mode_entity`)
 - Encja limitu mocy eksportu (`export_power_entity`)
 - Tryb testowy sprzedaży (`test_sell_mode`)
@@ -163,7 +163,7 @@ bez zaniżania metryk sprzedażowych pełnego horyzontu.
 - Brak SOC baterii lub encji Prog3 SOC → zakończenie na etapie walidacji wejścia
 - Brak ceny porannej (`morning_max_price_sensor`) → fallback z `price_unavailable=true` i
   kontynuacja decyzji przez gałąź pojemności/sunset
-- Brak `tariff_end_hour_sensor` → fallback do 13:00 (z logiem warning)
+- Brak `high_tariff_end_hour_sensor` → fallback do 13:00 (z logiem warning)
 - Brak `morning_max_price_hour_sensor` → fallback do 7:00 (z logiem warning); restore_hour = 8
 - Brak prognozy PV / serwisu HP / strat → przyjmowane wartości 0 zgodnie z helperami
 - Nadwyżka = 0 → `no_action` z logiem powodu

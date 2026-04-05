@@ -56,8 +56,8 @@ CONF_PROG6_TIME_START_ENTITY = "prog6_time_start_entity"
 
 CONF_DAILY_LOAD_SENSOR = "daily_load_sensor"
 CONF_DAILY_LOSSES_SENSOR = "daily_losses_sensor"
-CONF_TARIFF_START_HOUR_SENSOR = "tariff_start_hour_sensor"
-CONF_TARIFF_END_HOUR_SENSOR = "tariff_end_hour_sensor"
+CONF_HIGH_TARIFF_START_HOUR_SENSOR = "high_tariff_start_hour_sensor"
+CONF_HIGH_TARIFF_END_HOUR_SENSOR = "high_tariff_end_hour_sensor"
 
 # Time-windowed load sensors (4-hour average consumption in kWh/h)
 CONF_LOAD_USAGE_00_04 = "load_usage_00_04"

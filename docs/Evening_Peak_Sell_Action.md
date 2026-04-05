@@ -35,7 +35,7 @@ Logika działa niezależnie od kolejności czasowej okien (`A First` albo `B Fir
 - Rzeczywista produkcja PV (`pv_production_sensor`) do ograniczenia nadwyżki
 - Straty dzienne falownika
 - Margines bezpieczeństwa (domyślnie 1.1 = +10%)
-- Sensor godziny startu taryfy niskiej: `tariff_start_hour` (domyślnie 22:00)
+- Sensor godziny startu wysokiej taryfy: `high_tariff_start_hour_sensor` (domyślnie 22:00)
 - Maksymalna moc eksportu falownika (`max_export_power`) — używana jako cap energii możliwej do sprzedaży w jednej pełnej godzinie:
    - `hourly_cap_kwh = max_export_power / 1000`
 - Encja trybu pracy falownika (`work_mode_entity`)
@@ -193,7 +193,7 @@ flowchart TD
 - W `surplus sell`: brak osiągnięcia godziny wystarczalności jutro → brak akcji
 - W `surplus sell`: brak nadwyżki (`reserve <= total_needed`) → brak akcji lub `sell_restore` w drugim oknie przy aktywnej sprzedaży
 - Brak wymaganych encji SOC → zakończenie na etapie walidacji wejścia
-- Brak `tariff_start_hour` → fallback do 22:00
+- Brak `high_tariff_start_hour_sensor` → fallback do 22:00
 - Brak prognozy PV/HP lub strat → przyjmowane wartości 0 zgodnie z helperami
 - Brak `pv_production_sensor` → pominięcie kroku ograniczania nadwyżki
 

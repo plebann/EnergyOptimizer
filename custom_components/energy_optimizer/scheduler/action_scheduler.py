@@ -20,7 +20,7 @@ from ..const import (
     CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_PRICE_SENSOR,
-    CONF_TARIFF_START_HOUR_SENSOR,
+    CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     DOMAIN,
     SUN_ABOVE_HORIZON,
     SUN_ENTITY,
@@ -113,7 +113,7 @@ class ActionScheduler:
                 "Price-driven actions: sun not above horizon at startup — hourly trigger inactive"
             )
 
-        tariff_start_entity = self.entry.data.get(CONF_TARIFF_START_HOUR_SENSOR)
+        tariff_start_entity = self.entry.data.get(CONF_HIGH_TARIFF_START_HOUR_SENSOR)
         if tariff_start_entity:
             self._listeners.append(
                 async_track_state_change_event(
@@ -548,7 +548,7 @@ class ActionScheduler:
                     now=now,
                 ),
                 kind="dynamic",
-                source="tariff_start_hour_sensor_minus_2h",
+                source="high_tariff_start_hour_sensor_minus_2h",
                 order=100,
             )
         )

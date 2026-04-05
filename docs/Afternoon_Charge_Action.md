@@ -8,7 +8,7 @@ Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w
 
 ## Wyzwalacz
 
-- Godzina wyliczana z sensora startu taryfy: `tariff_start_hour - 2h`
+- Godzina wyliczana z sensora startu wysokiej taryfy: `high_tariff_start_hour_sensor - 2h`
 - Możliwość ręcznego wywołania przez dedykowany serwis (do ustalenia)
 
 ## Wejścia (koncepcyjne)
@@ -31,8 +31,8 @@ Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w
    - przy wyznaczaniu rezerwy uwzględnia straty **tylko na rozładowaniu**
    - przy wyznaczaniu energii do załadowania uwzględnia straty **na ładowaniu i rozładowaniu**
 - Margines bezpieczeństwa (domyślnie 1.1 = +10%)
-- Sensor godziny startu taryfy: `tariff_start_hour` **(nowy, wymagany do okna obliczeń)**
-- Wyzwalacz czasowy akcji: `tariff_start_hour - 2h`
+- Sensor godziny startu wysokiej taryfy: `high_tariff_start_hour_sensor` **(nowy, wymagany do okna obliczeń)**
+- Wyzwalacz czasowy akcji: `high_tariff_start_hour_sensor - 2h`
 - Ustawienie włączenia Pompy Ciepła (jeśli wyłączone, zużycie PC = 0)
 - Sensor wsparcia z sieci po południu (afternoon grid assist)
 
