@@ -8,7 +8,6 @@ import pytest
 from homeassistant.util import dt as dt_util
 
 from custom_components.energy_optimizer.const import (
-    CONF_USE_PV_FORECAST_COMPENSATION,
     CONF_PV_FORECAST_TODAY,
     CONF_PV_FORECAST_TOMORROW,
 )
@@ -181,17 +180,28 @@ def test_collect_pv_forecast_wrap_window_after_start_uses_today_and_tomorrow(
 
 
 @pytest.mark.unit
-def test_get_pv_compensation_factor_respects_disabled_flag() -> None:
-    """Return None when sensor compensation usage is disabled in entry config."""
+def test_get_pv_compensation_factor_respects_disabled_switch() -> None:
+    """Return None when compensation usage switch is off."""
     hass = MagicMock()
     hass.config_entries = MagicMock()
-    hass.config_entries.async_get_entry.return_value = MagicMock(
-        data={CONF_USE_PV_FORECAST_COMPENSATION: False}
-    )
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {}
+    entry.options = {}
+    hass.config_entries.async_get_entry.return_value = entry
 
     sensor = MagicMock()
     sensor.native_value = 0.87
-    hass.data = {"energy_optimizer": {"entry-1": {"pv_forecast_compensation_sensor": sensor}}}
+    pv_comp_switch = MagicMock()
+    pv_comp_switch.is_on = False
+    hass.data = {
+        "energy_optimizer": {
+            "entry-1": {
+                "pv_forecast_compensation_sensor": sensor,
+                "pv_forecast_compensation_switch": pv_comp_switch,
+            }
+        }
+    }
 
     assert get_pv_compensation_factor(hass, "entry-1") is None
 
@@ -201,7 +211,11 @@ def test_get_pv_compensation_factor_defaults_enabled_when_missing_flag() -> None
     """Use sensor value when toggle is missing to preserve backward compatibility."""
     hass = MagicMock()
     hass.config_entries = MagicMock()
-    hass.config_entries.async_get_entry.return_value = MagicMock(data={})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {}
+    entry.options = {}
+    hass.config_entries.async_get_entry.return_value = entry
 
     sensor = MagicMock()
     sensor.native_value = 0.91
@@ -211,16 +225,27 @@ def test_get_pv_compensation_factor_defaults_enabled_when_missing_flag() -> None
 
 
 @pytest.mark.unit
-def test_get_pv_compensation_factor_enabled_returns_sensor_value() -> None:
-    """Use sensor value when compensation toggle is enabled."""
+def test_get_pv_compensation_factor_enabled_switch_returns_sensor_value() -> None:
+    """Use sensor value when compensation usage switch is on."""
     hass = MagicMock()
     hass.config_entries = MagicMock()
-    hass.config_entries.async_get_entry.return_value = MagicMock(
-        data={CONF_USE_PV_FORECAST_COMPENSATION: True}
-    )
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {}
+    entry.options = {}
+    hass.config_entries.async_get_entry.return_value = entry
 
     sensor = MagicMock()
     sensor.native_value = 1.03
-    hass.data = {"energy_optimizer": {"entry-1": {"pv_forecast_compensation_sensor": sensor}}}
+    pv_comp_switch = MagicMock()
+    pv_comp_switch.is_on = True
+    hass.data = {
+        "energy_optimizer": {
+            "entry-1": {
+                "pv_forecast_compensation_sensor": sensor,
+                "pv_forecast_compensation_switch": pv_comp_switch,
+            }
+        }
+    }
 
     assert get_pv_compensation_factor(hass, "entry-1") == pytest.approx(1.03)

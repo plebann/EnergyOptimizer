@@ -12,10 +12,10 @@ from ..const import (
     CONF_PV_FORECAST_TODAY,
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PRODUCTION_SENSOR,
-    CONF_USE_PV_FORECAST_COMPENSATION,
     DEFAULT_PV_EFFICIENCY,
     DOMAIN,
 )
+from ..helpers import is_pv_forecast_compensation_enabled
 from .time_window import build_hour_window
 
 if TYPE_CHECKING:
@@ -247,7 +247,7 @@ def _get_sensor_compensation_factor(
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         return None
-    if not bool(entry.data.get(CONF_USE_PV_FORECAST_COMPENSATION, True)):
+    if not is_pv_forecast_compensation_enabled(hass, entry):
         return None
     if DOMAIN not in hass.data or entry_id not in hass.data[DOMAIN]:
         return None

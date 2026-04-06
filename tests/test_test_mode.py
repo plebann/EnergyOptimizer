@@ -9,6 +9,7 @@ from custom_components.energy_optimizer.const import CONF_TEST_MODE, DOMAIN
 from custom_components.energy_optimizer.controllers.inverter import set_program_soc
 from custom_components.energy_optimizer.helpers import is_test_mode
 from custom_components.energy_optimizer.switch import (
+    PvForecastCompensationSwitch,
     TestModeSwitch as EnergyOptimizerTestModeSwitch,
     TestSellModeSwitch as EnergyOptimizerTestSellModeSwitch,
 )
@@ -99,7 +100,7 @@ async def test_switch_setup_registers_test_mode_switch() -> None:
 
     await async_setup_entry(hass, entry, _add_entities)
 
-    assert len(added_entities) == 2
+    assert len(added_entities) == 3
     assert any(
         isinstance(entity, EnergyOptimizerTestModeSwitch) for entity in added_entities
     )
@@ -107,8 +108,13 @@ async def test_switch_setup_registers_test_mode_switch() -> None:
         isinstance(entity, EnergyOptimizerTestSellModeSwitch)
         for entity in added_entities
     )
+    assert any(
+        isinstance(entity, PvForecastCompensationSwitch)
+        for entity in added_entities
+    )
     assert "test_mode_switch" in hass.data[DOMAIN][entry.entry_id]
     assert "test_sell_mode_switch" in hass.data[DOMAIN][entry.entry_id]
+    assert "pv_forecast_compensation_switch" in hass.data[DOMAIN][entry.entry_id]
 
 
 @pytest.mark.asyncio

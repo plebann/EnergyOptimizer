@@ -8,7 +8,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import CONF_TEST_MODE, CONF_TEST_SELL_MODE, DOMAIN
+from .const import (
+    CONF_TEST_MODE,
+    CONF_TEST_SELL_MODE,
+    CONF_USE_PV_FORECAST_COMPENSATION,
+    DOMAIN,
+)
 
 if TYPE_CHECKING:
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -23,11 +28,19 @@ async def async_setup_entry(
     """Set up Energy Optimizer switches from a config entry."""
     test_mode_switch = TestModeSwitch(config_entry)
     test_sell_mode_switch = TestSellModeSwitch(config_entry)
-    async_add_entities([test_mode_switch, test_sell_mode_switch])
+    pv_forecast_compensation_switch = PvForecastCompensationSwitch(config_entry)
+    async_add_entities(
+        [
+            test_mode_switch,
+            test_sell_mode_switch,
+            pv_forecast_compensation_switch,
+        ]
+    )
 
     entry_data = hass.data.setdefault(DOMAIN, {}).setdefault(config_entry.entry_id, {})
     entry_data["test_mode_switch"] = test_mode_switch
     entry_data["test_sell_mode_switch"] = test_sell_mode_switch
+    entry_data["pv_forecast_compensation_switch"] = pv_forecast_compensation_switch
 
 
 class TestModeSwitch(SwitchEntity, RestoreEntity):
@@ -108,5 +121,50 @@ class TestSellModeSwitch(SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn test sell mode off."""
+        self._attr_is_on = False
+        self.async_write_ha_state()
+
+
+class PvForecastCompensationSwitch(SwitchEntity, RestoreEntity):
+    """Switch controlling PV compensation sensor usage in forecast calculations."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "pv_forecast_compensation_usage"
+    _attr_icon = "mdi:chart-line-variant"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_device_class = SwitchDeviceClass.SWITCH
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        """Initialize the PV forecast compensation usage switch."""
+        self._attr_is_on = True
+        self._attr_unique_id = (
+            f"{config_entry.entry_id}_pv_forecast_compensation_switch"
+        )
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, config_entry.entry_id)},
+            "name": "Energy Optimizer",
+            "manufacturer": "Energy Optimizer",
+            "model": "Battery Optimizer",
+        }
+        self._entry_data = config_entry.data
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last state when added to hass."""
+        if (last_state := await self.async_get_last_state()) is not None:
+            self._attr_is_on = last_state.state == "on"
+            return
+
+        if CONF_USE_PV_FORECAST_COMPENSATION in self._entry_data:
+            self._attr_is_on = bool(
+                self._entry_data.get(CONF_USE_PV_FORECAST_COMPENSATION)
+            )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable PV forecast compensation usage."""
+        self._attr_is_on = True
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable PV forecast compensation usage."""
         self._attr_is_on = False
         self.async_write_ha_state()

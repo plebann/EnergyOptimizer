@@ -43,6 +43,23 @@ def is_test_sell_mode(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return bool(entry.options.get(CONF_TEST_SELL_MODE, False))
 
 
+def is_pv_forecast_compensation_enabled(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> bool:
+    """Return True when PV forecast compensation sensor usage is enabled."""
+    from .const import CONF_USE_PV_FORECAST_COMPENSATION, DOMAIN
+
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if isinstance(entry_data, dict):
+        pv_comp_switch = entry_data.get("pv_forecast_compensation_switch")
+        if pv_comp_switch is not None:
+            return bool(pv_comp_switch.is_on)
+
+    if CONF_USE_PV_FORECAST_COMPENSATION in entry.data:
+        return bool(entry.data.get(CONF_USE_PV_FORECAST_COMPENSATION))
+    return bool(entry.options.get(CONF_USE_PV_FORECAST_COMPENSATION, True))
+
+
 def is_balancing_ongoing(hass: HomeAssistant, entry_id: str) -> bool:
     """Return True when balancing ongoing binary sensor is on."""
     from .const import DOMAIN
