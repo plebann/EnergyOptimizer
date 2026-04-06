@@ -78,6 +78,7 @@ CONF_PV_PEAK_FORECAST = "pv_peak_forecast"
 CONF_WEATHER_FORECAST = "weather_forecast"
 CONF_PV_FORECAST_SENSOR = "pv_forecast_sensor"
 CONF_PV_EFFICIENCY = "pv_efficiency"
+CONF_USE_PV_FORECAST_COMPENSATION = "use_pv_forecast_compensation"
 
 CONF_ENABLE_HEAT_PUMP = "enable_heat_pump"
 CONF_HEAT_PUMP_FORECAST_DOMAIN = "heat_pump_forecast_domain"

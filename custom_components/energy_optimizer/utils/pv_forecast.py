@@ -12,6 +12,7 @@ from ..const import (
     CONF_PV_FORECAST_TODAY,
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PRODUCTION_SENSOR,
+    CONF_USE_PV_FORECAST_COMPENSATION,
     DEFAULT_PV_EFFICIENCY,
     DOMAIN,
 )
@@ -242,6 +243,11 @@ def _get_sensor_compensation_factor(
     hass: HomeAssistant, entry_id: str | None
 ) -> float | None:
     if entry_id is None:
+        return None
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None:
+        return None
+    if not bool(entry.data.get(CONF_USE_PV_FORECAST_COMPENSATION, True)):
         return None
     if DOMAIN not in hass.data or entry_id not in hass.data[DOMAIN]:
         return None

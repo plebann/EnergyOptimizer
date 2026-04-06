@@ -72,6 +72,7 @@ from .const import (
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PEAK_FORECAST,
     CONF_PV_PRODUCTION_SENSOR,
+    CONF_USE_PV_FORECAST_COMPENSATION,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
     CONF_TODAY_LOAD_SENSOR,
@@ -412,6 +413,10 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_PV_EFFICIENCY,
                     default=DEFAULT_PV_EFFICIENCY,
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
+                vol.Optional(
+                    CONF_USE_PV_FORECAST_COMPENSATION,
+                    default=True,
+                ): selector.BooleanSelector(),
                 vol.Optional(CONF_PV_FORECAST_TODAY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -1180,6 +1185,13 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                         CONF_PV_EFFICIENCY, DEFAULT_PV_EFFICIENCY
                     ),
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
+                vol.Optional(
+                    CONF_USE_PV_FORECAST_COMPENSATION,
+                    default=self._config_entry.data.get(
+                        CONF_USE_PV_FORECAST_COMPENSATION,
+                        True,
+                    ),
+                ): selector.BooleanSelector(),
                 vol.Optional(
                     CONF_WEATHER_FORECAST,
                     default=self._config_entry.data.get(CONF_WEATHER_FORECAST),
