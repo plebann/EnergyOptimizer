@@ -5,6 +5,8 @@ DOMAIN = "energy_optimizer"
 # Config flow steps
 CONF_PRICE_SENSOR = "price_sensor"
 CONF_TOMORROW_PRICE_SENSOR = "tomorrow_price_sensor"
+CONF_BUY_PRICE_SENSOR = "buy_price_sensor"
+CONF_SELL_PRICE_SENSOR = "sell_price_sensor"
 CONF_MIN_ARBITRAGE_PRICE = "min_arbitrage_price"
 CONF_EVENING_MAX_PRICE_SENSOR = "evening_max_price_sensor"
 CONF_EVENING_MAX_PRICE_HOUR_SENSOR = "evening_max_price_hour_sensor"
@@ -108,6 +110,7 @@ DEFAULT_MIN_ARBITRAGE_PRICE = 0.0
 DEFAULT_TODAY_LOAD_SENSOR = "sensor.load_usage_daily"
 DEFAULT_HEAT_PUMP_FORECAST_DOMAIN = "heat_pump_predictor"
 DEFAULT_HEAT_PUMP_FORECAST_SERVICE = "calculate_forecast_energy"
+PRICE_UNIT_PLN_PER_KWH = "PLN/kWh"
 
 # Services
 SERVICE_OVERNIGHT_SCHEDULE = "overnight_schedule"

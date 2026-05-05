@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
+    CONF_BUY_PRICE_SENSOR,
     CONF_BATTERY_CURRENT_SENSOR,
     CONF_BATTERY_POWER_SENSOR,
     CONF_BATTERY_SOC_SENSOR,
@@ -19,6 +20,7 @@ from .const import (
     CONF_PV_FORECAST_TODAY,
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PRODUCTION_SENSOR,
+    CONF_SELL_PRICE_SENSOR,
     DOMAIN,
 )
 from .helpers import get_float_state_info
@@ -66,6 +68,8 @@ class EnergyOptimizerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             CONF_BATTERY_VOLTAGE_SENSOR,
             CONF_BATTERY_CURRENT_SENSOR,
             CONF_PRICE_SENSOR,
+            CONF_BUY_PRICE_SENSOR,
+            CONF_SELL_PRICE_SENSOR,
             CONF_PV_FORECAST_TODAY,
             CONF_PV_FORECAST_TOMORROW,
             CONF_PV_FORECAST_REMAINING,

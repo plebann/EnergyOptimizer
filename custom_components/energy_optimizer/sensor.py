@@ -10,7 +10,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.event import async_track_time_interval
 
-from .const import CONF_BATTERY_SOC_SENSOR, DOMAIN
+from .const import (
+    CONF_BATTERY_SOC_SENSOR,
+    CONF_BUY_PRICE_SENSOR,
+    CONF_SELL_PRICE_SENSOR,
+    DOMAIN,
+)
 from .entities.sensors import (
     BatteryCapacityAhSensor,
     BatteryCapacitySensor,
@@ -18,13 +23,16 @@ from .entities.sensors import (
     BatteryReserveSensor,
     BatterySpaceSensor,
     BatteryVoltageSensor,
+    BuyPriceSensor,
     LastBalancingTimestampSensor,
     LastOptimizationSensor,
     MaxSocSensor,
+    MinArbitrageMarginSensor,
     MinSocSensor,
     OptimizationHistorySensor,
     PvForecastCompensationSensor,
     ScheduledActionsSensor,
+    SellPriceSensor,
     UsableCapacitySensor,
 )
 from .services import check_and_update_balancing_completion
@@ -54,6 +62,9 @@ async def async_setup_entry(
         BatteryEfficiencySensor(coordinator, config_entry, config),
         MinSocSensor(coordinator, config_entry, config),
         MaxSocSensor(coordinator, config_entry, config),
+        BuyPriceSensor(coordinator, config_entry, config),
+        SellPriceSensor(coordinator, config_entry, config),
+        MinArbitrageMarginSensor(coordinator, config_entry, config),
         PvForecastCompensationSensor(coordinator, config_entry, config),
     ]
 
@@ -103,8 +114,16 @@ async def async_setup_entry(
 
     async_add_entities(sensors)
 
-    soc_sensor = config.get(CONF_BATTERY_SOC_SENSOR)
-    if soc_sensor:
+    refresh_entities = [
+        entity_id
+        for entity_id in {
+            config.get(CONF_BATTERY_SOC_SENSOR),
+            config.get(CONF_BUY_PRICE_SENSOR),
+            config.get(CONF_SELL_PRICE_SENSOR),
+        }
+        if entity_id
+    ]
+    if refresh_entities:
 
         @callback
         def _async_sensor_changed(event):
@@ -112,7 +131,7 @@ async def async_setup_entry(
             hass.async_create_task(coordinator.async_request_refresh())
 
         remove_listener = async_track_state_change_event(
-            hass, [soc_sensor], _async_sensor_changed
+            hass, refresh_entities, _async_sensor_changed
         )
         hass.data[DOMAIN][config_entry.entry_id]["listeners"].append(remove_listener)
 

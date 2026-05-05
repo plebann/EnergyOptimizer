@@ -20,6 +20,7 @@ from .const import (
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE_SENSOR,
     CONF_BATTERY_VOLTAGE,
+    CONF_BUY_PRICE_SENSOR,
     CONF_CHARGE_CURRENT_ENTITY,
     CONF_DAILY_LOAD_SENSOR,
     CONF_DAILY_LOSSES_SENSOR,
@@ -74,6 +75,7 @@ from .const import (
     CONF_PV_PRODUCTION_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
+    CONF_SELL_PRICE_SENSOR,
     CONF_TODAY_LOAD_SENSOR,
     CONF_TOMORROW_PRICE_SENSOR,
     CONF_WEATHER_FORECAST,
@@ -93,9 +95,22 @@ from .const import (
     DEFAULT_PV_EFFICIENCY,
     DEFAULT_TODAY_LOAD_SENSOR,
     DOMAIN,
+    PRICE_UNIT_PLN_PER_KWH,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _price_margin_selector() -> selector.NumberSelector:
+    """Build a numeric selector for PLN/kWh margin values."""
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=0,
+            step=0.001,
+            mode=selector.NumberSelectorMode.BOX,
+            unit_of_measurement=PRICE_UNIT_PLN_PER_KWH,
+        )
+    )
 
 
 class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -147,10 +162,16 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_TOMORROW_PRICE_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
+                vol.Optional(CONF_BUY_PRICE_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_SELL_PRICE_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
                 vol.Optional(
                     CONF_MIN_ARBITRAGE_PRICE,
                     default=DEFAULT_MIN_ARBITRAGE_PRICE,
-                ): vol.All(vol.Coerce(float), vol.Range(min=0)),
+                ): _price_margin_selector(),
                 vol.Optional(CONF_EVENING_MAX_PRICE_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -559,6 +580,15 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             value_type=float,
         )
+        for field in (CONF_BUY_PRICE_SENSOR, CONF_SELL_PRICE_SENSOR):
+            entity_id = user_input.get(field)
+            if entity_id:
+                self._validate_entity(
+                    entity_id=entity_id,
+                    field=field,
+                    errors=errors,
+                    value_type=float,
+                )
         return errors
 
     def _validate_entity(
@@ -768,11 +798,23 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(
+                    CONF_BUY_PRICE_SENSOR,
+                    default=self._config_entry.data.get(CONF_BUY_PRICE_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_SELL_PRICE_SENSOR,
+                    default=self._config_entry.data.get(CONF_SELL_PRICE_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
                     CONF_MIN_ARBITRAGE_PRICE,
                     default=self._config_entry.data.get(
                         CONF_MIN_ARBITRAGE_PRICE, DEFAULT_MIN_ARBITRAGE_PRICE
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0)),
+                ): _price_margin_selector(),
                 vol.Optional(
                     CONF_EVENING_MAX_PRICE_SENSOR,
                     default=self._config_entry.data.get(CONF_EVENING_MAX_PRICE_SENSOR),

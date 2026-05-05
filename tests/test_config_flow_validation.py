@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock
 
 from custom_components.energy_optimizer.config_flow import EnergyOptimizerConfigFlow
@@ -18,6 +19,13 @@ def _mock_hass_with_state(state_obj: MagicMock | None) -> MagicMock:
     hass = MagicMock()
     hass.states = MagicMock()
     hass.states.get.return_value = state_obj
+    return hass
+
+
+def _mock_hass_with_states(states: dict[str, MagicMock | None]) -> MagicMock:
+    hass = MagicMock()
+    hass.states = MagicMock()
+    hass.states.get.side_effect = lambda entity_id: states.get(entity_id)
     return hass
 
 
@@ -111,3 +119,47 @@ def test_validate_entity_int_coercion_invalid_sets_error() -> None:
 
     assert result is None
     assert errors == {"x": "not_numeric"}
+
+
+def test_validate_price_entities_validates_optional_buy_and_sell_sources() -> None:
+    flow = EnergyOptimizerConfigFlow()
+    flow.hass = _mock_hass_with_states(
+        {
+            "sensor.price": _mock_state(domain="sensor", state="1.111"),
+            "sensor.buy_price": _mock_state(domain="sensor", state="1.327"),
+            "sensor.sell_price": _mock_state(domain="sensor", state="1.428"),
+        }
+    )
+
+    result = asyncio.run(
+        flow._validate_price_entities(
+            {
+                "price_sensor": "sensor.price",
+                "buy_price_sensor": "sensor.buy_price",
+                "sell_price_sensor": "sensor.sell_price",
+            }
+        )
+    )
+
+    assert result == {}
+
+
+def test_validate_price_entities_rejects_non_numeric_buy_source() -> None:
+    flow = EnergyOptimizerConfigFlow()
+    flow.hass = _mock_hass_with_states(
+        {
+            "sensor.price": _mock_state(domain="sensor", state="1.111"),
+            "sensor.buy_price": _mock_state(domain="sensor", state="unknown"),
+        }
+    )
+
+    result = asyncio.run(
+        flow._validate_price_entities(
+            {
+                "price_sensor": "sensor.price",
+                "buy_price_sensor": "sensor.buy_price",
+            }
+        )
+    )
+
+    assert result == {"buy_price_sensor": "not_numeric"}
