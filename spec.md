@@ -194,7 +194,7 @@ All I/O operations, Home Assistant API calls, and any function that can block MU
 
 - All entities MUST set `_attr_has_entity_name = True`.
 - The primary feature entity for a device MUST set `_attr_name = None` so it inherits the device name.
-- Secondary entities MUST use a `translation_key` backed by an entry in `translations/en.json` (and `translations/pl.json`).
+- Secondary entities MUST use a `translation_key` backed by an entry in `translations/en.json`; any additional language files that exist (e.g. `translations/pl.json`) MUST be kept in parity with `en.json`.
 - Hard-coded English strings MUST NOT appear as entity names.
 - Every entity MUST have a stable `unique_id` composed of the config entry ID and a deterministic suffix.
 - Entities MUST register against the device registry via `DeviceInfo`.
