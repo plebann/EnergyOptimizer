@@ -209,3 +209,10 @@ mypy custom_components/energy_optimizer
 - HACS Docs: https://hacs.xyz/docs/publish/integration
 - Entity: https://developers.home-assistant.io/docs/core/entity
 - Config Entries: https://developers.home-assistant.io/docs/config_entries_index
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+at `specs/001-core-integration/plan.md` (active feature directory is
+pinned in `.specify/feature.json`).
+<!-- SPECKIT END -->
