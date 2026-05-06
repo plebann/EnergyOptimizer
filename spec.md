@@ -119,6 +119,7 @@ All four domains MUST be listed in `manifest.json` under `after_dependencies` so
 - All business logic MUST be covered by unit tests in the `tests/` directory.
 - Tests MUST use `pytest` with `pytest-asyncio` for async test cases.
 - Tests MUST NOT import integration modules directly from outside `tests/`; they MUST go through `hass.config_entries` or helper factories.
+- **Current state:** the existing test suite imports `custom_components.energy_optimizer.*` modules directly in many places (decision engine, config flow, calculations). A future refactor is planned to align the test suite with this requirement. Until that refactor is complete, direct module imports are tolerated but MUST NOT be extended to new test files.
 - The test suite MUST remain green before any PR is merged.
 
 ---
@@ -165,6 +166,7 @@ All I/O operations, Home Assistant API calls, and any function that can block MU
 - Decision outcomes MUST be returned as a `DecisionOutcome` dataclass (or equivalent), separating:
   - `key_metrics` — concise, human-readable summary for history views and notifications.
   - `full_details` — numeric diagnostics for sensor attributes and deep inspection.
+- **Current state:** the existing `DecisionOutcome` dataclass (in `utils/logging.py`) uses `summary`, `reason`, and `details` fields, which do not match the `key_metrics`/`full_details` shape above. This mismatch will be resolved in a future refactoring pass that aligns the dataclass with this spec.
 
 ### 4.4 Coordinator Pattern
 
