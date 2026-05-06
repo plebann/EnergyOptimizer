@@ -168,10 +168,13 @@ All I/O operations, Home Assistant API calls, and any function that can block MU
 
 ### 4.4 Coordinator Pattern
 
-- A single `DataUpdateCoordinator` MUST manage data refresh for all sensors in the integration.
-- The coordinator MUST separate fast-refresh data (battery SOC, power — 60 s interval) from slow-refresh data (daily forecasts — 3600 s interval).
+- Sensor data refresh MUST be managed through coordinator-based polling using `DataUpdateCoordinator`.
+- The refresh design MUST separate fast-refresh data (battery SOC, power — 60 s interval) from slow-refresh data (daily forecasts — 3600 s interval).
+- This separation MAY be implemented either by:
+  - a single `DataUpdateCoordinator` with distinct internal caches / refresh paths for fast and slow data, or
+  - up to two coordinators, split by refresh cadence.
 - Entities MUST extend `CoordinatorEntity` and MUST NOT poll Home Assistant states independently.
-- The coordinator MUST raise `UpdateFailed` on transient errors rather than swallowing exceptions silently.
+- Coordinators MUST raise `UpdateFailed` on transient errors rather than swallowing exceptions silently.
 
 ### 4.5 Scheduler Design
 
