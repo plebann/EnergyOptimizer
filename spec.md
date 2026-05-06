@@ -30,21 +30,18 @@ The integration will operate conservatively: avoiding purchases of expensive-tar
 **In scope:**
 
 - Automated decision-making at defined daily action points (overnight, morning, afternoon, evening peaks).
-- Price-aware charge scheduling using G12 dual-zone tariff logic.
+- Price-aware charge scheduling using the user's selected tariff logic.
 - PV forecast integration (Solcast) to compute surplus and adjust SOC targets.
-- RCE spot-price arbitrage within defined safety margins.
+- Spot-price arbitrage using buy/sell prices provided by external integrations, within defined safety margins.
 - Battery balancing (full charge) on a configurable cadence.
-- Optional heat-pump (CWU boiler) coordination.
+- Optional domestic hot water (DHW) heat-pump coordination.
 - Diagnostic sensors exposing decision rationale and history.
 - Full UI-based setup and configuration via Home Assistant Config Flow.
 - HACS distribution and compliance.
 
 **Out of scope (for v1):**
 
-- Direct inverter firmware updates or low-level device control outside of Home Assistant entities.
-- Multi-site or multi-inverter installations.
 - Grid-export peak shaving beyond what is achievable through existing inverter program slots.
-- Autonomous re-training or machine-learning SOC models.
 
 ---
 
@@ -57,7 +54,7 @@ Energy Optimizer will minimise the annual electricity bill for a prosumer househ
 1. Maximising PV self-consumption so that generated energy is used locally rather than exported at a lower net-billing rate.
 2. Eliminating grid consumption during high-tariff periods whenever stored or forecasted PV energy is sufficient.
 3. Building a prosumer deposit during high-PV months to offset costs in low-PV months.
-4. Executing RCE spot-price arbitrage — selling at price peaks and buying in the off-peak window — up to the net daily PV yield ceiling.
+4. Executing spot-price arbitrage — selling at price peaks and buying in the off-peak window — up to the net daily PV yield ceiling.
 
 ### 2.2 Strategy
 
@@ -112,7 +109,7 @@ The integration SHOULD work with the following companion HACS integrations when 
 | --- | --- | --- |
 | ha-solarman | davidrapan/ha-solarman | Inverter and battery control entities |
 | ha-solcast-solar | BJReplay/ha-solcast-solar | PV production forecasts |
-| ha-rce-pse | Lewa-Reka/ha-rce-pse | RCE spot prices (15-min resolution) |
+| ha-rce-pse | Lewa-Reka/ha-rce-pse | Spot electricity prices (15-min resolution) — current provider, subject to change |
 | HeatPumpPredictor | plebann/HeatPumpPredictor | Heat pump energy forecast |
 
 These integrations MUST be listed in `manifest.json` under `after_dependencies` so that Energy Optimizer loads after them. The integration MUST degrade gracefully when optional integrations are absent: missing optional sensor entities MUST disable only the dependent feature branch, not the entire integration.
