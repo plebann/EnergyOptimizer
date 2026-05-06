@@ -105,14 +105,14 @@ The integration MUST NOT rely on internal/private HA APIs (modules prefixed with
 
 The integration SHOULD work with the following companion HACS integrations when they are installed:
 
-| Integration | Repository | Data Provided |
+| HA Domain | HACS Repository | Data Provided |
 | --- | --- | --- |
-| ha-solarman | davidrapan/ha-solarman | Inverter and battery control entities |
-| ha-solcast-solar | BJReplay/ha-solcast-solar | PV production forecasts |
-| ha-rce-pse | Lewa-Reka/ha-rce-pse | Spot electricity prices (15-min resolution) — current provider, subject to change |
-| HeatPumpPredictor | plebann/HeatPumpPredictor | Heat pump energy forecast |
+| `solarman` | davidrapan/ha-solarman | Inverter and battery control entities |
+| `solcast_solar` | BJReplay/ha-solcast-solar | PV production forecasts |
+| `rce_pse` | Lewa-Reka/ha-rce-pse | Spot electricity prices (15-min resolution) — current provider, subject to change |
+| `heat_pump_predictor` | plebann/HeatPumpPredictor | Heat pump energy forecast |
 
-These integrations MUST be listed in `manifest.json` under `after_dependencies` so that Energy Optimizer loads after them. The integration MUST degrade gracefully when optional integrations are absent: missing optional sensor entities MUST disable only the dependent feature branch, not the entire integration.
+All four domains MUST be listed in `manifest.json` under `after_dependencies` so that Energy Optimizer loads after them. The integration MUST degrade gracefully when an optional integration is absent: missing optional sensor entities MUST disable only the dependent feature branch, not the entire integration.
 
 ### 3.4 Testing
 
