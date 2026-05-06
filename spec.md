@@ -276,7 +276,7 @@ All I/O operations, Home Assistant API calls, and any function that can block MU
 - Every PR MUST maintain or increase unit-test coverage for modified modules.
 - Every new decision engine module MUST include at least one happy-path and one error-path test.
 - No hard-coded credentials, API keys, or personally identifiable information MAY appear in source code or committed files.
-- All user-facing strings MUST be externalised to `translations/en.json`; Polish translations in `translations/pl.json` SHOULD be kept in sync.
+- All user-facing strings MUST be externalised to `translations/en.json`; Polish translations in `translations/pl.json` MUST be kept in sync if that file exists.
 
 ### 6.5 Coding Style Constraints
 
