@@ -97,7 +97,7 @@ The integration MUST use only stable, public Home Assistant APIs:
 - `homeassistant.helpers.event` — `async_track_time_interval`, `async_track_state_change_event` for scheduled and reactive triggers.
 - `homeassistant.helpers.entity_platform` — platform registration for `sensor`, `binary_sensor`, and `switch`.
 - `homeassistant.helpers.storage` — persistent lightweight state (e.g., sell-restore flags).
-- `homeassistant.components.persistent_notification` — user-facing decision notifications.
+- Home Assistant `notify` services — user-facing decision notifications delivered via the `notify` service mechanism.
 
 The integration MUST NOT rely on internal/private HA APIs (modules prefixed with `_` or documented as internal).
 
