@@ -10,7 +10,7 @@ from .battery import (
     MinSocSensor,
     UsableCapacitySensor,
 )
-from .pricing import BuyPriceSensor, MinArbitrageMarginSensor, SellPriceSensor
+from .pricing import BuyPriceSensor, MiddaySellWindowSensor, MinArbitrageMarginSensor, SellPriceSensor
 from .tracking import (
     LastBalancingTimestampSensor,
     LastOptimizationSensor,
@@ -30,6 +30,7 @@ __all__ = [
     "LastBalancingTimestampSensor",
     "LastOptimizationSensor",
     "MaxSocSensor",
+    "MiddaySellWindowSensor",
     "MinArbitrageMarginSensor",
     "MinSocSensor",
     "OptimizationHistorySensor",
