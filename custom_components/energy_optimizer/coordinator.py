@@ -59,7 +59,7 @@ class EnergyOptimizerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Returns:
             Dictionary containing updated data for coordinator consumers.
         """
-        data: dict[str, Any] = {"states": {}}
+        data: dict[str, Any] = {"states": {}, "price_payloads": {}}
         config = self.entry.data
 
         entity_keys = (
@@ -84,5 +84,15 @@ class EnergyOptimizerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             data["states"][entity_id] = (
                 value if error is None and value is not None else None
             )
+
+        sell_price_entity_id = config.get(CONF_SELL_PRICE_SENSOR)
+        if sell_price_entity_id:
+            state = self.hass.states.get(sell_price_entity_id)
+            if state is not None:
+                prices_today = state.attributes.get("prices_today")
+                if isinstance(prices_today, list):
+                    data["price_payloads"][sell_price_entity_id] = {
+                        "prices_today": prices_today,
+                    }
 
         return data

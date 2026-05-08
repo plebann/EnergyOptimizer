@@ -5,7 +5,7 @@ from homeassistant.components.sensor import SensorStateClass
 
 from ..base import EnergyOptimizerSensor
 from ...calculations.price_windows import (
-    find_cheapest_midday_sell_window,
+    build_midday_sell_window_result,
     format_sell_window,
 )
 from ...const import (
@@ -80,13 +80,7 @@ class MinArbitrageMarginSensor(_PriceValueSensor):
 
 
 class MiddaySellWindowSensor(EnergyOptimizerSensor):
-    """Sensor publishing the cheapest 8-quarter-hour midday sell-price window.
-
-    Reads the current-day sell-price series directly from the Home Assistant
-    state object and publishes the cheapest contiguous window between 08:00 and
-    16:00 as a text value in HH:MM-HH-MM format.  When sufficient data is not
-    available the sensor becomes unavailable (native_value returns None).
-    """
+    """Sensor publishing the cheapest 8-quarter-hour midday sell-price window."""
 
     _attr_translation_key = "midday_sell_window"
     _attr_unique_id = "midday_sell_window"
@@ -94,9 +88,24 @@ class MiddaySellWindowSensor(EnergyOptimizerSensor):
 
     @property
     def native_value(self) -> str | None:
-        """Return the cheapest midday sell-price window as HH:MM-HH-MM, or None."""
+        """Return the cheapest midday sell-price window as HH:MM-HH:MM, or None."""
         entity_id = self.config.get(CONF_SELL_PRICE_SENSOR)
-        result = find_cheapest_midday_sell_window(self.hass, entity_id)
+        if not entity_id or self.coordinator.data is None:
+            return None
+
+        payloads = self.coordinator.data.get("price_payloads")
+        if not isinstance(payloads, dict):
+            return None
+
+        payload = payloads.get(entity_id)
+        if not isinstance(payload, dict):
+            return None
+
+        prices_today = payload.get("prices_today")
+        if not isinstance(prices_today, list) or not prices_today:
+            return None
+
+        result = build_midday_sell_window_result(prices_today, entity_id)
         if result is None:
             return None
         return format_sell_window(result)

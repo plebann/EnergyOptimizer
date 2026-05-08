@@ -1,14 +1,14 @@
-# Quickstart: Okno Najniższej Ceny Zakupu w Środku Dnia
+# Quickstart: Okno Najniższej Ceny Sprzedaży w Środku Dnia
 
 ## Goal
 
-Add a derived Home Assistant text sensor that exposes the cheapest 8-quarter-hour purchase-price window between 08:00 and 16:00 for the current local day.
+Add a derived Home Assistant text sensor that exposes the cheapest 8-quarter-hour sell-price window between 08:00 and 16:00 for the current local day, calculated from hourly input expanded into quarter-hours.
 
 ## Implementation Steps
 
 1. Add a pure calculation module under `custom_components/energy_optimizer/calculations/` that:
-   - reads the configured current-day price-series payload,
-   - normalizes quarter-hour slots,
+   - reads the configured current-day hourly price-series payload,
+   - expands each hour into 4 quarter-hour slots with the same price,
    - filters the current local day and the 08:00-16:00 interval,
    - chooses the cheapest contiguous 8-slot window,
    - returns no result when data is incomplete,
@@ -45,8 +45,8 @@ wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOp
 
 ## Manual Verification
 
-1. Ensure the configured price-series entity exposes current-day quarter-hour purchase prices.
+1. Ensure the configured price-series entity exposes current-day hourly sell prices.
 2. Reload the integration.
 3. Confirm the new sensor publishes a value like `12:00-14:00` when complete data exists.
-4. Remove or corrupt one required quarter-hour slot and confirm the sensor becomes `unavailable`.
-5. Change only the sell-price input and confirm the window sensor does not change.
+4. Remove or corrupt one required hourly input or one expanded quarter-hour candidate path and confirm the sensor becomes `unavailable`.
+5. Change only the buy-price input and confirm the window sensor does not change.

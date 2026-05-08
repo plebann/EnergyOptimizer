@@ -5,7 +5,7 @@
 
 ## Summary
 
-Add a derived Home Assistant text sensor that publishes the cheapest current-day sell-price window between 08:00 and 16:00, using exactly 8 contiguous quarter-hour slots and formatting the result as `HH:MM-HH-MM`. The implementation will keep the selection algorithm in a pure calculation module, read source data directly from the Home Assistant state object, publish `unavailable` on insufficient data, and integrate through the current entity/translation/test patterns already used by `energy_optimizer`.
+Add a derived Home Assistant text sensor that publishes the cheapest current-day sell-price window between 08:00 and 16:00, using exactly 8 contiguous quarter-hour slots and formatting the result as `HH:MM-HH:MM`. The implementation will keep the selection algorithm in a pure calculation module, read hourly `sell-price sensor` data from shared integration state, expand each full hour into 4 quarter-hour slots with the same price, publish `unavailable` on insufficient data, and integrate through the current entity/translation/test patterns already used by `energy_optimizer`.
 
 ## Technical Context
 
@@ -15,8 +15,8 @@ Add a derived Home Assistant text sensor that publishes the cheapest current-day
 **Testing**: `pytest` with focused unit tests under `tests/`  
 **Target Platform**: Home Assistant custom integration distributed via HACS  
 **Project Type**: Single-project Home Assistant custom integration  
-**Performance Goals**: Recompute the midday window inside the existing refresh/listener path with negligible overhead by scanning only the current local day quarter-hour price payload  
-**Constraints**: UI-only configuration, no blocking I/O, no new external APIs, current local day only, sell price only, earliest-window tie-break, `unavailable` on insufficient data, translation-backed naming, stable unique IDs tied to the config entry  
+**Performance Goals**: Recompute the midday window inside the existing refresh/listener path with negligible overhead by scanning only the current local day hourly payload already stored in shared integration state and expanding it in memory to quarter-hour slots  
+**Constraints**: UI-only configuration, no blocking I/O, no new external APIs, current local day only, `sell-price sensor` only, hourly input expanded into 4 quarter-hours per hour, shared-state access instead of direct entity reads from the output sensor, earliest-window tie-break, `unavailable` on insufficient data, translation-backed naming, stable unique IDs tied to the config entry  
 **Scale/Scope**: One new derived sensor, one pure calculation module, one focused output contract, one translation update, and targeted test additions
 
 ## Constitution Check
@@ -39,9 +39,9 @@ Add a derived Home Assistant text sensor that publishes the cheapest current-day
 
 ## Implementation Strategy
 
-1. Add a pure parser/selector for current-day quarter-hour sell-price points and choose the cheapest contiguous 8-slot window between 08:00 and 16:00.
-2. Add a dedicated text sensor that formats the chosen window as `HH:MM-HH-MM` and becomes `unavailable` when the selector cannot return a valid result.
-3. Read the price-series payload directly from the Home Assistant state object while reusing the existing refresh/listener path for pricing changes.
+1. Add a pure parser/selector for current-day hourly `sell-price sensor` points from shared state, expand each hour into 4 quarter-hour slots with the same price, and choose the cheapest contiguous 8-slot window between 08:00 and 16:00.
+2. Add a dedicated text sensor that formats the chosen window as `HH:MM-HH:MM` and becomes `unavailable` when the selector cannot return a valid result.
+3. Extend the shared integration state so the coordinator exposes the hourly `sell-price sensor` payload while reusing the existing refresh/listener path for pricing changes.
 4. Add translation, contract, and focused regression tests for tie-breaking, insufficient data, and current-day-only filtering.
 
 ## Project Structure
@@ -80,7 +80,7 @@ tests/
 └── test_time_windows.py
 ```
 
-**Structure Decision**: Keep the feature inside the existing `energy_optimizer` integration. Put deterministic quarter-hour window selection in a new `custom_components/energy_optimizer/calculations/price_windows.py` module, keep the published sensor inside `custom_components/energy_optimizer/entities/sensors/pricing.py`, wire it through `custom_components/energy_optimizer/sensor.py`, and read source data directly from the Home Assistant state object (without coordinator changes for this feature). Add a dedicated algorithm test file and extend existing pricing sensor tests for entity behavior.
+**Structure Decision**: Keep the feature inside the existing `energy_optimizer` integration. Put deterministic quarter-hour window selection in a new `custom_components/energy_optimizer/calculations/price_windows.py` module, normalize hourly shared-state data into quarter-hour candidates there, keep the published sensor inside `custom_components/energy_optimizer/entities/sensors/pricing.py`, wire it through `custom_components/energy_optimizer/sensor.py`, and expose the hourly `sell-price sensor` payload through shared coordinator state instead of direct entity reads from the result sensor. Add a dedicated algorithm test file and extend existing pricing sensor tests for entity behavior.
 
 ## Complexity Tracking
 

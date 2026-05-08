@@ -16,7 +16,8 @@
 ### Session 2026-05-08
 
 - Q: Na podstawie którego sensora cenowego liczymy wynikowe okno? → A: Wyłącznie na podstawie ceny sprzedaży.
-- Q: Jakiego formatu tekstowego używa wynikowy sensor? → A: `HH:MM-HH-MM`.
+- Q: Jakiego formatu tekstowego używa wynikowy sensor? → A: `HH:MM-HH:MM`.
+- Q: Jak traktować dane wejściowe, jeśli sensor ceny sprzedaży udostępnia kolejne pełne godziny zamiast gotowych kwadransów? → A: Każdą godzinę należy rozbić na 4 kolejne kwadranse z tą samą wartością ceny, a długość okna nadal liczyć w kwadransach.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -26,11 +27,11 @@ Użytkownik Home Assistant chce zobaczyć osobny sensor tekstowy, który wskazuj
 
 **Why this priority**: To jest bezpośrednia wartość tej funkcji i minimalny użyteczny rezultat dla użytkownika.
 
-**Independent Test**: Przy dostępnych danych ceny sprzedaży dla przedziału 08:00-16:00 użytkownik widzi osobny sensor tekstowy z jednym, poprawnie wyznaczonym oknem o długości 8 kolejnych kwadransów.
+**Independent Test**: Przy dostępnych danych ceny sprzedaży dla kolejnych pełnych godzin w przedziale 08:00-16:00 użytkownik widzi osobny sensor tekstowy z jednym, poprawnie wyznaczonym oknem o długości 8 kolejnych kwadransów, liczonym po rozbiciu każdej godziny na 4 kwadranse.
 
 **Acceptance Scenarios**:
 
-1. **Given** dostępne są dane ceny sprzedaży dla środka dnia, **When** integracja wyznacza najtańsze okno, **Then** użytkownik widzi osobny sensor tekstowy z zakresem czasu odpowiadającym najtańszemu ciągłemu oknu długości 8 kwadransów.
+1. **Given** dostępne są dane ceny sprzedaży dla kolejnych pełnych godzin środka dnia, **When** integracja wyznacza najtańsze okno, **Then** użytkownik widzi osobny sensor tekstowy z zakresem czasu odpowiadającym najtańszemu ciągłemu oknu długości 8 kwadransów, wyliczonemu po rozbiciu każdej godziny na 4 kwadranse z tą samą ceną.
 2. **Given** cena sprzedaży różni się od ceny zakupu, **When** integracja wyznacza okno środka dnia, **Then** wynik opiera się wyłącznie na cenie sprzedaży.
 3. **Given** dostępne są także dane cenowe dla kolejnego dnia, **When** integracja wyznacza okno środka dnia, **Then** wynik dotyczy wyłącznie przedziału 08:00-16:00 bieżącego dnia lokalnego.
 
@@ -46,7 +47,7 @@ Użytkownik chce otrzymać wynik w jednoznacznym formacie tekstowym, aby móc wy
 
 **Acceptance Scenarios**:
 
-1. **Given** najtańsze okno zostało wyznaczone, **When** użytkownik odczytuje wartość sensora, **Then** otrzymuje pojedynczy zakres czasu zapisany jako przedział początku i końca okna w formacie `HH:MM-HH-MM`, na przykład `12:00-14-00`.
+1. **Given** najtańsze okno zostało wyznaczone, **When** użytkownik odczytuje wartość sensora, **Then** otrzymuje pojedynczy zakres czasu zapisany jako przedział początku i końca okna w formacie `HH:MM-HH:MM`, na przykład `12:00-14:00`.
 2. **Given** dane ceny sprzedaży zmieniają się, **When** zmiana wpływa na najtańsze okno środka dnia, **Then** opublikowana wartość sensora odzwierciedla nowy przedział.
 
 ---
@@ -61,12 +62,12 @@ Użytkownik chce, aby integracja zachowywała się przewidywalnie, gdy dane ceny
 
 **Acceptance Scenarios**:
 
-1. **Given** w przedziale 08:00-16:00 nie ma wystarczających danych do zbudowania ciągłego okna długości 8 kwadransów, **When** integracja próbuje wyznaczyć wynik, **Then** ustawia sensor w stanie `unavailable` zamiast publikować pozornie poprawny przedział czasu.
+1. **Given** w przedziale 08:00-16:00 nie ma wystarczających danych godzinowych do zbudowania po rozbiciu ciągłego okna długości 8 kwadransów, **When** integracja próbuje wyznaczyć wynik, **Then** ustawia sensor w stanie `unavailable` zamiast publikować pozornie poprawny przedział czasu.
 2. **Given** istnieje więcej niż jedno okno z takim samym najniższym kosztem sprzedaży, **When** integracja wybiera wynik, **Then** wybiera najwcześniejsze takie okno, tak aby wynik był powtarzalny.
 
 ### Edge Cases
 
-- Co dzieje się, gdy dane ceny sprzedaży istnieją tylko dla części przedziału 08:00-16:00 i nie pozwalają zbudować pełnego okna 8 kwadransów? Sensor przechodzi w stan `unavailable`.
+- Co dzieje się, gdy dane ceny sprzedaży istnieją tylko dla części godzin w przedziale 08:00-16:00 i po rozbiciu nie pozwalają zbudować pełnego okna 8 kwadransów? Sensor przechodzi w stan `unavailable`.
 - Co dzieje się, gdy dwa lub więcej okien mają dokładnie taki sam najniższy łączny koszt sprzedaży? System wybiera najwcześniejsze takie okno.
 - Co dzieje się, gdy cena zakupu jest niższa lub wyższa od ceny sprzedaży, ale użytkownik oczekuje okna wyznaczanego tylko z ceny sprzedaży?
 - Co dzieje się, gdy dane wejściowe zawierają wartości nienumeryczne albo chwilowo niedostępne?
@@ -75,29 +76,31 @@ Użytkownik chce, aby integracja zachowywała się przewidywalnie, gdy dane ceny
 
 ### Functional Requirements
 
-- **FR-001**: System MUST wyznaczać wynik wyłącznie na podstawie sensora ceny sprzedaży.
+- **FR-001**: System MUST wyznaczać wynik wyłącznie na podstawie `sell-price sensor`.
 - **FR-002**: System MUST ignorować sensor ceny zakupu przy obliczaniu opisywanego okna.
 - **FR-003**: System MUST szukać okna wyłącznie w przedziale środka dnia od 08:00 do 16:00 czasu lokalnego.
 - **FR-003a**: System MUST wyznaczać okno wyłącznie dla bieżącego dnia lokalnego.
 - **FR-004**: System MUST wyznaczać jedno ciągłe okno o długości dokładnie 8 kolejnych kwadransów.
+- **FR-004a**: System MUST traktować każdą wejściową pełną godzinę ceny sprzedaży jako 4 kolejne kwadranse z tą samą wartością ceny przy budowaniu kandydatów okna.
 - **FR-005**: System MUST publikować wyliczone okno jako osobny sensor tekstowy odrębny od istniejących sensorów cenowych.
-- **FR-006**: System MUST prezentować wynik sensora jako pojedynczy zakres początku i końca wyznaczonego okna w formacie `HH:MM-HH-MM`, na przykład `12:00-14-00`.
+- **FR-006**: System MUST prezentować wynik sensora jako pojedynczy zakres początku i końca wyznaczonego okna w formacie `HH:MM-HH:MM`, na przykład `12:00-14:00`.
+- **FR-006a**: System MUST budować wyliczenie z danych udostępnionych przez współdzielony stan integracji dla `sell-price sensor`, a nie przez bezpośredni odczyt encji z warstwy publikującej sensor wynikowy.
 - **FR-007**: System MUST aktualizować opublikowany wynik, gdy zmiana danych ceny sprzedaży zmienia najtańsze okno w środku dnia.
-- **FR-008**: System MUST ustawiać sensor tekstowy w stanie `unavailable`, jeśli brak danych nie pozwala wyznaczyć pełnego okna długości 8 kwadransów.
+- **FR-008**: System MUST ustawiać sensor tekstowy w stanie `unavailable`, jeśli brak danych godzinowych nie pozwala po rozbiciu wyznaczyć pełnego okna długości 8 kwadransów.
 - **FR-009**: System MUST wybierać najwcześniejsze okno, gdy więcej niż jedno okno ma ten sam najniższy koszt sprzedaży.
 - **FR-010**: System MUST zachować spójność wyniku z lokalnym sposobem prezentacji czasu używanym przez integrację.
 
 ### Key Entities *(include if feature involves data)*
 
-- **Cena Sprzedaży**: Dane wejściowe opisujące koszt sprzedaży energii w kolejnych przedziałach kwadransowych.
+- **Cena Sprzedaży**: Dane wejściowe opisujące koszt sprzedaży energii w kolejnych pełnych godzinach, z których każda jest na potrzeby obliczeń rozbijana na 4 kolejne kwadranse o tej samej wartości ceny.
 - **Okno Środka Dnia**: Każdy ciągły kandydat do oceny mieszczący się całkowicie pomiędzy 08:00 a 16:00 i obejmujący 8 kolejnych kwadransów.
-- **Sensor Okna Sprzedaży**: Publikowany wynik tekstowy pokazujący wybrany przedział czasu odpowiadający najtańszemu oknu sprzedaży w środku dnia.
+- **Sensor Okna Sprzedaży**: Publikowany wynik tekstowy pokazujący wybrany przedział czasu odpowiadający najtańszemu oknu sprzedaży w środku dnia, wyliczony z współdzielonego stanu `sell-price sensor`.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: Gdy dostępne są kompletne dane ceny sprzedaży dla środka dnia, użytkownik otrzymuje jeden opublikowany wynik wskazujący najtańsze okno o długości 8 kwadransów.
+- **SC-001**: Gdy dostępne są kompletne dane godzinowe ceny sprzedaży dla środka dnia, użytkownik otrzymuje jeden opublikowany wynik wskazujący najtańsze okno o długości 8 kwadransów, wyliczone po rozbiciu każdej godziny na 4 kwadranse.
 - **SC-002**: W 100% przypadków zmiana wyłącznie sensora ceny zakupu nie zmienia wyliczonego okna środka dnia.
 - **SC-003**: W 100% przypadków niewystarczających danych system ustawia sensor w stanie `unavailable` i nie publikuje pozornie poprawnego zakresu czasu.
 - **SC-004**: Użytkownik może odczytać wynik w jednoznacznym formacie zakresu czasu bez potrzeby wykonywania dodatkowych obliczeń.
@@ -106,7 +109,7 @@ Użytkownik chce, aby integracja zachowywała się przewidywalnie, gdy dane ceny
 ## Assumptions
 
 - W integracji istnieją odrębne źródła danych dla ceny zakupu i ceny sprzedaży.
-- Dane ceny sprzedaży są dostępne w rozdzielczości pozwalającej ocenić kolejne kwadranse w przedziale 08:00-16:00.
+- Dane ceny sprzedaży są dostępne dla kolejnych pełnych godzin w przedziale 08:00-16:00 i mogą zostać rozbite na 4 kolejne kwadranse o tej samej wartości ceny.
 - Zakres środka dnia jest interpretowany jako okna w całości mieszczące się pomiędzy 08:00 a 16:00 bieżącego dnia lokalnego.
 - Przy remisie najtańszych okien integracja wybiera najwcześniejsze okno.
 - Przy niewystarczających danych wejściowych sensor przechodzi w stan `unavailable`.
