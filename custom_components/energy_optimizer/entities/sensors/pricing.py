@@ -1,9 +1,16 @@
 """Price-related sensors for Energy Optimizer."""
 from __future__ import annotations
 
+from datetime import timedelta
+
 from homeassistant.components.sensor import SensorStateClass
+from homeassistant.util import dt as dt_util
 
 from ..base import EnergyOptimizerSensor
+from ...calculations.price_windows import (
+    build_midday_sell_window_result,
+    format_sell_window,
+)
 from ...const import (
     CONF_BUY_PRICE_SENSOR,
     CONF_MIN_ARBITRAGE_PRICE,
@@ -73,3 +80,76 @@ class MinArbitrageMarginSensor(_PriceValueSensor):
             DEFAULT_MIN_ARBITRAGE_PRICE,
         )
         return round(float(configured or 0.0), 3)
+
+
+class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
+    """Base sensor for day-scoped midday sell-price windows."""
+
+    _attr_icon = "mdi:clock-time-eight-outline"
+    _payload_key: str
+    _day_offset: int = 0
+
+    def _get_result(self):
+        """Return the selected midday sell window result for this sensor variant."""
+        entity_id = self.config.get(CONF_SELL_PRICE_SENSOR)
+        if not entity_id or self.coordinator.data is None:
+            return None
+
+        payloads = self.coordinator.data.get("price_payloads")
+        if not isinstance(payloads, dict):
+            return None
+
+        payload = payloads.get(entity_id)
+        if not isinstance(payload, dict):
+            return None
+
+        prices = payload.get(self._payload_key)
+        if not isinstance(prices, list) or not prices:
+            return None
+
+        now_local = dt_util.now() + timedelta(days=self._day_offset)
+        return build_midday_sell_window_result(prices, entity_id, now_local=now_local)
+
+    def _apply_result(self, result) -> None:
+        """Update cached state and attributes from a computed window result."""
+        if result is None:
+            self._attr_native_value = None
+            self._attr_extra_state_attributes = {}
+            return
+
+        self._attr_native_value = format_sell_window(result)
+        self._attr_extra_state_attributes = {
+            "price": round(result.average_price, 2)
+        }
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the cheapest midday sell-price window as HH:MM-HH:MM, or None."""
+        return getattr(self, "_attr_native_value", None)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, float]:
+        """Return the rounded average price when a valid window exists."""
+        return getattr(self, "_attr_extra_state_attributes", {})
+
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated coordinator data."""
+        self._apply_result(self._get_result())
+        super()._handle_coordinator_update()
+
+
+class MiddaySellWindowSensor(_MiddaySellWindowBaseSensor):
+    """Sensor publishing the cheapest 8-quarter-hour midday sell-price window."""
+
+    _attr_translation_key = "midday_sell_window"
+    _attr_unique_id = "midday_sell_window"
+    _payload_key = "prices_today"
+
+
+class MiddaySellWindowTomorrowSensor(_MiddaySellWindowBaseSensor):
+    """Sensor publishing the cheapest midday sell window for tomorrow."""
+
+    _attr_translation_key = "midday_sell_window_tomorrow"
+    _attr_unique_id = "midday_sell_window_tomorrow"
+    _payload_key = "prices_tomorrow"
+    _day_offset = 1

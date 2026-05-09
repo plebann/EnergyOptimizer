@@ -278,6 +278,12 @@
       "min_arbitrage_margin": {
         "name": "Minimum arbitrage margin"
       },
+      "midday_sell_window": {
+        "name": "Midday sell window"
+      },
+      "midday_sell_window_tomorrow": {
+        "name": "Midday sell window tomorrow"
+      },
       "scheduled_actions": {
         "name": "Scheduled actions"
       },
