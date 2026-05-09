@@ -110,21 +110,32 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
         now_local = dt_util.now() + timedelta(days=self._day_offset)
         return build_midday_sell_window_result(prices, entity_id, now_local=now_local)
 
+    def _apply_result(self, result) -> None:
+        """Update cached state and attributes from a computed window result."""
+        if result is None:
+            self._attr_native_value = None
+            self._attr_extra_state_attributes = {}
+            return
+
+        self._attr_native_value = format_sell_window(result)
+        self._attr_extra_state_attributes = {
+            "price": round(result.average_price, 2)
+        }
+
     @property
     def native_value(self) -> str | None:
         """Return the cheapest midday sell-price window as HH:MM-HH:MM, or None."""
-        result = self._get_result()
-        if result is None:
-            return None
-        return format_sell_window(result)
+        return getattr(self, "_attr_native_value", None)
 
     @property
     def extra_state_attributes(self) -> dict[str, float]:
         """Return the rounded average price when a valid window exists."""
-        result = self._get_result()
-        if result is None:
-            return {}
-        return {"price": round(result.average_price, 2)}
+        return getattr(self, "_attr_extra_state_attributes", {})
+
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated coordinator data."""
+        self._apply_result(self._get_result())
+        super()._handle_coordinator_update()
 
 
 class MiddaySellWindowSensor(_MiddaySellWindowBaseSensor):
