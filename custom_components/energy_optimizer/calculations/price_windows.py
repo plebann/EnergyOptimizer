@@ -68,6 +68,10 @@ def expand_hourly_sell_prices(
     points: list[QuarterHourPricePoint] = []
 
     for entry in prices_today:
+        if not isinstance(entry, dict):
+            _LOGGER.debug("Skipping non-dict hourly sell-price entry: %s", entry)
+            continue
+
         raw_time = entry.get("time")
         raw_price = entry.get("price")
         if raw_time is None or raw_price is None:
