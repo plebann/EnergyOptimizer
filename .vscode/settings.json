@@ -20,6 +20,19 @@
         "/^& \"\\.specify/scripts/powershell/setup-tasks\\.ps1\" -Json$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^git rev-parse --is-inside-work-tree 2>\\$null$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        ".\\.specify\\extensions\\git\\scripts\\powershell\\create-new-feature.ps1": true,
+        "/^git rev-parse --is-inside-work-tree$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^git rev-parse --abbrev-ref HEAD$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     },
     "python.defaultInterpreterPath": "C:/Users/mpleb/AppData/Local/Programs/Python/Python312/python.exe"

@@ -28,6 +28,7 @@ from .entities.sensors import (
     LastOptimizationSensor,
     MaxSocSensor,
     MiddaySellWindowSensor,
+    MiddaySellWindowTomorrowSensor,
     MinArbitrageMarginSensor,
     MinSocSensor,
     OptimizationHistorySensor,
@@ -67,6 +68,7 @@ async def async_setup_entry(
         SellPriceSensor(coordinator, config_entry, config),
         MinArbitrageMarginSensor(coordinator, config_entry, config),
         MiddaySellWindowSensor(coordinator, config_entry, config),
+        MiddaySellWindowTomorrowSensor(coordinator, config_entry, config),
         PvForecastCompensationSensor(coordinator, config_entry, config),
     ]
 

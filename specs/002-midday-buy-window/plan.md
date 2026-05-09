@@ -1,48 +1,41 @@
-# Implementation Plan: Okno Najniższej Ceny Sprzedaży w Środku Dnia
+# Implementation Plan: Rozszerzenie Sensorów Okna Najniższej Ceny Sprzedaży
 
-**Branch**: `[002-midday-buy-window]` | **Date**: 2026-05-07 | **Spec**: [spec.md](./spec.md)
+**Branch**: `[002-midday-buy-window]` | **Date**: 2026-05-09 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `/specs/002-midday-buy-window/spec.md`
 
 ## Summary
 
-Add a derived Home Assistant text sensor that publishes the cheapest current-day sell-price window between 08:00 and 16:00, using exactly 8 contiguous quarter-hour slots and formatting the result as `HH:MM-HH:MM`. The implementation will keep the selection algorithm in a pure calculation module, read hourly `sell-price sensor` data from shared integration state, expand each full hour into 4 quarter-hour slots with the same price, publish `unavailable` on insufficient data, and integrate through the current entity/translation/test patterns already used by `energy_optimizer`.
+Extend the existing midday sell-window feature into a day-scoped sensor pair: keep the current-day text sensor for the cheapest sell-price window between 08:00 and 16:00, add a second analogous tomorrow sensor, and publish a rounded float `price` attribute for the average selected window price when available. The implementation will reuse one pure calculation path, read `prices_today` and `prices_tomorrow` from shared integration state, preserve earliest-start tie-breaking and `unavailable` semantics, omit `price` when a sensor is unavailable, and keep Home Assistant entity logic thin and translation-backed.
 
 ## Technical Context
 
-**Language/Version**: Python in the Home Assistant custom integration runtime (repo does not pin a separate standalone interpreter version)  
+**Language/Version**: Python in the Home Assistant custom integration runtime  
 **Primary Dependencies**: Home Assistant config entries, `DataUpdateCoordinator`, `CoordinatorEntity`/`SensorEntity`, existing Energy Optimizer entity bases and translations, pytest  
-**Storage**: N/A for feature-specific persistence; state is derived from current Home Assistant entity state and attributes  
-**Testing**: `pytest` with focused unit tests under `tests/`  
+**Storage**: N/A for feature-specific persistence; state is derived from shared Home Assistant entity state and attributes  
+**Testing**: `pytest` with focused unit and entity tests under `tests/`  
 **Target Platform**: Home Assistant custom integration distributed via HACS  
 **Project Type**: Single-project Home Assistant custom integration  
-**Performance Goals**: Recompute the midday window inside the existing refresh/listener path with negligible overhead by scanning only the current local day hourly payload already stored in shared integration state and expanding it in memory to quarter-hour slots  
-**Constraints**: UI-only configuration, no blocking I/O, no new external APIs, current local day only, `sell-price sensor` only, hourly input expanded into 4 quarter-hours per hour, shared-state access instead of direct entity reads from the output sensor, earliest-window tie-break, `unavailable` on insufficient data, translation-backed naming, stable unique IDs tied to the config entry  
-**Scale/Scope**: One new derived sensor, one pure calculation module, one focused output contract, one translation update, and targeted test additions
+**Performance Goals**: Recompute both day-scoped windows inside the existing refresh/listener path with negligible overhead by scanning at most two hourly payloads, expanding them in memory to quarter-hour slots, and reusing a single pure selector  
+**Constraints**: UI-only configuration, no blocking I/O, no new external APIs, sell-price data only, `prices_today` for the current-day sensor, `prices_tomorrow` for the tomorrow sensor, hourly input expanded into 4 quarter-hours per hour, shared-state access instead of direct entity reads, earliest-window tie-break, `unavailable` on insufficient data, omit `price` on unavailable, translation-backed naming, stable unique IDs tied to the config entry  
+**Scale/Scope**: Two derived sensors sharing one calculation core, one updated output contract, one translation update, and targeted tests for day separation, average-price publishing, and controlled degradation
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- **HA-first scope**: PASS before design. The feature remains a derived Home Assistant sensor and does not introduce direct device control or external telemetry responsibilities.
-- **Module separation**: PASS before design. The plan keeps pricing-window selection in a calculation module and leaves entity registration and HA publishing in platform/entity files.
-- **Controlled degradation**: PASS before design. The design explicitly maps insufficient or invalid input data to `unavailable` instead of a stale or guessed window.
-- **Naming and registry stability**: PASS before design. The new entity will use `translation_key`, `_attr_has_entity_name = True`, and a stable config-entry-prefixed unique ID.
-- **Testing and observability**: PASS before design. The feature itself is the observable output, and the plan includes deterministic algorithm and entity tests.
+- **HA-first scope**: PASS before design. The feature remains a derived Home Assistant output built from existing HA price entities.
+- **Module separation**: PASS before design. The plan keeps window selection and averaging in a calculation module and leaves entity registration/publishing in HA-facing files.
+- **Controlled degradation**: PASS before design. The clarified contract explicitly maps incomplete or invalid day-scoped data to `unavailable` and omits `price` in that state.
+- **Naming and registry stability**: PASS before design. Both derived sensors will use translation-backed naming, `_attr_has_entity_name = True`, and stable config-entry-based unique IDs.
+- **Testing and observability**: PASS before design. The feature extends observability through the `price` attribute and requires deterministic tests for calculation plus entity publication.
 
 ### Post-Design Re-check
 
-- **HA-first scope**: PASS after design. The contract remains a read-only sensor built from existing Home Assistant price entities.
-- **Module separation**: PASS after design. The proposed file layout keeps the pure selector in `calculations/` and the published sensor in `entities/sensors/`.
-- **Controlled degradation**: PASS after design. The data model and contract both require `unavailable` whenever a full 8-slot window cannot be proven from valid current-day data.
-- **Naming and registry stability**: PASS after design. The plan routes entity naming through translations and existing base-entity unique-ID behavior.
-- **Testing and observability**: PASS after design. `research.md`, `data-model.md`, `quickstart.md`, and the contract define the expected observable state and the required regression coverage.
-
-## Implementation Strategy
-
-1. Add a pure parser/selector for current-day hourly `sell-price sensor` points from shared state, expand each hour into 4 quarter-hour slots with the same price, and choose the cheapest contiguous 8-slot window between 08:00 and 16:00.
-2. Add a dedicated text sensor that formats the chosen window as `HH:MM-HH:MM` and becomes `unavailable` when the selector cannot return a valid result.
-3. Extend the shared integration state so the coordinator exposes the hourly `sell-price sensor` payload while reusing the existing refresh/listener path for pricing changes.
-4. Add translation, contract, and focused regression tests for tie-breaking, insufficient data, and current-day-only filtering.
+- **HA-first scope**: PASS after design. The contract remains a pair of read-only sensors built from existing Home Assistant price payloads.
+- **Module separation**: PASS after design. The data model and structure keep day-scoped calculation generic and entity-layer concerns thin.
+- **Controlled degradation**: PASS after design. `research.md`, `data-model.md`, `quickstart.md`, and the contract all require `unavailable` with omitted `price` when a valid 8-slot window cannot be proven for that day.
+- **Naming and registry stability**: PASS after design. The design keeps stable IDs, translation keys, and existing Home Assistant naming rules for both sensors.
+- **Testing and observability**: PASS after design. The updated artifacts require tests for average-price calculation, day isolation, buy-price invariance, and attribute omission while exposing richer observable state through `price`.
 
 ## Project Structure
 
@@ -65,7 +58,7 @@ specs/002-midday-buy-window/
 custom_components/energy_optimizer/
 ├── calculations/
 │   └── price_windows.py
-├── const.py
+├── coordinator.py
 ├── entities/
 │   └── sensors/
 │       ├── __init__.py
@@ -80,8 +73,8 @@ tests/
 └── test_time_windows.py
 ```
 
-**Structure Decision**: Keep the feature inside the existing `energy_optimizer` integration. Put deterministic quarter-hour window selection in a new `custom_components/energy_optimizer/calculations/price_windows.py` module, normalize hourly shared-state data into quarter-hour candidates there, keep the published sensor inside `custom_components/energy_optimizer/entities/sensors/pricing.py`, wire it through `custom_components/energy_optimizer/sensor.py`, and expose the hourly `sell-price sensor` payload through shared coordinator state instead of direct entity reads from the result sensor. Add a dedicated algorithm test file and extend existing pricing sensor tests for entity behavior.
+**Structure Decision**: Keep the feature inside the existing `energy_optimizer` integration. Generalize the deterministic quarter-hour selector in `custom_components/energy_optimizer/calculations/price_windows.py` so it can evaluate either `prices_today` or `prices_tomorrow`, expose both payloads through shared coordinator state in `custom_components/energy_optimizer/coordinator.py`, keep the published today/tomorrow sensors in `custom_components/energy_optimizer/entities/sensors/pricing.py`, wire them through `custom_components/energy_optimizer/sensor.py`, and validate behavior with dedicated algorithm plus entity tests.
 
 ## Complexity Tracking
 
-No constitution violations identified. This feature fits the current single-integration architecture without requiring additional exceptions.
+No constitution violations identified. The expanded feature still fits the current single-integration architecture without requiring exceptions.

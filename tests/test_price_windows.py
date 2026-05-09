@@ -32,12 +32,17 @@ def _hourly_entry(
     return {"time": dt.isoformat(), "price": price}
 
 
-def _full_day_entries(low_start_hour: int = 10, low_hours: int = 2) -> list[dict[str, object]]:
+def _full_day_entries(
+    low_start_hour: int = 10,
+    low_hours: int = 2,
+    *,
+    day: date = TODAY,
+) -> list[dict[str, object]]:
     """Create a full 08:00-16:00 hourly day where a contiguous range is cheapest."""
     entries: list[dict[str, object]] = []
     for hour in range(8, 16):
         is_low = low_start_hour <= hour < low_start_hour + low_hours
-        entries.append(_hourly_entry(hour, 0.5 if is_low else 1.0))
+        entries.append(_hourly_entry(hour, 0.5 if is_low else 1.0, day=day))
     return entries
 
 
@@ -105,6 +110,7 @@ def test_select_midday_window_picks_cheapest_contiguous_eight_quarters() -> None
     assert result.end_local == datetime(2026, 5, 8, 12, 0, tzinfo=TZ)
     assert result.slot_count == WINDOW_SLOTS
     assert result.total_cost == pytest.approx(4.0)
+    assert result.average_price == pytest.approx(0.5)
 
 
 @pytest.mark.unit
@@ -153,12 +159,27 @@ def test_build_midday_sell_window_result_ignores_tomorrow_even_when_cheaper() ->
 
     assert result is not None
     assert result.start_local.date() == TODAY
+    assert result.average_price == pytest.approx(0.5)
+
+
+@pytest.mark.unit
+def test_build_midday_sell_window_result_selects_tomorrow_payload_when_evaluating_tomorrow() -> None:
+    result = build_midday_sell_window_result(
+        _full_day_entries(low_start_hour=11, day=TOMORROW),
+        ENTITY_ID,
+        now_local=datetime(2026, 5, 9, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.start_local == datetime(2026, 5, 9, 11, 0, tzinfo=TZ)
+    assert result.end_local == datetime(2026, 5, 9, 13, 0, tzinfo=TZ)
+    assert result.average_price == pytest.approx(0.5)
 
 
 @pytest.mark.unit
 def test_build_midday_sell_window_result_returns_none_when_data_missing() -> None:
     result = build_midday_sell_window_result(
-        [_hourly_entry(8, 1.0), _hourly_entry(9, 1.0)],
+        [_hourly_entry(7, 1.0), _hourly_entry(8, 1.0)],
         ENTITY_ID,
         now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
     )
@@ -187,6 +208,7 @@ def test_format_sell_window_uses_hhmm_hhmm_format() -> None:
         start_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
         end_local=datetime(2026, 5, 8, 14, 0, tzinfo=TZ),
         total_cost=4.0,
+        average_price=0.5,
     )
 
     assert format_sell_window(result) == "12:00-14:00"

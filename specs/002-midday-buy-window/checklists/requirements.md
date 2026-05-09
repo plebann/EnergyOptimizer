@@ -1,7 +1,7 @@
-# Specification Quality Checklist: Okno Najniższej Ceny Zakupu w Środku Dnia
+# Specification Quality Checklist: Rozszerzenie Sensorów Okna Najniższej Ceny Sprzedaży
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
-**Created**: 2026-05-07
+**Created**: 2026-05-09
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
@@ -31,5 +31,5 @@
 
 ## Notes
 
-- Validation passed on first draft.
-- The spec is ready for `/speckit.plan`.
+- Validation passed after updating the scope for the `price` attribute and the analogous tomorrow sensor.
+- The revised spec is ready for `/speckit.plan`.

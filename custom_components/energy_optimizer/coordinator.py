@@ -90,9 +90,15 @@ class EnergyOptimizerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             state = self.hass.states.get(sell_price_entity_id)
             if state is not None:
                 prices_today = state.attributes.get("prices_today")
+                prices_tomorrow = state.attributes.get("prices_tomorrow")
+
+                payload: dict[str, Any] = {}
                 if isinstance(prices_today, list):
-                    data["price_payloads"][sell_price_entity_id] = {
-                        "prices_today": prices_today,
-                    }
+                    payload["prices_today"] = prices_today
+                if isinstance(prices_tomorrow, list):
+                    payload["prices_tomorrow"] = prices_tomorrow
+
+                if payload:
+                    data["price_payloads"][sell_price_entity_id] = payload
 
         return data

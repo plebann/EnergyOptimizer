@@ -23,15 +23,21 @@ Energy Optimizer is a Home Assistant custom integration focused on price-aware b
 - Services: morning_grid_charge, afternoon_grid_charge, overnight_schedule.
 - Sensors: battery, configuration, tracking, forecast helpers, and pricing window sensors.
 
-### Midday Sell Window Sensor
+### Midday Sell Window Sensors
 
-The **Midday Sell Window** sensor (`sensor.<device>_midday_sell_window`) publishes the cheapest 8-quarter-hour (2-hour) sell-price window between 08:00 and 16:00 for the current local day.
+The integration publishes two derived midday sell-window sensors:
+
+- **Current day**: `sensor.<device>_midday_sell_window`
+- **Tomorrow**: `sensor.<device>_midday_sell_window_tomorrow`
+
+Both sensors publish the cheapest 8-quarter-hour (2-hour) sell-price window between 08:00 and 16:00 for their respective local day.
 
 - **Format**: `HH:MM-HH:MM` (e.g., `12:00-14:00`)
-- **Source**: Reads hourly `prices_today` data for the configured sell-price entity from shared coordinator state and expands each hour into 4 quarter-hours during selection
-- **Unavailable**: Becomes unavailable when there is insufficient data to form a full 8-slot window
+- **Attribute**: `price` with the rounded average sell price for the selected window in PLN/kWh
+- **Source**: Reads hourly `prices_today` and `prices_tomorrow` data for the configured sell-price entity from shared coordinator state and expands each hour into 4 quarter-hours during selection
+- **Unavailable**: The affected sensor becomes unavailable when there is insufficient data to form a full 8-slot window, and `price` is omitted in that state
 - **Tie-break**: When multiple windows share the same total cost, the earliest window is selected
-- **Isolation**: Ignores buy-price-only changes when calculating or publishing the window
+- **Isolation**: Ignores buy-price-only changes and keeps current-day and tomorrow payload updates isolated from each other
 - **Update**: Recalculates automatically whenever the sell-price entity payload changes through the normal coordinator refresh path
 
 ## Configuration (UI-Only)

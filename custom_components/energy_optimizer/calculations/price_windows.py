@@ -36,6 +36,7 @@ class MiddaySellWindowResult:
     start_local: datetime
     end_local: datetime
     total_cost: float
+    average_price: float
     slot_count: int = field(default=WINDOW_SLOTS)
 
 
@@ -136,6 +137,7 @@ def select_midday_window(
                 start_local=window[0].start_local,
                 end_local=window[-1].end_local,
                 total_cost=total_cost,
+                average_price=total_cost / WINDOW_SLOTS,
             )
 
     return best

@@ -1,65 +1,63 @@
-# Research: Okno Najniższej Ceny Sprzedaży w Środku Dnia
+# Research: Rozszerzenie Sensorów Okna Najniższej Ceny Sprzedaży
 
-## Decision: Use the existing hourly `sell-price sensor` data exposed through shared integration state as the authoritative input for the window calculation, and expand each hour into four quarter-hours during selection.
-
-**Rationale**
-- The clarified input for this feature is hourly sell-price data, while the business rule still defines the output window length in quarter-hours.
-- Expanding each hourly entry into 4 consecutive quarter-hours with the same price preserves the requested quarter-hour window semantics without requiring a different external source.
-- Reusing the configured hourly `sell-price sensor` avoids new config-flow inputs and keeps the feature aligned with the current HA-first model where Energy Optimizer derives outputs from existing Home Assistant entities.
-- Reading the payload through shared integration state aligns the feature with the project constitution's preference for centralized data access instead of direct reads from entity code.
-- The implementation remains semantically based on sell pricing and must remain fully isolated from the configured buy-price sensor.
-
-**Alternatives considered**
-- Use `buy_price_sensor` as the only input: rejected because the feature is explicitly scoped to sell-price data.
-- Require a new external precomputed window sensor in config flow: rejected because it duplicates setup burden and moves core optimizer logic outside the integration.
-- Blend buy and sell price sources: rejected because the specification explicitly scopes the feature to sell pricing only.
-
-## Decision: Keep the hourly-to-quarter-hour expansion and cheapest-window selection in a pure calculation module, and keep the entity layer thin.
+## Decision: Reuse shared integration state as the authoritative source for both day-scoped price payloads, with `prices_today` feeding the current-day sensor and `prices_tomorrow` feeding the tomorrow sensor.
 
 **Rationale**
-- The constitution requires clear module separation between calculations and Home Assistant entity wiring.
-- A pure function that parses current-day hourly price points, expands them to quarter-hours, filters 08:00-16:00, enforces 8 contiguous quarter-hours, and breaks ties by earliest start is easy to unit-test deterministically.
-- A thin entity can focus on formatting the chosen window as `HH:MM-HH:MM`, publishing `unavailable` on insufficient data, and exposing stable HA metadata.
+- The updated specification explicitly requires two analogous sensors that differ only by day scope and payload source.
+- Reading both payloads from coordinator-owned shared state keeps entity code thin and aligned with the constitution's requirement for centralized reads.
+- This approach preserves the existing Home Assistant flow where Energy Optimizer derives outputs from already-configured HA entities rather than introducing new configuration or direct state scraping in entities.
+- Isolating each sensor to its own payload prevents cross-day leakage and makes update behavior deterministic.
 
 **Alternatives considered**
-- Put the full algorithm into the sensor `native_value` property: rejected because it mixes business rules with entity concerns and weakens test isolation.
-- Extend `helpers.py` with all new logic: rejected because this feature is a reusable calculation concern rather than a generic HA helper.
-- Store the computed window in scheduler state: rejected because the spec defines a derived sensor, not a scheduler-owned artifact.
+- Read source entity attributes directly inside each derived sensor: rejected because it duplicates access logic and weakens the shared-state architecture.
+- Drive both sensors from `prices_today` with date offsets: rejected because the specification explicitly names `prices_tomorrow` for the tomorrow sensor.
+- Introduce a new config-flow source just for tomorrow data: rejected because it adds configuration burden without domain value.
 
-## Decision: Publish a dedicated translation-backed text sensor for the midday sell window.
+## Decision: Keep one shared pure calculation path that accepts day-scoped hourly sell-price data, expands each hour into four quarter-hours, and returns both the chosen window and its average price.
 
 **Rationale**
-- The specification requires a separate text sensor rather than a hidden attribute on an existing entity.
-- A first-class sensor is directly usable in dashboards and automations and fits the repo's current pattern of small, focused entities.
-- Home Assistant naming rules in this repo require `_attr_has_entity_name = True`, translation-backed naming, and stable unique IDs tied to the config entry.
-- Setting the state to `unavailable` on insufficient data is explicit, testable, and safer than keeping a stale value.
+- The business rules for both sensors are identical except for the payload key and target day, so one reusable algorithm minimizes drift and regression risk.
+- A pure function can deterministically enforce 08:00-16:00 bounds, 8 contiguous quarter-hours, earliest-start tie-breaks, and `unavailable` handling across both days.
+- Returning structured selection data, including average price, lets the entity layer remain focused on HA publishing concerns such as formatting and attribute omission.
 
 **Alternatives considered**
-- Add the window as an attribute on `SellPriceSensor`: rejected because it would not satisfy the separate-sensor requirement and would be harder to automate against.
-- Persist the last valid text value through restarts: rejected because the feature is current-day derived state and stale restoration could mislead users after price data changes.
-- Expose the window through a service response only: rejected because the spec requires a sensor entity.
+- Duplicate the selection logic in two separate sensor classes: rejected because it doubles maintenance cost and creates divergence risk.
+- Compute average price only in the entity layer: rejected because it separates one business rule from the rest of the selection result.
+- Store computed windows in scheduler state: rejected because the feature is a read-only derived sensor concern, not scheduler-owned data.
 
-## Decision: Reuse the current refresh/listener path and extend shared integration state with the hourly sell-price payload.
+## Decision: Publish two dedicated translation-backed text sensors, each with a `price` attribute when available and no `price` attribute when the sensor is `unavailable`.
 
 **Rationale**
-- The sensor platform already listens for buy/sell price entity changes and requests coordinator refreshes, so the feature can reuse the same update rhythm.
-- The current coordinator caches numeric state values only, while this feature needs raw hourly attributes that will be expanded into quarter-hours.
-- Extending shared state with the hourly `sell-price sensor` payload keeps the entity layer thin and matches the repo's centralized-read preference better than direct entity-state access inside the result sensor.
+- The specification keeps the existing current-day sensor and adds a second analogous tomorrow sensor, so separate entities are the clearest automation surface.
+- Home Assistant naming requirements in this repo favor `_attr_has_entity_name = True`, translation-backed naming, and stable unique IDs tied to the config entry.
+- Omitting `price` when the sensor is `unavailable` avoids stale or misleading numeric data and gives automations a clean contract: availability controls attribute presence.
+- Publishing the window as state and the average as an attribute satisfies the requirement to preserve the existing primary behavior while extending observability.
 
 **Alternatives considered**
-- Poll the price-series source independently in a new background loop: rejected because the integration already has coordinator and listener infrastructure.
-- Recompute only on hourly scheduler ticks: rejected because the feature should update when price data changes, not only on time-based events.
-- Read directly from the Home Assistant state object inside the result sensor: rejected because shared state is the better fit for the architecture rules of this repository.
-- Ignore attribute changes and watch only scalar states: rejected because the cheapest window is derived from the attribute payload, not the current scalar state.
+- Publish both day results as attributes on a single sensor: rejected because it weakens automation ergonomics and departs from the existing dedicated-entity pattern.
+- Publish `price` as `null` or `0.0` on `unavailable`: rejected because both values can be misread as valid data rather than absence of a valid computation.
+- Replace the existing sensor with a generic day-selector entity: rejected because the spec explicitly preserves the current sensor and adds an analogous tomorrow sensor.
 
-## Decision: Validate the feature with both pure algorithm tests and entity-level sensor tests.
+## Decision: Extend the shared-state refresh/listener path to trigger independent recalculation for both sensors whenever their source payload changes.
 
 **Rationale**
-- The constitution requires deterministic coverage for calculation-heavy logic.
-- The repo already has lightweight sensor tests in `tests/test_pricing_sensors.py` and time-window-oriented tests in dedicated test files, so extending that split keeps the suite readable.
-- The highest-risk failures are algorithmic: hourly-to-quarter-hour expansion, incomplete data handling, local-day scoping, tie-breaking, and ensuring buy-price changes never affect the result.
+- The existing integration already refreshes from price updates, so the cheapest-risk change is to reuse that path instead of introducing new loops or schedulers.
+- The specification requires that only the affected sensor changes when only one day payload changes, so the update path must keep today and tomorrow results isolated.
+- Coordinator-managed payload snapshots make it straightforward to detect day-specific recalculation inputs while keeping entity logic declarative.
 
 **Alternatives considered**
-- Rely on manual Home Assistant verification only: rejected because time-window selection is easy to regress and hard to eyeball across edge cases.
-- Cover everything only with entity setup tests: rejected because parsing and tie-breaking are better exercised as pure unit tests.
-- Skip timezone/day-boundary tests: rejected because the feature is explicitly scoped to the current local day.
+- Poll the payload source on a separate timer: rejected because the coordinator/listener infrastructure already exists.
+- Recompute both sensors only on full integration refresh: rejected because the desired behavior is keyed to payload changes for each day.
+- Update the tomorrow sensor only at midnight rollover: rejected because tomorrow pricing may arrive or change before midnight and must remain visible for planning.
+
+## Decision: Validate the feature with pure calculation tests plus entity-level tests that cover both sensors, `price`, and `unavailable` attribute omission.
+
+**Rationale**
+- The constitution requires deterministic tests for decision-heavy logic, and the expanded feature introduces additional failure modes around day separation and attribute contracts.
+- Pure tests are the best fit for quarter-hour expansion, average-price calculation, date scoping, and tie-breaking.
+- Entity tests are the best fit for translation-backed identity, state formatting, independent day updates, buy-price isolation, and omission of `price` when unavailable.
+
+**Alternatives considered**
+- Rely on manual Home Assistant checks only: rejected because the new dual-day contract is easy to regress silently.
+- Cover everything only in entity tests: rejected because pure calculation tests remain the most precise way to prove business rules.
+- Skip tests for attribute omission: rejected because the updated clarification explicitly makes attribute presence part of the contract.
