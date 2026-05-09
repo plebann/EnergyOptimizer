@@ -161,7 +161,10 @@ def test_midday_sell_window_sensor_ignores_buy_price_only_changes(monkeypatch: p
         CONF_SELL_PRICE_SENSOR: "sensor.sell",
         CONF_BUY_PRICE_SENSOR: "sensor.buy",
     }
-    coordinator = _coordinator_with_prices(_payload(low_start_hour=10), "sensor.sell")
+    coordinator = _coordinator_with_prices(
+        prices_today=_payload(low_start_hour=10),
+        sell_entity="sensor.sell",
+    )
     coordinator.data["states"]["sensor.buy"] = 0.25
 
     sensor = MiddaySellWindowSensor(coordinator, _mock_entry(), config)
