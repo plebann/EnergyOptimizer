@@ -34,7 +34,6 @@
             "approve": true,
             "matchCommandLine": true
         }
-    },
-    "python.defaultInterpreterPath": "C:/Users/mpleb/AppData/Local/Programs/Python/Python312/python.exe"
+    }
 }
 
