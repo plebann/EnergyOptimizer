@@ -89,6 +89,11 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
     _payload_key: str
     _day_offset: int = 0
 
+    def __init__(self, coordinator, config_entry, config) -> None:
+        """Initialize the sensor with the current coordinator snapshot."""
+        super().__init__(coordinator, config_entry, config)
+        self._apply_result(self._get_result())
+
     def _get_result(self):
         """Return the selected midday sell window result for this sensor variant."""
         entity_id = self.config.get(CONF_SELL_PRICE_SENSOR)
@@ -125,11 +130,13 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
     @property
     def native_value(self) -> str | None:
         """Return the cheapest midday sell-price window as HH:MM-HH:MM, or None."""
+        self._apply_result(self._get_result())
         return getattr(self, "_attr_native_value", None)
 
     @property
     def extra_state_attributes(self) -> dict[str, float]:
         """Return the rounded average price when a valid window exists."""
+        self._apply_result(self._get_result())
         return getattr(self, "_attr_extra_state_attributes", {})
 
     def _handle_coordinator_update(self) -> None:

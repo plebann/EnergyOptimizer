@@ -11,6 +11,7 @@ from custom_components.energy_optimizer.const import (
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_SELL_PRICE_SENSOR,
 )
+from custom_components.energy_optimizer.coordinator import EnergyOptimizerCoordinator
 from custom_components.energy_optimizer.entities.sensors.pricing import (
     BuyPriceSensor,
     MiddaySellWindowSensor,
@@ -304,4 +305,39 @@ def test_midday_sell_window_tomorrow_sensor_has_translation_key_and_prefixed_uni
 
     assert sensor.translation_key == "midday_sell_window_tomorrow"
     assert sensor.unique_id == "entry-1_midday_sell_window_tomorrow"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_copies_price_payloads_to_avoid_in_place_source_mutation() -> None:
+    prices_today = _payload(low_start_hour=10)
+    prices_tomorrow = _payload_for_day(9, low_start_hour=11)
+
+    state = MagicMock()
+    state.state = "1.0"
+    state.attributes = {
+        "prices_today": prices_today,
+        "prices_tomorrow": prices_tomorrow,
+    }
+
+    hass = MagicMock()
+    hass.states.get.return_value = state
+
+    entry = _mock_entry()
+    entry.data = {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
+
+    coordinator = EnergyOptimizerCoordinator(hass, entry)
+    data = await coordinator._async_update_data()
+
+    snapshot_today = data["price_payloads"]["sensor.sell"]["prices_today"]
+    snapshot_tomorrow = data["price_payloads"]["sensor.sell"]["prices_tomorrow"]
+
+    assert snapshot_today == prices_today
+    assert snapshot_tomorrow == prices_tomorrow
+    assert snapshot_today is not prices_today
+    assert snapshot_tomorrow is not prices_tomorrow
+
+    prices_tomorrow.clear()
+
+    assert snapshot_tomorrow != prices_tomorrow
+    assert snapshot_tomorrow
 

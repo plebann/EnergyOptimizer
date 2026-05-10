@@ -1,6 +1,7 @@
 """DataUpdateCoordinator for Energy Optimizer integration."""
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import timedelta
 import logging
 from typing import Any
@@ -94,9 +95,9 @@ class EnergyOptimizerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 payload: dict[str, Any] = {}
                 if isinstance(prices_today, list):
-                    payload["prices_today"] = prices_today
+                    payload["prices_today"] = deepcopy(prices_today)
                 if isinstance(prices_tomorrow, list):
-                    payload["prices_tomorrow"] = prices_tomorrow
+                    payload["prices_tomorrow"] = deepcopy(prices_tomorrow)
 
                 if payload:
                     data["price_payloads"][sell_price_entity_id] = payload
