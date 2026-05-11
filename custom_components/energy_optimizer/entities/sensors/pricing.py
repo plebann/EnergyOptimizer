@@ -175,6 +175,7 @@ class _RankedSellWindowBaseSensor(EnergyOptimizerSensor):
     def __init__(self, coordinator, config_entry, config) -> None:
         """Initialize the sensor with the current coordinator snapshot."""
         super().__init__(coordinator, config_entry, config)
+        self._attr_available = False
         self._apply_result(self._get_result())
 
     def _get_result(self):
