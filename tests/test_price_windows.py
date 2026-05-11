@@ -10,6 +10,7 @@ from custom_components.energy_optimizer.calculations.price_windows import (
     MiddaySellWindowResult,
     QuarterHourPricePoint,
     build_midday_sell_window_result,
+    build_ranked_sell_window_result,
     expand_hourly_sell_prices,
     format_sell_window,
     select_midday_window,
@@ -212,3 +213,166 @@ def test_format_sell_window_uses_hhmm_hhmm_format() -> None:
     )
 
     assert format_sell_window(result) == "12:00-14:00"
+
+
+@pytest.mark.unit
+def test_build_ranked_sell_window_result_selects_best_and_second_best_for_today_morning() -> None:
+    result = build_ranked_sell_window_result(
+        [
+            _hourly_entry(4, 0.40),
+            _hourly_entry(5, 0.85),
+            _hourly_entry(6, 0.72),
+            _hourly_entry(7, 0.91),
+            _hourly_entry(8, 0.55),
+            _hourly_entry(9, 0.60),
+            _hourly_entry(10, 0.99),
+        ],
+        ENTITY_ID,
+        range_start_hour=4,
+        range_end_hour=10,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.best_start_local == datetime(2026, 5, 8, 7, 0, tzinfo=TZ)
+    assert result.best_price == pytest.approx(0.91)
+    assert result.second_best_start_local == datetime(2026, 5, 8, 5, 0, tzinfo=TZ)
+    assert result.second_best_price == pytest.approx(0.85)
+    assert result.second_window_gap_pct == pytest.approx(6.6)
+
+
+@pytest.mark.unit
+def test_build_ranked_sell_window_result_breaks_ties_by_earliest_start() -> None:
+    result = build_ranked_sell_window_result(
+        [
+            _hourly_entry(4, 0.20),
+            _hourly_entry(5, 0.90),
+            _hourly_entry(6, 0.90),
+            _hourly_entry(7, 0.80),
+            _hourly_entry(8, 0.70),
+            _hourly_entry(9, 0.60),
+        ],
+        ENTITY_ID,
+        range_start_hour=4,
+        range_end_hour=10,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.best_start_local == datetime(2026, 5, 8, 5, 0, tzinfo=TZ)
+    assert result.second_best_start_local == datetime(2026, 5, 8, 6, 0, tzinfo=TZ)
+
+
+@pytest.mark.unit
+def test_build_ranked_sell_window_result_requires_full_hour_candidates() -> None:
+    result = build_ranked_sell_window_result(
+        [
+            _hourly_entry(4, 0.50),
+            {"time": datetime(2026, 5, 8, 5, 30, tzinfo=TZ).isoformat(), "price": 0.95},
+            _hourly_entry(6, 0.70),
+        ],
+        ENTITY_ID,
+        range_start_hour=4,
+        range_end_hour=10,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.best_start_local == datetime(2026, 5, 8, 6, 0, tzinfo=TZ)
+    assert result.second_best_start_local == datetime(2026, 5, 8, 4, 0, tzinfo=TZ)
+
+
+@pytest.mark.unit
+def test_build_ranked_sell_window_result_ignores_out_of_range_hours() -> None:
+    result = build_ranked_sell_window_result(
+        [
+            _hourly_entry(3, 1.20),
+            _hourly_entry(4, 0.50),
+            _hourly_entry(5, 0.70),
+            _hourly_entry(10, 1.10),
+            _hourly_entry(11, 0.95),
+        ],
+        ENTITY_ID,
+        range_start_hour=4,
+        range_end_hour=10,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.best_start_local == datetime(2026, 5, 8, 5, 0, tzinfo=TZ)
+    assert result.second_best_start_local == datetime(2026, 5, 8, 4, 0, tzinfo=TZ)
+
+
+@pytest.mark.unit
+def test_build_ranked_sell_window_result_returns_none_when_fewer_than_two_valid_candidates() -> None:
+    result = build_ranked_sell_window_result(
+        [_hourly_entry(5, 0.80)],
+        ENTITY_ID,
+        range_start_hour=4,
+        range_end_hour=10,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is None
+
+
+@pytest.mark.unit
+def test_build_ranked_sell_window_result_omits_gap_when_best_price_is_zero() -> None:
+    result = build_ranked_sell_window_result(
+        [
+            _hourly_entry(4, 0.0),
+            _hourly_entry(5, -0.1),
+            _hourly_entry(6, -0.2),
+        ],
+        ENTITY_ID,
+        range_start_hour=4,
+        range_end_hour=10,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.best_price == pytest.approx(0.0)
+    assert result.second_best_price == pytest.approx(-0.1)
+    assert result.second_window_gap_pct is None
+
+
+@pytest.mark.unit
+def test_build_ranked_sell_window_result_isolates_requested_day() -> None:
+    result = build_ranked_sell_window_result(
+        [
+            _hourly_entry(4, 0.50),
+            _hourly_entry(5, 0.70),
+            _hourly_entry(4, 1.20, day=TOMORROW),
+            _hourly_entry(5, 1.10, day=TOMORROW),
+        ],
+        ENTITY_ID,
+        range_start_hour=4,
+        range_end_hour=10,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.best_start_local.date() == TODAY
+    assert result.second_best_start_local.date() == TODAY
+
+
+@pytest.mark.unit
+def test_build_ranked_sell_window_result_selects_tomorrow_candidates_when_evaluating_tomorrow() -> None:
+    result = build_ranked_sell_window_result(
+        [
+            _hourly_entry(4, 0.50),
+            _hourly_entry(5, 0.70),
+            _hourly_entry(16, 0.20, day=TOMORROW),
+            _hourly_entry(17, 0.95, day=TOMORROW),
+            _hourly_entry(18, 0.82, day=TOMORROW),
+            _hourly_entry(19, 0.88, day=TOMORROW),
+        ],
+        ENTITY_ID,
+        range_start_hour=16,
+        range_end_hour=22,
+        now_local=datetime(2026, 5, 9, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.best_start_local == datetime(2026, 5, 9, 17, 0, tzinfo=TZ)
+    assert result.second_best_start_local == datetime(2026, 5, 9, 19, 0, tzinfo=TZ)
