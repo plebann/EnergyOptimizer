@@ -227,7 +227,7 @@ class _RankedSellWindowBaseSensor(EnergyOptimizerSensor):
 
     @property
     def available(self) -> bool:
-        """Return True only when the coordinator and ranked result are available."""
+        """Return True only when the coordinator and ranked sell-window result are available."""
         return super().available and self._attr_available
 
     @property
