@@ -40,7 +40,7 @@ class MiddaySellWindowResult:
     slot_count: int = field(default=WINDOW_SLOTS)
 
 
-@dataclass(eq=False)
+@dataclass
 class RankedSellWindowResult:
     """Result of selecting the best and second-best hourly sell windows."""
 
@@ -49,19 +49,6 @@ class RankedSellWindowResult:
     second_best_start_local: datetime
     second_best_price: float
     second_window_gap_pct: float | None
-
-    def __eq__(self, other: object) -> bool:
-        """Compare results while allowing pytest.approx-style expected values."""
-        if not isinstance(other, RankedSellWindowResult):
-            return NotImplemented
-
-        return (
-            other.best_start_local == self.best_start_local
-            and other.best_price == self.best_price
-            and other.second_best_start_local == self.second_best_start_local
-            and other.second_best_price == self.second_best_price
-            and other.second_window_gap_pct == self.second_window_gap_pct
-        )
 
 
 @dataclass

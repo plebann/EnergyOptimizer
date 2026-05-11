@@ -9,7 +9,6 @@ from custom_components.energy_optimizer.calculations.price_windows import (
     WINDOW_SLOTS,
     MiddaySellWindowResult,
     QuarterHourPricePoint,
-    RankedSellWindowResult,
     build_midday_sell_window_result,
     build_ranked_sell_window_result,
     expand_hourly_sell_prices,
@@ -234,13 +233,12 @@ def test_build_ranked_sell_window_result_selects_best_and_second_best_for_today_
         now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
     )
 
-    assert result == RankedSellWindowResult(
-        best_start_local=datetime(2026, 5, 8, 7, 0, tzinfo=TZ),
-        best_price=pytest.approx(0.91),
-        second_best_start_local=datetime(2026, 5, 8, 5, 0, tzinfo=TZ),
-        second_best_price=pytest.approx(0.85),
-        second_window_gap_pct=pytest.approx(6.6),
-    )
+    assert result is not None
+    assert result.best_start_local == datetime(2026, 5, 8, 7, 0, tzinfo=TZ)
+    assert result.best_price == pytest.approx(0.91)
+    assert result.second_best_start_local == datetime(2026, 5, 8, 5, 0, tzinfo=TZ)
+    assert result.second_best_price == pytest.approx(0.85)
+    assert result.second_window_gap_pct == pytest.approx(6.6)
 
 
 @pytest.mark.unit
