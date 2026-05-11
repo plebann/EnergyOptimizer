@@ -207,10 +207,12 @@ class _RankedSellWindowBaseSensor(EnergyOptimizerSensor):
     def _apply_result(self, result) -> None:
         """Update cached state and attributes from a computed ranking result."""
         if result is None:
+            self._attr_available = False
             self._attr_native_value = None
             self._attr_extra_state_attributes = {}
             return
 
+        self._attr_available = True
         attributes: dict[str, object] = {
             "price": round(result.best_price, 3),
             "second_window_start": result.second_best_start_local.strftime("%H:%M"),
@@ -221,6 +223,11 @@ class _RankedSellWindowBaseSensor(EnergyOptimizerSensor):
 
         self._attr_native_value = result.best_start_local.strftime("%H:%M")
         self._attr_extra_state_attributes = attributes
+
+    @property
+    def available(self) -> bool:
+        """Return False when the ranked result is unavailable."""
+        return super().available and getattr(self, "_attr_available", False)
 
     @property
     def native_value(self) -> str | None:

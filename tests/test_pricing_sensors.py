@@ -483,6 +483,7 @@ def test_evening_sell_window_sensor_unavailable_when_fewer_than_two_valid_candid
     sensor = _evening_sensor(_ranked_payload_for_hours(8, {17: 0.95}))
 
     assert sensor.native_value is None
+    assert sensor.available is False
     assert sensor.extra_state_attributes == {}
 
 
@@ -580,4 +581,3 @@ async def test_coordinator_copies_price_payloads_to_avoid_in_place_source_mutati
 
     assert snapshot_tomorrow != prices_tomorrow
     assert snapshot_tomorrow
-
