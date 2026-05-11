@@ -40,6 +40,41 @@ class MiddaySellWindowResult:
     slot_count: int = field(default=WINDOW_SLOTS)
 
 
+@dataclass(eq=False)
+class RankedSellWindowResult:
+    """Result of selecting the best and second-best hourly sell windows."""
+
+    best_start_local: datetime
+    best_price: float
+    second_best_start_local: datetime
+    second_best_price: float
+    second_window_gap_pct: float | None
+
+    def __eq__(self, other: object) -> bool:
+        """Compare results while allowing pytest.approx-style expected values."""
+        if not isinstance(other, RankedSellWindowResult):
+            return NotImplemented
+
+        return (
+            other.best_start_local == self.best_start_local
+            and other.best_price == self.best_price
+            and other.second_best_start_local == self.second_best_start_local
+            and other.second_best_price == self.second_best_price
+            and other.second_window_gap_pct == self.second_window_gap_pct
+        )
+
+
+@dataclass
+class HourlySellPriceCandidate:
+    """Normalized one-hour candidate used by ranked sell-window selection."""
+
+    start_local: datetime
+    end_local: datetime
+    business_date: date
+    sell_price_value: float
+    source_entity_id: str
+
+
 def _parse_entry_time(raw_time: Any, local_tz: tzinfo) -> datetime | None:
     """Parse one hourly source timestamp into local time."""
     if isinstance(raw_time, datetime):
@@ -56,6 +91,110 @@ def _parse_entry_time(raw_time: Any, local_tz: tzinfo) -> datetime | None:
         return parsed.replace(tzinfo=local_tz)
 
     return parsed.astimezone(local_tz)
+
+
+def _extract_ranked_hourly_candidates(
+    prices: list[dict[str, Any]],
+    entity_id: str,
+    current_day: date,
+    local_tz: tzinfo,
+    range_start_hour: int,
+    range_end_hour: int,
+) -> list[HourlySellPriceCandidate]:
+    """Extract one-hour ranked candidates fully inside the requested range."""
+    candidates_by_start: dict[datetime, HourlySellPriceCandidate] = {}
+
+    for entry in prices:
+        if not isinstance(entry, dict):
+            _LOGGER.debug("Skipping non-dict ranked sell-price entry: %s", entry)
+            continue
+
+        raw_time = entry.get("time")
+        raw_price = entry.get("price")
+        if raw_time is None or raw_price is None:
+            continue
+
+        start_local = _parse_entry_time(raw_time, local_tz)
+        if start_local is None or start_local.date() != current_day:
+            continue
+
+        if (
+            start_local.minute != 0
+            or start_local.second != 0
+            or start_local.microsecond != 0
+        ):
+            continue
+
+        end_local = start_local + HOUR_DURATION
+        if start_local.hour < range_start_hour or end_local.hour > range_end_hour:
+            continue
+
+        try:
+            sell_price = float(raw_price)
+        except (TypeError, ValueError):
+            _LOGGER.debug("Skipping invalid ranked sell-price entry: %s", entry)
+            continue
+
+        candidate = HourlySellPriceCandidate(
+            start_local=start_local,
+            end_local=end_local,
+            business_date=current_day,
+            sell_price_value=sell_price,
+            source_entity_id=entity_id,
+        )
+        existing = candidates_by_start.get(start_local)
+        if existing is None or candidate.sell_price_value > existing.sell_price_value:
+            candidates_by_start[start_local] = candidate
+
+    return sorted(candidates_by_start.values(), key=lambda candidate: candidate.start_local)
+
+
+def build_ranked_sell_window_result(
+    prices: list[dict[str, Any]],
+    entity_id: str,
+    *,
+    range_start_hour: int,
+    range_end_hour: int,
+    now_local: datetime | None = None,
+) -> RankedSellWindowResult | None:
+    """Build the best and second-best one-hour sell windows for one day/range."""
+    reference_now = now_local or dt_util.now()
+    if reference_now.tzinfo is None:
+        reference_now = reference_now.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+
+    candidates = _extract_ranked_hourly_candidates(
+        prices,
+        entity_id,
+        reference_now.date(),
+        reference_now.tzinfo,
+        range_start_hour,
+        range_end_hour,
+    )
+    if len(candidates) < 2:
+        return None
+
+    ranked = sorted(
+        candidates,
+        key=lambda candidate: (-candidate.sell_price_value, candidate.start_local),
+    )
+    best = ranked[0]
+    second_best = ranked[1]
+
+    second_window_gap_pct: float | None = None
+    if best.sell_price_value != 0:
+        second_window_gap_pct = round(
+            ((best.sell_price_value - second_best.sell_price_value) / best.sell_price_value)
+            * 100,
+            1,
+        )
+
+    return RankedSellWindowResult(
+        best_start_local=best.start_local,
+        best_price=best.sell_price_value,
+        second_best_start_local=second_best.start_local,
+        second_best_price=second_best.sell_price_value,
+        second_window_gap_pct=second_window_gap_pct,
+    )
 
 
 def expand_hourly_sell_prices(

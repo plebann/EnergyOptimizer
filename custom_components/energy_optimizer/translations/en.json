@@ -278,6 +278,18 @@
       "min_arbitrage_margin": {
         "name": "Minimum arbitrage margin"
       },
+      "morning_sell_window": {
+        "name": "Morning sell window"
+      },
+      "evening_sell_window": {
+        "name": "Evening sell window"
+      },
+      "morning_sell_window_tomorrow": {
+        "name": "Morning sell window tomorrow"
+      },
+      "evening_sell_window_tomorrow": {
+        "name": "Evening sell window tomorrow"
+      },
       "midday_sell_window": {
         "name": "Midday sell window"
       },
