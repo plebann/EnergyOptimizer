@@ -213,6 +213,6 @@ mypy custom_components/energy_optimizer
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/003-sell-window-sensors/plan.md` (active feature directory is
+at `specs/004-buy-window-sensors/plan.md` (active feature directory is
 pinned in `.specify/feature.json`).
 <!-- SPECKIT END -->

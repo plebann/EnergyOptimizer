@@ -52,6 +52,26 @@ class RankedSellWindowResult:
 
 
 @dataclass
+class HourlyBuyPriceEntry:
+    """Normalized one-hour buy-price entry used for two-hour window selection."""
+
+    start_local: datetime
+    end_local: datetime
+    business_date: date
+    buy_price_value: float
+    source_entity_id: str
+
+
+@dataclass
+class BuyWindowResult:
+    """Result of selecting the best two-hour buy window for one day/range."""
+
+    start_local: datetime
+    end_local: datetime
+    average_price: float
+
+
+@dataclass
 class HourlySellPriceCandidate:
     """Normalized one-hour candidate used by ranked sell-window selection."""
 
@@ -140,6 +160,145 @@ def _extract_ranked_hourly_candidates(
         candidates_by_start[start_local] = candidate
 
     return sorted(candidates_by_start.values(), key=lambda candidate: candidate.start_local)
+
+
+def _extract_buy_hourly_entries(
+    prices: list[dict[str, Any]],
+    entity_id: str,
+    current_day: date,
+    local_tz: tzinfo,
+) -> list[HourlyBuyPriceEntry]:
+    """Extract normalized one-hour buy-price entries for one evaluated day."""
+    entries_by_start: dict[datetime, HourlyBuyPriceEntry] = {}
+
+    for entry in prices:
+        if not isinstance(entry, dict):
+            _LOGGER.debug("Skipping non-dict buy-price entry: %s", entry)
+            continue
+
+        raw_time = entry.get("time")
+        raw_price = entry.get("price")
+        if raw_time is None or raw_price is None:
+            continue
+
+        start_local = _parse_entry_time(raw_time, local_tz)
+        if start_local is None or start_local.date() != current_day:
+            continue
+
+        if (
+            start_local.minute != 0
+            or start_local.second != 0
+            or start_local.microsecond != 0
+        ):
+            continue
+
+        try:
+            buy_price = float(raw_price)
+        except (TypeError, ValueError):
+            _LOGGER.debug("Skipping invalid buy-price entry: %s", entry)
+            continue
+
+        if start_local in entries_by_start:
+            _LOGGER.debug(
+                "Duplicate buy-price entry detected for %s at %s",
+                entity_id,
+                start_local,
+            )
+            return []
+
+        entries_by_start[start_local] = HourlyBuyPriceEntry(
+            start_local=start_local,
+            end_local=start_local + HOUR_DURATION,
+            business_date=current_day,
+            buy_price_value=buy_price,
+            source_entity_id=entity_id,
+        )
+
+    return sorted(entries_by_start.values(), key=lambda entry: entry.start_local)
+
+
+def build_best_buy_window_result(
+    prices: list[dict[str, Any]],
+    entity_id: str,
+    *,
+    range_key: str,
+    range_start_hour: int,
+    range_end_hour: int,
+    now_local: datetime | None = None,
+) -> BuyWindowResult | None:
+    """Build the best two-hour buy window for one day/range."""
+    reference_now = now_local or dt_util.now()
+    if reference_now.tzinfo is None:
+        reference_now = reference_now.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+
+    entries = _extract_buy_hourly_entries(
+        prices,
+        entity_id,
+        reference_now.date(),
+        reference_now.tzinfo,
+    )
+    if len(entries) < 2:
+        return None
+
+    entries_by_start = {entry.start_local: entry for entry in entries}
+    candidates: list[BuyWindowResult] = []
+    for entry in entries:
+        if entry.start_local.hour < range_start_hour:
+            continue
+
+        second_entry = entries_by_start.get(entry.start_local + HOUR_DURATION)
+        if second_entry is None:
+            continue
+
+        end_local = second_entry.end_local
+        if end_local.hour > range_end_hour:
+            continue
+
+        candidates.append(
+            BuyWindowResult(
+                start_local=entry.start_local,
+                end_local=end_local,
+                average_price=(
+                    entry.buy_price_value + second_entry.buy_price_value
+                )
+                / 2,
+            )
+        )
+
+    if not candidates:
+        return None
+
+    if range_key == "night":
+        range_anchor = datetime.combine(
+            reference_now.date(),
+            time(range_end_hour, 0),
+            tzinfo=reference_now.tzinfo,
+        )
+        return min(
+            candidates,
+            key=lambda candidate: (
+                candidate.average_price,
+                abs((range_anchor - candidate.end_local).total_seconds()),
+                -candidate.end_local.timestamp(),
+            ),
+        )
+
+    if range_key == "day":
+        range_anchor = datetime.combine(
+            reference_now.date(),
+            time(13, 0),
+            tzinfo=reference_now.tzinfo,
+        )
+        return min(
+            candidates,
+            key=lambda candidate: (
+                candidate.average_price,
+                abs((candidate.start_local - range_anchor).total_seconds()),
+                candidate.start_local,
+            ),
+        )
+
+    raise ValueError(f"Unsupported buy-window range key: {range_key}")
 
 
 def build_ranked_sell_window_result(
