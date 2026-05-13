@@ -185,7 +185,7 @@ class DayBuyWindowSensor(_BuyWindowBaseSensor):
     _payload_key = "prices_today"
     _range_key = "day"
     _range_start_hour = 10
-    _range_end_hour = 16
+    _range_end_hour = 18
 
 
 class NightBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
@@ -208,7 +208,7 @@ class DayBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
     _payload_key = "prices_tomorrow"
     _range_key = "day"
     _range_start_hour = 10
-    _range_end_hour = 16
+    _range_end_hour = 18
     _day_offset = 1
 
 

@@ -894,6 +894,50 @@ def test_buy_window_sensors_have_translation_keys_and_prefixed_unique_ids() -> N
 
 
 @pytest.mark.unit
+def test_day_buy_window_sensor_publishes_expected_result_for_real_may_13_prices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 13, 12, 0, tzinfo=TZ))
+
+    sensor = _day_buy_sensor(
+        [
+            {"time": "2026-05-13T00:00:00+02:00", "price": 0.833},
+            {"time": "2026-05-13T01:00:00+02:00", "price": 0.805},
+            {"time": "2026-05-13T02:00:00+02:00", "price": 0.787},
+            {"time": "2026-05-13T03:00:00+02:00", "price": 0.792},
+            {"time": "2026-05-13T04:00:00+02:00", "price": 0.805},
+            {"time": "2026-05-13T05:00:00+02:00", "price": 0.855},
+            {"time": "2026-05-13T06:00:00+02:00", "price": 1.327},
+            {"time": "2026-05-13T07:00:00+02:00", "price": 1.348},
+            {"time": "2026-05-13T08:00:00+02:00", "price": 1.279},
+            {"time": "2026-05-13T09:00:00+02:00", "price": 1.177},
+            {"time": "2026-05-13T10:00:00+02:00", "price": 1.095},
+            {"time": "2026-05-13T11:00:00+02:00", "price": 1.065},
+            {"time": "2026-05-13T12:00:00+02:00", "price": 1.057},
+            {"time": "2026-05-13T13:00:00+02:00", "price": 1.031},
+            {"time": "2026-05-13T14:00:00+02:00", "price": 1.02},
+            {"time": "2026-05-13T15:00:00+02:00", "price": 0.67},
+            {"time": "2026-05-13T16:00:00+02:00", "price": 0.758},
+            {"time": "2026-05-13T17:00:00+02:00", "price": 1.238},
+            {"time": "2026-05-13T18:00:00+02:00", "price": 1.344},
+            {"time": "2026-05-13T19:00:00+02:00", "price": 1.426},
+            {"time": "2026-05-13T20:00:00+02:00", "price": 1.475},
+            {"time": "2026-05-13T21:00:00+02:00", "price": 1.428},
+            {"time": "2026-05-13T22:00:00+02:00", "price": 0.938},
+            {"time": "2026-05-13T23:00:00+02:00", "price": 0.884},
+        ]
+    )
+
+    assert sensor.native_value == "15:00"
+    assert sensor.extra_state_attributes == {
+        "price": 0.714,
+        "is_negative": False,
+    }
+
+
+@pytest.mark.unit
 def test_existing_sell_window_sensor_behavior_is_unchanged_when_buy_payload_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

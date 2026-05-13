@@ -40,7 +40,7 @@ The payloads are consumed from coordinator-managed shared state rather than by d
 |----------|-------------|-----------|----------------|--------------|
 | Entity domain | `sensor` | `sensor` | `sensor` | `sensor` |
 | Translation key | `night_buy_window` | `day_buy_window` | `night_buy_window_tomorrow` | `day_buy_window_tomorrow` |
-| Evaluated range | `00:00-06:00` | `10:00-16:00` | `00:00-06:00` | `10:00-16:00` |
+| Evaluated range | `00:00-06:00` | `10:00-18:00` | `00:00-06:00` | `10:00-18:00` |
 | State when available | `HH:MM` best start | `HH:MM` best start | `HH:MM` best start | `HH:MM` best start |
 | `price` when available | Rounded float average price, 3 decimals | Rounded float average price, 3 decimals | Rounded float average price, 3 decimals | Rounded float average price, 3 decimals |
 | `is_negative` when available | Boolean derived from average price < 0 | Boolean derived from average price < 0 | Boolean derived from average price < 0 | Boolean derived from average price < 0 |

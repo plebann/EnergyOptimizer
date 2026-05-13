@@ -63,7 +63,7 @@
 - `end_local` must equal `start_local + 2 hours`.
 - The second hourly entry must begin exactly one hour after the first.
 - Night candidates must satisfy `00:00 <= start_local < 06:00` and `end_local <= 06:00`.
-- Day candidates must satisfy `10:00 <= start_local < 16:00` and `end_local <= 16:00`.
+- Day candidates must satisfy `10:00 <= start_local < 18:00` and `end_local <= 18:00`.
 - `average_buy_price` must equal the arithmetic mean of the two hourly prices.
 
 **Relationships**

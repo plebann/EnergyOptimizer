@@ -487,7 +487,7 @@ def test_build_best_buy_window_result_selects_today_day_window() -> None:
         ENTITY_ID,
         range_key="day",
         range_start_hour=10,
-        range_end_hour=16,
+        range_end_hour=18,
         now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
     )
 
@@ -538,7 +538,7 @@ def test_build_best_buy_window_result_breaks_day_ties_by_closest_to_thirteen_the
         ENTITY_ID,
         range_key="day",
         range_start_hour=10,
-        range_end_hour=16,
+        range_end_hour=18,
         now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
     )
 
@@ -582,7 +582,7 @@ def test_build_best_buy_window_result_selects_tomorrow_when_evaluating_tomorrow(
         ENTITY_ID,
         range_key="day",
         range_start_hour=10,
-        range_end_hour=16,
+        range_end_hour=18,
         now_local=datetime(2026, 5, 9, 12, 0, tzinfo=TZ),
     )
 
@@ -621,7 +621,7 @@ def test_build_best_buy_window_result_returns_none_for_duplicate_hour_entries() 
         ENTITY_ID,
         range_key="day",
         range_start_hour=10,
-        range_end_hour=16,
+        range_end_hour=18,
         now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
     )
 
@@ -642,7 +642,7 @@ def test_build_best_buy_window_result_preserves_negative_average() -> None:
         ENTITY_ID,
         range_key="day",
         range_start_hour=10,
-        range_end_hour=16,
+        range_end_hour=18,
         now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
     )
 
@@ -665,10 +665,52 @@ def test_build_best_buy_window_result_keeps_zero_average_available() -> None:
         ENTITY_ID,
         range_key="day",
         range_start_hour=10,
-        range_end_hour=16,
+        range_end_hour=18,
         now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
     )
 
     assert result is not None
     assert result.start_local == datetime(2026, 5, 8, 10, 0, tzinfo=TZ)
     assert result.average_price == pytest.approx(0.0)
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_selects_expected_day_window_for_real_may_13_prices() -> None:
+    result = build_best_buy_window_result(
+        [
+            {"time": "2026-05-13T00:00:00+02:00", "price": 0.833},
+            {"time": "2026-05-13T01:00:00+02:00", "price": 0.805},
+            {"time": "2026-05-13T02:00:00+02:00", "price": 0.787},
+            {"time": "2026-05-13T03:00:00+02:00", "price": 0.792},
+            {"time": "2026-05-13T04:00:00+02:00", "price": 0.805},
+            {"time": "2026-05-13T05:00:00+02:00", "price": 0.855},
+            {"time": "2026-05-13T06:00:00+02:00", "price": 1.327},
+            {"time": "2026-05-13T07:00:00+02:00", "price": 1.348},
+            {"time": "2026-05-13T08:00:00+02:00", "price": 1.279},
+            {"time": "2026-05-13T09:00:00+02:00", "price": 1.177},
+            {"time": "2026-05-13T10:00:00+02:00", "price": 1.095},
+            {"time": "2026-05-13T11:00:00+02:00", "price": 1.065},
+            {"time": "2026-05-13T12:00:00+02:00", "price": 1.057},
+            {"time": "2026-05-13T13:00:00+02:00", "price": 1.031},
+            {"time": "2026-05-13T14:00:00+02:00", "price": 1.02},
+            {"time": "2026-05-13T15:00:00+02:00", "price": 0.67},
+            {"time": "2026-05-13T16:00:00+02:00", "price": 0.758},
+            {"time": "2026-05-13T17:00:00+02:00", "price": 1.238},
+            {"time": "2026-05-13T18:00:00+02:00", "price": 1.344},
+            {"time": "2026-05-13T19:00:00+02:00", "price": 1.426},
+            {"time": "2026-05-13T20:00:00+02:00", "price": 1.475},
+            {"time": "2026-05-13T21:00:00+02:00", "price": 1.428},
+            {"time": "2026-05-13T22:00:00+02:00", "price": 0.938},
+            {"time": "2026-05-13T23:00:00+02:00", "price": 0.884},
+        ],
+        ENTITY_ID,
+        range_key="day",
+        range_start_hour=10,
+        range_end_hour=18,
+        now_local=datetime(2026, 5, 13, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.start_local == datetime(2026, 5, 13, 15, 0, tzinfo=TZ)
+    assert result.end_local == datetime(2026, 5, 13, 17, 0, tzinfo=TZ)
+    assert result.average_price == pytest.approx(0.714)
