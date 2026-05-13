@@ -9,50 +9,52 @@
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-**Purpose**: Prepare the shared file surfaces and test scaffolding used by all stories.
+**Purpose**: Prepare shared test and translation surfaces used by all stories.
 
-- [x] T001 Prepare ranked sell-window fixture helpers in `tests/test_price_windows.py`
-- [x] T002 [P] Prepare ranked pricing sensor fixture helpers in `tests/test_pricing_sensors.py`
-- [x] T003 [P] Preserve existing midday translation strings while adding placeholder ranked sell-window keys in `custom_components/energy_optimizer/translations/en.json`
+- [X] T001 Prepare ranked sell-window fixture helpers in `tests/test_price_windows.py`
+- [X] T002 [P] Prepare ranked pricing sensor fixture helpers in `tests/test_pricing_sensors.py`
+- [X] T003 [P] Add placeholder translation keys for ranked sell-window sensors in `custom_components/energy_optimizer/translations/en.json`
 
 ---
 
 ## Phase 2: Foundational (Blocking Prerequisites)
 
-**Purpose**: Build the shared ranking and entity plumbing required before any specific story can be completed.
+**Purpose**: Build the shared ranking and entity plumbing required before any user story can be implemented.
 
 **⚠️ CRITICAL**: No user story work should begin until this phase is complete.
 
-- [x] T004 Refactor hourly sell-price parsing, full-hour filtering, range constants, and ranking result types in `custom_components/energy_optimizer/calculations/price_windows.py`
-- [x] T005 Implement shared ranked sell-window sensor base behavior in `custom_components/energy_optimizer/entities/sensors/pricing.py`
-- [x] T006 [P] Preserve coexistence of existing midday sensor exports while preparing ranked pricing sensor exports in `custom_components/energy_optimizer/entities/sensors/__init__.py`
-- [x] T007 [P] Preserve coexistence of existing midday sensor registration while preparing ranked pricing sensor registration slots in `custom_components/energy_optimizer/sensor.py`
+- [X] T004 Refactor hourly sell-price parsing, `prices_today`/`prices_tomorrow` payload selection, range constants, and ranking result types in `custom_components/energy_optimizer/calculations/price_windows.py`
+- [X] T005 Implement full-hour candidate filtering, out-of-range record exclusion, and day/range slice helper behavior in `custom_components/energy_optimizer/calculations/price_windows.py`
+- [X] T006 Implement shared ranked sell-window sensor base behavior in `custom_components/energy_optimizer/entities/sensors/pricing.py`
+- [X] T007 [P] Export ranked sell-window sensor classes alongside existing midday sensors in `custom_components/energy_optimizer/entities/sensors/__init__.py`
+- [X] T008 [P] Prepare ranked sell-window sensor registration slots without removing existing sensors in `custom_components/energy_optimizer/sensor.py`
+- [X] T009 Define translation-backed sensor identity using `translation_key` and config-entry-scoped `unique_id` values for ranked sell-window sensors in `custom_components/energy_optimizer/entities/sensors/pricing.py`
 
-**Checkpoint**: Foundation ready - story implementation can proceed.
+**Checkpoint**: Foundation ready - user story implementation can now begin.
 
 ---
 
 ## Phase 3: User Story 1 - Dzisiejsze okna sprzedazy (Priority: P1) 🎯 MVP
 
-**Goal**: Publish today morning and today evening ranked sell-window sensors with the best window start time and runner-up comparison attributes.
+**Goal**: Publish today morning and today evening ranked sell-window sensors with the best-window start time and runner-up comparison attributes.
 
-**Independent Test**: With complete `prices_today` data, the integration publishes two sensors for today whose states are `HH:MM` and whose attributes expose `price`, `second_window_start`, `second_window_price`, and `second_window_gap_pct` with the required rounding when valid.
+**Independent Test**: With complete `prices_today` data, the integration publishes two today sensors whose states are `HH:MM` and whose attributes expose `price`, `second_window_start`, `second_window_price`, and `second_window_gap_pct` with the required rounding.
 
 ### Tests for User Story 1
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [x] T008 [P] [US1] Add today morning and evening ranking, full-hour filtering, and rounding tests in `tests/test_price_windows.py`
-- [x] T009 [P] [US1] Add today morning and evening sensor publication contract tests plus existing midday output contract regression checks in `tests/test_pricing_sensors.py`
+- [X] T010 [P] [US1] Add today morning and evening ranking, full-hour filtering, and rounding tests in `tests/test_price_windows.py`
+- [X] T011 [P] [US1] Add today morning and evening sensor publication tests, including minimal `translation_key` and config-entry-scoped `unique_id` identity checks plus one assertion that existing midday sensors remain unchanged, in `tests/test_pricing_sensors.py`
 
 ### Implementation for User Story 1
 
-- [x] T010 [US1] Implement today morning and evening candidate selection, full-hour filtering, and ranking output shaping in `custom_components/energy_optimizer/calculations/price_windows.py`
-- [x] T011 [US1] Implement today morning and evening ranked sensor entities with `second_window_*` attributes in `custom_components/energy_optimizer/entities/sensors/pricing.py`
-- [x] T012 [US1] Register today ranked sell-window sensors in `custom_components/energy_optimizer/sensor.py`
-- [x] T013 [US1] Finalize today ranked sell-window translations in `custom_components/energy_optimizer/translations/en.json`
+- [X] T012 [US1] Implement today morning and evening candidate selection and ranking output shaping in `custom_components/energy_optimizer/calculations/price_windows.py`
+- [X] T013 [US1] Implement today morning and evening ranked sensor entities with `second_window_*` attributes in `custom_components/energy_optimizer/entities/sensors/pricing.py`
+- [X] T014 [US1] Register today ranked sell-window sensors in `custom_components/energy_optimizer/sensor.py`
+- [X] T015 [US1] Finalize today ranked sell-window translations in `custom_components/energy_optimizer/translations/en.json`
 
-**Checkpoint**: User Story 1 should now expose both ranked today sensors and be independently testable.
+**Checkpoint**: User Story 1 should now expose both today ranked sensors and be independently testable.
 
 ---
 
@@ -60,39 +62,41 @@
 
 **Goal**: Publish tomorrow morning and tomorrow evening ranked sell-window sensors using only `prices_tomorrow` data.
 
-**Independent Test**: With complete `prices_tomorrow` data, the integration publishes two tomorrow sensors with the same `HH:MM` state contract and attributes `price`, `second_window_start`, `second_window_price`, and `second_window_gap_pct`, without affecting the today sensors or the existing sensor set.
+**Independent Test**: With complete `prices_tomorrow` data, the integration publishes two tomorrow sensors with the same `HH:MM` state contract and ranked attributes, without affecting today sensors or the pre-existing sensor set.
 
 ### Tests for User Story 2
 
-- [x] T014 [P] [US2] Add tomorrow day-scoping and payload-isolation ranking tests in `tests/test_price_windows.py`
-- [x] T015 [P] [US2] Add tomorrow morning and evening sensor publication isolation tests in `tests/test_pricing_sensors.py`
+- [X] T016 [P] [US2] Add tomorrow day-scoping and payload-isolation ranking tests in `tests/test_price_windows.py`
+- [X] T017 [P] [US2] Add tomorrow morning and evening sensor publication isolation tests, including minimal `translation_key` and config-entry-scoped `unique_id` identity checks plus one assertion that existing midday sensors remain unchanged, in `tests/test_pricing_sensors.py`
 
 ### Implementation for User Story 2
 
-- [x] T016 [US2] Implement tomorrow payload selection and day-offset handling in `custom_components/energy_optimizer/calculations/price_windows.py`
-- [x] T017 [US2] Implement tomorrow morning and evening ranked sensor entities in `custom_components/energy_optimizer/entities/sensors/pricing.py`
-- [x] T018 [US2] Register tomorrow ranked sell-window sensors in `custom_components/energy_optimizer/sensor.py`
-- [x] T019 [US2] Finalize tomorrow ranked sell-window translations in `custom_components/energy_optimizer/translations/en.json`
+- [X] T018 [US2] Implement tomorrow payload selection and day-offset handling in `custom_components/energy_optimizer/calculations/price_windows.py`
+- [X] T019 [US2] Implement tomorrow morning and evening ranked sensor entities in `custom_components/energy_optimizer/entities/sensors/pricing.py`
+- [X] T020 [US2] Register tomorrow ranked sell-window sensors in `custom_components/energy_optimizer/sensor.py`
+- [X] T021 [US2] Finalize tomorrow ranked sell-window translations in `custom_components/energy_optimizer/translations/en.json`
 
 **Checkpoint**: User Stories 1 and 2 should now expose four ranked sensors across both days.
 
 ---
 
-## Phase 5: User Story 3 - Przewidywalny ranking i degradacja danych (Priority: P3)
+## Phase 5: User Story 3 - Przewidywalny ranking bez regresji (Priority: P3)
 
-**Goal**: Enforce deterministic tie-breaking, strict top-two availability rules, safe attribute omission for invalid or zero-based comparisons, and no regressions in existing sensors.
+**Goal**: Enforce deterministic tie-breaking, strict top-two availability rules, invalid-data rejection, safe percentage omission for zero-valued best windows, and no regressions in existing sensors.
 
-**Independent Test**: With tied prices, missing candidates, invalid prices, or a best price of zero, the shared ranking logic and published entities still produce deterministic results and never publish misleading partial output, while existing sensors remain present and unchanged.
+**Independent Test**: With tied prices, missing candidates, invalid or duplicate hourly records, out-of-range records, or a best price of zero, the shared ranking logic and published entities still produce deterministic results, ignore irrelevant records, and never publish misleading partial output, while existing sensors remain present and unchanged.
 
 ### Tests for User Story 3
 
-- [x] T020 [P] [US3] Add tie-break, missing-runner-up, invalid-price, zero-best-price gap omission, and existing midday calculation regression tests in `tests/test_price_windows.py`
-- [x] T021 [P] [US3] Add unavailable-state, buy-price-invariance, and existing midday sensor behavior regression tests in `tests/test_pricing_sensors.py`
+- [X] T022 [P] [US3] Add tie-break, out-of-range exclusion, missing-runner-up, invalid-time, invalid-price, duplicate-hour, and zero-best-price gap omission tests in `tests/test_price_windows.py`
+- [X] T023 [P] [US3] Add slice-local unavailable-state, buy-price-invariance, existing-sensor regression, and broader sensor identity regression coverage for `translation_key` and config-entry-scoped `unique_id` in `tests/test_pricing_sensors.py`
+- [X] T024 [P] [US3] Add sensor-registration coexistence regression coverage in `tests/test_services_registration.py`
 
 ### Implementation for User Story 3
 
-- [x] T022 [US3] Enforce earliest-start tie-breaking and top-two availability rules in `custom_components/energy_optimizer/calculations/price_windows.py`
-- [x] T023 [US3] Apply unavailable-state and `second_window_gap_pct` omission behavior in `custom_components/energy_optimizer/entities/sensors/pricing.py`
+- [X] T025 [US3] Enforce earliest-start tie-breaking, duplicate/invalid record rejection, out-of-range exclusion, and top-two availability rules in `custom_components/energy_optimizer/calculations/price_windows.py`
+- [X] T026 [US3] Apply slice-local unavailable-state and `second_window_gap_pct` omission behavior in `custom_components/energy_optimizer/entities/sensors/pricing.py`
+- [X] T027 [US3] Verify existing sensor registration remains unchanged while ranked sensors are additive in `custom_components/energy_optimizer/sensor.py`
 
 **Checkpoint**: All ranked sensor variants should now behave deterministically across edge cases and coexist cleanly with the existing sensors.
 
@@ -100,9 +104,11 @@
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-**Purpose**: Final documentation and focused validation across the completed feature.
+**Purpose**: Final validation and documentation alignment across the completed feature.
 
-- [x] T024 Run quickstart validation commands for `tests/test_price_windows.py` and `tests/test_pricing_sensors.py` from `specs/003-sell-window-sensors/quickstart.md`
+- [X] T028 [P] Review `specs/003-sell-window-sensors/contracts/sell-window-sensors.md` and `specs/003-sell-window-sensors/quickstart.md` for final terminology alignment with implemented behavior
+- [X] T029 [P] Validate that feature 003 remains sell-only by confirming no buy-window logic, translation keys, entities, or tests were added in `custom_components/energy_optimizer/calculations/price_windows.py`, `custom_components/energy_optimizer/translations/en.json`, `custom_components/energy_optimizer/entities/sensors/pricing.py`, `custom_components/energy_optimizer/sensor.py`, `tests/test_price_windows.py`, and `tests/test_pricing_sensors.py`
+- [X] T030 Run focused validation from `specs/003-sell-window-sensors/quickstart.md` with `tests/test_price_windows.py`, `tests/test_pricing_sensors.py`, and `tests/test_services_registration.py`
 
 ---
 
@@ -132,12 +138,12 @@
 
 ### Parallel Opportunities
 
-- `T002` and `T003` can run in parallel after `T001` begins the shared test scaffolding.
-- `T006` and `T007` can run in parallel after `T005` defines the ranked sensor base shape.
-- `T008` and `T009` can run in parallel for User Story 1.
-- `T014` and `T015` can run in parallel for User Story 2.
-- `T020` and `T021` can run in parallel for User Story 3.
-- `T024` runs after implementation is complete and the quickstart validation commands are ready.
+- `T002` and `T003` can run in parallel after `T001` begins the shared scaffolding.
+- `T007` and `T008` can run in parallel after `T006` defines the ranked sensor base shape.
+- `T010` and `T011` can run in parallel for User Story 1.
+- `T016` and `T017` can run in parallel for User Story 2.
+- `T022`, `T023`, and `T024` can run in parallel for User Story 3.
+- `T028` and `T029` can run in parallel once implementation is complete.
 
 ---
 
@@ -146,7 +152,7 @@
 ```bash
 # Launch the today-specific tests together first
 Task: "Add today morning and evening ranking, full-hour filtering, and rounding tests in tests/test_price_windows.py"
-Task: "Add today morning and evening sensor publication contract tests plus existing midday output contract regression checks in tests/test_pricing_sensors.py"
+Task: "Add today morning and evening sensor publication tests, including minimal identity checks and one unchanged-existing-sensor assertion, in tests/test_pricing_sensors.py"
 ```
 
 ## Parallel Example: User Story 2
@@ -154,15 +160,16 @@ Task: "Add today morning and evening sensor publication contract tests plus exis
 ```bash
 # Validate tomorrow behavior and day isolation in parallel
 Task: "Add tomorrow day-scoping and payload-isolation ranking tests in tests/test_price_windows.py"
-Task: "Add tomorrow morning and evening sensor publication isolation tests in tests/test_pricing_sensors.py"
+Task: "Add tomorrow morning and evening sensor publication isolation tests, including minimal identity checks and one unchanged-existing-sensor assertion, in tests/test_pricing_sensors.py"
 ```
 
 ## Parallel Example: User Story 3
 
 ```bash
-# Harden ranking edge cases in parallel
-Task: "Add tie-break, missing-runner-up, invalid-price, zero-best-price gap omission, and existing midday calculation regression tests in tests/test_price_windows.py"
-Task: "Add unavailable-state, buy-price-invariance, and existing midday sensor behavior regression tests in tests/test_pricing_sensors.py"
+# Harden ranking edge cases and coexistence in parallel
+Task: "Add tie-break, out-of-range exclusion, missing-runner-up, invalid-time, invalid-price, duplicate-hour, and zero-best-price gap omission tests in tests/test_price_windows.py"
+Task: "Add slice-local unavailable-state, buy-price-invariance, existing-sensor regression, and broader sensor identity regression coverage in tests/test_pricing_sensors.py"
+Task: "Add sensor-registration coexistence regression coverage in tests/test_services_registration.py"
 ```
 
 ---
@@ -188,7 +195,8 @@ Task: "Add unavailable-state, buy-price-invariance, and existing midday sensor b
 
 1. One developer can prepare ranking fixtures in `tests/test_price_windows.py` while another prepares entity fixtures in `tests/test_pricing_sensors.py`.
 2. After Foundational completion, one developer can focus on `custom_components/energy_optimizer/calculations/price_windows.py` while another works on registration and translation follow-up in `custom_components/energy_optimizer/sensor.py` and `custom_components/energy_optimizer/translations/en.json`.
-3. Final quickstart validation can proceed once all implementation work is merged.
+3. Coexistence and registration regression coverage in `tests/test_services_registration.py` can be owned separately during User Story 3.
+4. Final quickstart validation can proceed once all implementation work is merged.
 
 ---
 

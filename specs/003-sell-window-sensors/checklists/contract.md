@@ -8,75 +8,75 @@
 
 ## Requirement Completeness
 
-- [ ] CHK001 Are all four sensor variants explicitly named and scoped by both day and time range? [Completeness, Spec: FR-001]
-- [ ] CHK002 Are the input payload requirements complete for both `prices_today` and `prices_tomorrow`, including required `time` and `price` fields? [Completeness, Spec: FR-003, FR-003a]
-- [ ] CHK003 Are the published attributes completely specified for every available sensor state, including best price, second-best start, second-best price, and percentage gap? [Completeness, Spec: FR-008, FR-009, FR-012]
-- [ ] CHK004 Does the spec define what happens when fewer than two valid hourly candidates exist for a sensor slice, rather than only when no best candidate exists? [Completeness, Spec: FR-014]
-- [ ] CHK005 Are the day-isolation rules fully specified so that today and tomorrow sensors cannot consume the wrong payload by implication only? [Completeness, Spec: FR-003, FR-015]
+- [x] CHK001 Are all four sensor variants explicitly named and scoped by both day and time range? [Completeness, Spec: FR-001]
+- [x] CHK002 Are the input payload requirements complete for both `prices_today` and `prices_tomorrow`, including required `time` and `price` fields? [Completeness, Spec: FR-003, FR-003a]
+- [x] CHK003 Are the published attributes completely specified for every available sensor state, including best price, second-best start, second-best price, and percentage gap? [Completeness, Spec: FR-008, FR-009, FR-012]
+- [x] CHK004 Does the spec define what happens when fewer than two valid hourly candidates exist for a sensor slice, rather than only when no best candidate exists? [Completeness, Spec: FR-014]
+- [x] CHK005 Are the day-isolation rules fully specified so that today and tomorrow sensors cannot consume the wrong payload by implication only? [Completeness, Spec: FR-003, FR-015]
 
 ## Requirement Clarity
 
-- [ ] CHK006 Is “optymalne okno” unambiguously defined as the one-hour candidate with the maximum sell price rather than another optimization metric? [Clarity, Spec: FR-002, FR-006]
-- [ ] CHK007 Is the rule “pelne godziny startu” precise enough to exclude starts like `04:30` or `16:15` without interpretation by the implementer? [Clarity, Spec: FR-005a]
-- [ ] CHK008 Is the required state format clear that the sensor state is only the best-window start `HH:MM`, not a range or timestamp with date? [Clarity, Spec: FR-007]
-- [ ] CHK009 Is the percentage-gap requirement clear about the comparison basis, so “gorsze od pierwszego” cannot be interpreted as an absolute delta instead of a relative percentage? [Clarity, Spec: FR-012]
-- [ ] CHK010 Are rounding expectations explicit enough to distinguish storage precision from published precision for `price`, `second_window_price`, and percentage? [Clarity, Spec: FR-008, FR-009, FR-012]
+- [x] CHK006 Is “optymalne okno” unambiguously defined as the one-hour candidate with the maximum sell price rather than another optimization metric? [Clarity, Spec: FR-002, FR-006]
+- [x] CHK007 Is the rule “pelne godziny startu” precise enough to exclude starts like `04:30` or `16:15` without interpretation by the implementer? [Clarity, Spec: FR-005a]
+- [x] CHK008 Is the required state format clear that the sensor state is only the best-window start `HH:MM`, not a range or timestamp with date? [Clarity, Spec: FR-007]
+- [x] CHK009 Is the percentage-gap requirement clear about the comparison basis, so “gorsze od pierwszego” cannot be interpreted as an absolute delta instead of a relative percentage? [Clarity, Spec: FR-012]
+- [x] CHK010 Are rounding expectations explicit enough to distinguish storage precision from published precision for `price`, `second_window_price`, and percentage? [Clarity, Spec: FR-008, FR-009, FR-012]
 
 ## Requirement Consistency
 
-- [ ] CHK011 Are the ranking rules consistent between the main requirements and the user-story acceptance scenarios for equal-price windows? [Consistency, Spec: FR-010, FR-011]
-- [ ] CHK012 Do the morning and evening range requirements align with the assumption about the last valid start time inside each range? [Consistency, Spec: FR-004, FR-005, Assumptions]
-- [ ] CHK013 Are the availability rules consistent between edge cases, functional requirements, and success criteria for incomplete data? [Consistency, Spec: FR-014, SC-004]
-- [ ] CHK014 Is the zero-price behavior consistent between the edge-case description and the functional requirement for omitting the percentage attribute only? [Consistency, Spec: FR-013]
+- [x] CHK011 Are the ranking rules consistent between the main requirements and the user-story acceptance scenarios for equal-price windows? [Consistency, Spec: FR-010, FR-011]
+- [x] CHK012 Do the morning and evening range requirements align with the assumption about the last valid start time inside each range? [Consistency, Spec: FR-004, FR-005, Assumptions]
+- [x] CHK013 Are the availability rules consistent between edge cases, functional requirements, and success criteria for incomplete data? [Consistency, Spec: FR-014, SC-004]
+- [x] CHK014 Is the zero-price behavior consistent between the edge-case description and the functional requirement for omitting the percentage attribute only? [Consistency, Spec: FR-013]
 
 ## Acceptance Criteria Quality
 
-- [ ] CHK015 Can each success criterion be objectively verified from sensor state and attributes without inferring hidden implementation details? [Acceptance Criteria, Spec: SC-001, SC-003, SC-006]
-- [ ] CHK016 Do the success criteria quantify deterministic ranking behavior strongly enough for equal-price scenarios across all four sensor variants? [Measurability, Spec: SC-002]
-- [ ] CHK017 Is the success criterion for incomplete data measurable enough to distinguish “partial ranking” from a fully valid available state? [Measurability, Spec: SC-004]
+- [x] CHK015 Can each success criterion be objectively verified from sensor state and attributes without inferring hidden implementation details? [Acceptance Criteria, Spec: SC-001, SC-003, SC-006]
+- [x] CHK016 Do the success criteria quantify deterministic ranking behavior strongly enough for equal-price scenarios across all four sensor variants? [Measurability, Spec: SC-002]
+- [x] CHK017 Is the success criterion for incomplete data measurable enough to distinguish “partial ranking” from a fully valid available state? [Measurability, Spec: SC-004]
 
 ## Scenario Coverage
 
-- [ ] CHK018 Are requirements defined for both primary operating scenarios: same-day decision support and next-day planning support? [Coverage, Spec: User Story 1, User Story 2]
-- [ ] CHK019 Are requirements defined for exception scenarios involving invalid hourly prices, missing hours, or only one valid candidate in a range? [Coverage, Spec: FR-014, Edge Cases]
-- [ ] CHK020 Are tie scenarios with more than two equal-price windows addressed clearly enough to determine both first and second place without ambiguity? [Coverage, Spec: FR-010, FR-011, User Story 3]
-- [ ] CHK021 Are cross-slice independence requirements documented for both dimensions of separation: morning vs evening and today vs tomorrow? [Coverage, Spec: FR-015]
+- [x] CHK018 Are requirements defined for both primary operating scenarios: same-day decision support and next-day planning support? [Coverage, Spec: User Story 1, User Story 2]
+- [x] CHK019 Are requirements defined for exception scenarios involving invalid hourly prices, missing hours, or only one valid candidate in a range? [Coverage, Spec: FR-014, Edge Cases]
+- [x] CHK020 Are tie scenarios with more than two equal-price windows addressed clearly enough to determine both first and second place without ambiguity? [Coverage, Spec: FR-010, FR-011, User Story 3]
+- [x] CHK021 Are cross-slice independence requirements documented for both dimensions of separation: morning vs evening and today vs tomorrow? [Coverage, Spec: FR-015]
 
 ## Edge Case Coverage
 
-- [ ] CHK022 Is the fallback behavior specified when the best price is zero but the rest of the ranking remains valid? [Edge Case, Spec: FR-013]
-- [ ] CHK023 Does the spec define how to treat out-of-range hourly entries that exist in the payload but fall outside `04:00-10:00` or `16:00-22:00`? [Gap]
-- [ ] CHK024 Does the spec define whether duplicate hourly entries for the same start time are impossible, rejected, or need explicit selection rules? [Gap]
+- [x] CHK022 Is the fallback behavior specified when the best price is zero but the rest of the ranking remains valid? [Edge Case, Spec: FR-013]
+- [x] CHK023 Does the spec define how to treat out-of-range hourly entries that exist in the payload but fall outside `04:00-10:00` or `16:00-22:00`? [Gap]
+- [x] CHK024 Does the spec define whether duplicate hourly entries for the same start time are impossible, rejected, or need explicit selection rules? [Gap]
 
 ## Non-Functional Requirements
 
-- [ ] CHK025 Are Home Assistant publication requirements clear enough for naming, translation-backed identity, and stable entity semantics without leaking implementation details? [Coverage, Plan Summary]
-- [ ] CHK026 Is the requirement for controlled degradation sufficiently specified so the feature remains trustworthy under partial source-data failure? [Non-Functional, Spec: FR-014, SC-004]
+- [x] CHK025 Are Home Assistant publication requirements clear enough for naming, translation-backed identity, and stable entity semantics without leaking implementation details? [Coverage, Plan Summary]
+- [x] CHK026 Is the requirement for controlled degradation sufficiently specified so the feature remains trustworthy under partial source-data failure? [Non-Functional, Spec: FR-014, SC-004]
 
 ## Dependencies & Assumptions
 
-- [ ] CHK027 Are assumptions about hourly payload structure and local-time interpretation documented strongly enough to support the ranking contract without hidden dependencies? [Assumption, Spec: FR-003a, Assumptions]
-- [ ] CHK028 Does the spec make it clear that the feature depends on an existing sell-price source exposing both day payloads, rather than assuming those payloads exist implicitly? [Dependency, Assumptions]
+- [x] CHK027 Are assumptions about hourly payload structure and local-time interpretation documented strongly enough to support the ranking contract without hidden dependencies? [Assumption, Spec: FR-003a, Assumptions]
+- [x] CHK028 Does the spec make it clear that the feature depends on an existing sell-price source exposing both day payloads, rather than assuming those payloads exist implicitly? [Dependency, Assumptions]
 
 ## Ambiguities & Conflicts
 
-- [ ] CHK029 Is the duplicate “Kandydackie Okno Sprzedazy” entity definition resolved so the data model does not contain two overlapping meanings for the same concept? [Conflict, Spec: Key Entities]
-- [ ] CHK030 Is there any unresolved ambiguity about whether the second-best candidate must be later only in tie cases or simply second in the global ranked order? [Ambiguity, Spec: FR-010, FR-011]
+- [x] CHK029 Is the duplicate “Kandydackie Okno Sprzedazy” entity definition resolved so the data model does not contain two overlapping meanings for the same concept? [Conflict, Spec: Key Entities]
+- [x] CHK030 Is there any unresolved ambiguity about whether the second-best candidate must be later only in tie cases or simply second in the global ranked order? [Ambiguity, Spec: FR-010, FR-011]
 
 ## Additional Edge Case Coverage
 
-- [ ] CHK031 Are additive-scope requirements explicit enough to distinguish coexistence of the four new sensors from preservation of existing sensor behavior? [Clarity, Spec: FR-001, FR-001a, SC-007]
-- [ ] CHK032 Are out-of-range hourly entries explicitly ignored by the contract, rather than filtered only by implication from the allowed morning and evening ranges? [Gap, Spec: FR-004, FR-005]
-- [ ] CHK033 Do requirements define whether duplicate hourly records for one start time are impossible by assumption, invalid input, or require deterministic conflict resolution? [Gap, Spec: FR-003a, Assumptions]
-- [ ] CHK034 Are unavailable scenarios separated clearly enough between invalid source data, insufficient candidates, and slice isolation so reviewers can tell why a sensor should not publish? [Clarity, Spec: FR-014, FR-015, Edge Cases]
+- [x] CHK031 Are additive-scope requirements explicit enough to distinguish coexistence of the four new sensors from preservation of existing sensor behavior? [Clarity, Spec: FR-001, FR-001a, SC-007]
+- [x] CHK032 Are out-of-range hourly entries explicitly ignored by the contract, rather than filtered only by implication from the allowed morning and evening ranges? [Gap, Spec: FR-004, FR-005]
+- [x] CHK033 Do requirements define whether duplicate hourly records for one start time are impossible by assumption, invalid input, or require deterministic conflict resolution? [Gap, Spec: FR-003a, Assumptions]
+- [x] CHK034 Are unavailable scenarios separated clearly enough between invalid source data, insufficient candidates, and slice isolation so reviewers can tell why a sensor should not publish? [Clarity, Spec: FR-014, FR-015, Edge Cases]
 
 ## Traceability & Delivery Readiness
 
-- [ ] CHK035 Are full-hour input semantics and full-hour candidate eligibility separated clearly enough that both can be traced to distinct tests and planning tasks? [Traceability, Spec: FR-003a, FR-005a]
-- [ ] CHK036 Are Home Assistant identity requirements specified strongly enough to require translation-backed naming and stable entity semantics without relying only on the implementation plan? [Gap]
-- [ ] CHK037 Are no-regression expectations for existing midday sensors measurable enough to verify count stability and behavior stability separately? [Measurability, Spec: FR-001a, SC-007]
-- [ ] CHK038 Is additive-scope language strong enough that coexistence safeguards must be treated as prerequisite work rather than optional polish during planning? [Traceability, Spec: FR-001, FR-001a]
-- [ ] CHK039 Does the contract distinguish requirement-level safeguards clearly enough that planning can map coexistence, full-hour filtering, and midday regressions to separate tasks? [Traceability, Spec: FR-001a, FR-003a, FR-005a, SC-007]
+- [x] CHK035 Are full-hour input semantics and full-hour candidate eligibility separated clearly enough that both can be traced to distinct tests and planning tasks? [Traceability, Spec: FR-003a, FR-005a]
+- [x] CHK036 Are Home Assistant identity requirements specified strongly enough to require translation-backed naming and stable entity semantics without relying only on the implementation plan? [Gap]
+- [x] CHK037 Are no-regression expectations for existing midday sensors measurable enough to verify count stability and behavior stability separately? [Measurability, Spec: FR-001a, SC-007]
+- [x] CHK038 Is additive-scope language strong enough that coexistence safeguards must be treated as prerequisite work rather than optional polish during planning? [Traceability, Spec: FR-001, FR-001a]
+- [x] CHK039 Does the contract distinguish requirement-level safeguards clearly enough that planning can map coexistence, full-hour filtering, and midday regressions to separate tasks? [Traceability, Spec: FR-001a, FR-003a, FR-005a, SC-007]
 
 ## Notes
 

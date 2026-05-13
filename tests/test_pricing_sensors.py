@@ -548,6 +548,73 @@ def test_ranked_sell_window_sensors_have_translation_keys_and_prefixed_unique_id
     assert evening_tomorrow.unique_id == "entry-1_evening_sell_window_tomorrow"
 
 
+@pytest.mark.unit
+def test_ranked_sell_window_sensor_rounds_only_published_attributes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
+
+    sensor = _morning_sensor(
+        _ranked_payload_for_hours(
+            8,
+            {4: 0.9999, 5: 0.6666, 6: 0.5},
+        )
+    )
+
+    assert sensor.native_value == "04:00"
+    assert sensor.extra_state_attributes == {
+        "price": 1.0,
+        "second_window_start": "05:00",
+        "second_window_price": 0.667,
+        "second_window_gap_pct": 33.3,
+    }
+
+
+@pytest.mark.unit
+def test_duplicate_hour_only_makes_affected_ranked_sensor_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 18, 0, tzinfo=TZ))
+
+    coordinator = _coordinator_with_prices(
+        _ranked_payload_for_hours(
+            8,
+            {
+                4: 0.40,
+                5: 0.80,
+                6: 0.70,
+                16: 0.60,
+                17: 0.95,
+                18: 0.85,
+                19: 0.95,
+            },
+        )
+        + [{"time": datetime(2026, 5, 8, 5, 0, tzinfo=TZ).isoformat(), "price": 0.81}],
+        None,
+        "sensor.sell",
+    )
+    config = {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
+
+    morning_sensor = MorningSellWindowSensor(coordinator, _mock_entry(), config)
+    evening_sensor = EveningSellWindowSensor(coordinator, _mock_entry(), config)
+    morning_sensor.hass = MagicMock()
+    evening_sensor.hass = MagicMock()
+
+    assert morning_sensor.native_value is None
+    assert morning_sensor.available is False
+    assert evening_sensor.native_value == "17:00"
+    assert evening_sensor.extra_state_attributes == {
+        "price": 0.95,
+        "second_window_start": "19:00",
+        "second_window_price": 0.95,
+        "second_window_gap_pct": 0.0,
+    }
+
+
 @pytest.mark.asyncio
 async def test_coordinator_copies_price_payloads_to_avoid_in_place_source_mutation() -> None:
     prices_today = _payload(low_start_hour=10)

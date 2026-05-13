@@ -1,6 +1,6 @@
 # Implementation Plan: Cztery Sensory Optymalnych Okien Sprzedazy Energii
 
-**Branch**: `[003-add-sell-window-sensors]` | **Date**: 2026-05-11 | **Spec**: [spec.md](./spec.md)
+**Branch**: `[003-add-sell-window-sensors]` | **Date**: 2026-05-12 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `/specs/003-sell-window-sensors/spec.md`
 
 ## Summary
@@ -16,7 +16,7 @@ Add four ranked one-hour sell-window sensors alongside the existing pricing sens
 **Target Platform**: Home Assistant custom integration distributed via HACS  
 **Project Type**: Single-project Home Assistant custom integration  
 **Performance Goals**: Recompute all four derived sensors inside the existing refresh/listener path with negligible overhead by scanning at most the hourly sell-price entries already held for `prices_today` and `prices_tomorrow`  
-**Constraints**: UI-only configuration; no blocking I/O; no new external APIs; sell-price data only; one input price per full hour; candidate windows start only on full hours; morning range is 04:00-10:00, evening range is 16:00-22:00; state format is `HH:MM`; `price` and `second_window_price` round to 3 decimals; `second_window_gap_pct` rounds to 1 decimal; sensor is `unavailable` unless both best and second-best windows are valid; translation-backed naming and stable config-entry-scoped unique IDs; no removal or functional regression of existing sensors  
+**Constraints**: UI-only configuration; no blocking I/O; no new external APIs; sell-price data only; one input price per full hour; candidate windows start only on full hours; morning range is `04:00-10:00`, evening range is `16:00-22:00`; state format is `HH:MM`; `price` and `second_window_price` round to 3 decimals; `second_window_gap_pct` rounds to 1 decimal; sensor is `unavailable` unless both best and second-best windows are valid; translation-backed naming and stable config-entry-scoped unique IDs; no removal or functional regression of existing sensors; buy-window sensors remain out of scope for this feature  
 **Scale/Scope**: Four additional derived sensors, one generalized ranking core, additive entity publication beside the existing pricing sensors, translation updates, and targeted tests for ranking, tie-breaks, day separation, coexistence, and controlled degradation
 
 ## Constitution Check
@@ -58,6 +58,7 @@ specs/003-sell-window-sensors/
 custom_components/energy_optimizer/
 ├── calculations/
 │   └── price_windows.py
+├── coordinator.py
 ├── entities/
 │   └── sensors/
 │       ├── __init__.py
@@ -68,7 +69,8 @@ custom_components/energy_optimizer/
 
 tests/
 ├── test_price_windows.py
-└── test_pricing_sensors.py
+├── test_pricing_sensors.py
+└── test_services_registration.py
 ```
 
 **Structure Decision**: Keep the feature inside the existing `energy_optimizer` integration and reuse the current pricing sensor surface. Refactor `custom_components/energy_optimizer/calculations/price_windows.py` from a midday cheapest-quarter-hour selector into a generalized hourly sell-window ranking helper that can evaluate morning or evening ranges for either `prices_today` or `prices_tomorrow`. Extend `custom_components/energy_optimizer/entities/sensors/pricing.py`, `custom_components/energy_optimizer/entities/sensors/__init__.py`, and `custom_components/energy_optimizer/sensor.py` with four ranked one-hour sensors while preserving the existing midday and other pricing sensors, extend `custom_components/energy_optimizer/translations/en.json`, and validate behavior with focused algorithm and entity tests plus coexistence regressions.

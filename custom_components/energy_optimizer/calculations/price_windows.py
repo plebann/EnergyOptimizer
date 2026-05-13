@@ -122,6 +122,14 @@ def _extract_ranked_hourly_candidates(
             _LOGGER.debug("Skipping invalid ranked sell-price entry: %s", entry)
             continue
 
+        if start_local in candidates_by_start:
+            _LOGGER.debug(
+                "Duplicate ranked sell-price entry detected for %s at %s",
+                entity_id,
+                start_local,
+            )
+            return []
+
         candidate = HourlySellPriceCandidate(
             start_local=start_local,
             end_local=end_local,
@@ -129,9 +137,7 @@ def _extract_ranked_hourly_candidates(
             sell_price_value=sell_price,
             source_entity_id=entity_id,
         )
-        existing = candidates_by_start.get(start_local)
-        if existing is None or candidate.sell_price_value > existing.sell_price_value:
-            candidates_by_start[start_local] = candidate
+        candidates_by_start[start_local] = candidate
 
     return sorted(candidates_by_start.values(), key=lambda candidate: candidate.start_local)
 
@@ -169,11 +175,10 @@ def build_ranked_sell_window_result(
 
     second_window_gap_pct: float | None = None
     if best.sell_price_value != 0:
-        second_window_gap_pct = round(
-            ((best.sell_price_value - second_best.sell_price_value) / best.sell_price_value)
-            * 100,
-            1,
-        )
+        second_window_gap_pct = (
+            (best.sell_price_value - second_best.sell_price_value)
+            / best.sell_price_value
+        ) * 100
 
     return RankedSellWindowResult(
         best_start_local=best.start_local,

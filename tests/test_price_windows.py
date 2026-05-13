@@ -238,7 +238,7 @@ def test_build_ranked_sell_window_result_selects_best_and_second_best_for_today_
     assert result.best_price == pytest.approx(0.91)
     assert result.second_best_start_local == datetime(2026, 5, 8, 5, 0, tzinfo=TZ)
     assert result.second_best_price == pytest.approx(0.85)
-    assert result.second_window_gap_pct == pytest.approx(6.6)
+    assert result.second_window_gap_pct == pytest.approx(6.5934065934)
 
 
 @pytest.mark.unit
@@ -334,6 +334,58 @@ def test_build_ranked_sell_window_result_omits_gap_when_best_price_is_zero() -> 
     assert result.best_price == pytest.approx(0.0)
     assert result.second_best_price == pytest.approx(-0.1)
     assert result.second_window_gap_pct is None
+
+
+@pytest.mark.unit
+def test_build_ranked_sell_window_result_keeps_internal_gap_precision_unrounded() -> None:
+    result = build_ranked_sell_window_result(
+        [
+            _hourly_entry(4, 0.9999),
+            _hourly_entry(5, 0.6666),
+            _hourly_entry(6, 0.5),
+        ],
+        ENTITY_ID,
+        range_start_hour=4,
+        range_end_hour=10,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.second_window_gap_pct == pytest.approx(33.3333333333)
+
+
+@pytest.mark.unit
+def test_build_ranked_sell_window_result_returns_none_for_duplicate_hour_entries() -> None:
+    result = build_ranked_sell_window_result(
+        [
+            _hourly_entry(4, 0.50),
+            _hourly_entry(5, 0.70),
+            _hourly_entry(5, 0.90),
+            _hourly_entry(6, 0.80),
+        ],
+        ENTITY_ID,
+        range_start_hour=4,
+        range_end_hour=10,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is None
+
+
+@pytest.mark.unit
+def test_build_ranked_sell_window_result_returns_none_when_invalid_time_removes_required_candidate() -> None:
+    result = build_ranked_sell_window_result(
+        [
+            {"time": "not-a-timestamp", "price": 0.95},
+            _hourly_entry(5, 0.70),
+        ],
+        ENTITY_ID,
+        range_start_hour=4,
+        range_end_hour=10,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is None
 
 
 @pytest.mark.unit
