@@ -86,20 +86,26 @@ class EnergyOptimizerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 value if error is None and value is not None else None
             )
 
-        sell_price_entity_id = config.get(CONF_SELL_PRICE_SENSOR)
-        if sell_price_entity_id:
-            state = self.hass.states.get(sell_price_entity_id)
-            if state is not None:
-                prices_today = state.attributes.get("prices_today")
-                prices_tomorrow = state.attributes.get("prices_tomorrow")
+        for price_sensor_key in (CONF_SELL_PRICE_SENSOR, CONF_BUY_PRICE_SENSOR):
+            price_entity_id = config.get(price_sensor_key)
+            if not price_entity_id:
+                continue
+            if price_entity_id in data["price_payloads"]:
+                # Already populated (e.g. buy and sell sensors share the same entity)
+                continue
+            state = self.hass.states.get(price_entity_id)
+            if state is None:
+                continue
+            prices_today = state.attributes.get("prices_today")
+            prices_tomorrow = state.attributes.get("prices_tomorrow")
 
-                payload: dict[str, Any] = {}
-                if isinstance(prices_today, list):
-                    payload["prices_today"] = deepcopy(prices_today)
-                if isinstance(prices_tomorrow, list):
-                    payload["prices_tomorrow"] = deepcopy(prices_tomorrow)
+            payload: dict[str, Any] = {}
+            if isinstance(prices_today, list):
+                payload["prices_today"] = deepcopy(prices_today)
+            if isinstance(prices_tomorrow, list):
+                payload["prices_tomorrow"] = deepcopy(prices_tomorrow)
 
-                if payload:
-                    data["price_payloads"][sell_price_entity_id] = payload
+            if payload:
+                data["price_payloads"][price_entity_id] = payload
 
         return data
