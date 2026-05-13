@@ -8,6 +8,7 @@ from homeassistant.util import dt as dt_util
 
 from ..base import EnergyOptimizerSensor
 from ...calculations.price_windows import (
+    build_best_buy_window_result,
     build_midday_sell_window_result,
     build_ranked_sell_window_result,
     format_sell_window,
@@ -81,6 +82,134 @@ class MinArbitrageMarginSensor(_PriceValueSensor):
             DEFAULT_MIN_ARBITRAGE_PRICE,
         )
         return round(float(configured or 0.0), 3)
+
+
+class _BuyWindowBaseSensor(EnergyOptimizerSensor):
+    """Base sensor for two-hour buy-price windows."""
+
+    _attr_icon = "mdi:clock-time-two-outline"
+    _payload_key: str
+    _range_key: str
+    _range_start_hour: int
+    _range_end_hour: int
+    _day_offset: int = 0
+
+    def __init__(self, coordinator, config_entry, config) -> None:
+        """Initialize the sensor with the current coordinator snapshot."""
+        super().__init__(coordinator, config_entry, config)
+        self._attr_available = False
+        self._apply_result(self._get_result())
+
+    def _get_result(self):
+        """Return the selected buy window result for this sensor variant."""
+        entity_id = self.config.get(CONF_BUY_PRICE_SENSOR)
+        if not entity_id or self.coordinator.data is None:
+            return None
+
+        payloads = self.coordinator.data.get("price_payloads")
+        if not isinstance(payloads, dict):
+            return None
+
+        payload = payloads.get(entity_id)
+        if not isinstance(payload, dict):
+            return None
+
+        prices = payload.get(self._payload_key)
+        if not isinstance(prices, list) or not prices:
+            return None
+
+        now_local = dt_util.now() + timedelta(days=self._day_offset)
+        return build_best_buy_window_result(
+            prices,
+            entity_id,
+            range_key=self._range_key,
+            range_start_hour=self._range_start_hour,
+            range_end_hour=self._range_end_hour,
+            now_local=now_local,
+        )
+
+    def _apply_result(self, result) -> None:
+        """Update cached state and attributes from a computed buy window result."""
+        if result is None:
+            self._attr_available = False
+            self._attr_native_value = None
+            self._attr_extra_state_attributes = {}
+            return
+
+        self._attr_available = True
+        self._attr_native_value = result.start_local.strftime("%H:%M")
+        self._attr_extra_state_attributes = {
+            "price": round(result.average_price, 3),
+            "is_negative": result.average_price < 0,
+        }
+
+    @property
+    def available(self) -> bool:
+        """Return True only when the coordinator and buy-window result are available."""
+        return super().available and self._attr_available
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the best two-hour buy window start time as HH:MM, or None."""
+        self._apply_result(self._get_result())
+        return getattr(self, "_attr_native_value", None)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Return buy-window details when a valid result exists."""
+        self._apply_result(self._get_result())
+        return getattr(self, "_attr_extra_state_attributes", {})
+
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated coordinator data."""
+        self._apply_result(self._get_result())
+        super()._handle_coordinator_update()
+
+
+class NightBuyWindowSensor(_BuyWindowBaseSensor):
+    """Sensor publishing the best night buy window for today."""
+
+    _attr_translation_key = "night_buy_window"
+    _attr_unique_id = "night_buy_window"
+    _payload_key = "prices_today"
+    _range_key = "night"
+    _range_start_hour = 0
+    _range_end_hour = 6
+
+
+class DayBuyWindowSensor(_BuyWindowBaseSensor):
+    """Sensor publishing the best day buy window for today."""
+
+    _attr_translation_key = "day_buy_window"
+    _attr_unique_id = "day_buy_window"
+    _payload_key = "prices_today"
+    _range_key = "day"
+    _range_start_hour = 10
+    _range_end_hour = 16
+
+
+class NightBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
+    """Sensor publishing the best night buy window for tomorrow."""
+
+    _attr_translation_key = "night_buy_window_tomorrow"
+    _attr_unique_id = "night_buy_window_tomorrow"
+    _payload_key = "prices_tomorrow"
+    _range_key = "night"
+    _range_start_hour = 0
+    _range_end_hour = 6
+    _day_offset = 1
+
+
+class DayBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
+    """Sensor publishing the best day buy window for tomorrow."""
+
+    _attr_translation_key = "day_buy_window_tomorrow"
+    _attr_unique_id = "day_buy_window_tomorrow"
+    _payload_key = "prices_tomorrow"
+    _range_key = "day"
+    _range_start_hour = 10
+    _range_end_hour = 16
+    _day_offset = 1
 
 
 class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):

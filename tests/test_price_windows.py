@@ -7,8 +7,10 @@ import pytest
 
 from custom_components.energy_optimizer.calculations.price_windows import (
     WINDOW_SLOTS,
+    BuyWindowResult,
     MiddaySellWindowResult,
     QuarterHourPricePoint,
+    build_best_buy_window_result,
     build_midday_sell_window_result,
     build_ranked_sell_window_result,
     expand_hourly_sell_prices,
@@ -45,6 +47,18 @@ def _full_day_entries(
         is_low = low_start_hour <= hour < low_start_hour + low_hours
         entries.append(_hourly_entry(hour, 0.5 if is_low else 1.0, day=day))
     return entries
+
+
+def _buy_payload_for_hours(
+    prices_by_hour: dict[int, float | str],
+    *,
+    day: date = TODAY,
+) -> list[dict[str, object]]:
+    """Create hourly buy-price payload entries for one evaluated day."""
+    return [
+        _hourly_entry(hour, price, day=day)
+        for hour, price in sorted(prices_by_hour.items())
+    ]
 
 
 def _point_at(hour: int, minute: int, price: float) -> QuarterHourPricePoint:
@@ -428,3 +442,233 @@ def test_build_ranked_sell_window_result_selects_tomorrow_candidates_when_evalua
     assert result is not None
     assert result.best_start_local == datetime(2026, 5, 9, 17, 0, tzinfo=TZ)
     assert result.second_best_start_local == datetime(2026, 5, 9, 19, 0, tzinfo=TZ)
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_selects_today_night_window() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                0: 0.40,
+                1: 0.20,
+                2: 0.10,
+                3: 0.30,
+                4: 0.80,
+                5: 0.90,
+            }
+        ),
+        ENTITY_ID,
+        range_key="night",
+        range_start_hour=0,
+        range_end_hour=6,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result == BuyWindowResult(
+        start_local=datetime(2026, 5, 8, 1, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 3, 0, tzinfo=TZ),
+        average_price=pytest.approx(0.15),
+    )
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_selects_today_day_window() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                10: 0.60,
+                11: 0.30,
+                12: 0.20,
+                13: 0.70,
+                14: 0.90,
+                15: 0.95,
+            }
+        ),
+        ENTITY_ID,
+        range_key="day",
+        range_start_hour=10,
+        range_end_hour=16,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.start_local == datetime(2026, 5, 8, 11, 0, tzinfo=TZ)
+    assert result.end_local == datetime(2026, 5, 8, 13, 0, tzinfo=TZ)
+    assert result.average_price == pytest.approx(0.25)
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_breaks_night_ties_by_latest_end() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                0: 0.90,
+                1: 0.40,
+                2: 0.60,
+                3: 0.40,
+                4: 0.90,
+                5: 0.95,
+            }
+        ),
+        ENTITY_ID,
+        range_key="night",
+        range_start_hour=0,
+        range_end_hour=6,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.start_local == datetime(2026, 5, 8, 2, 0, tzinfo=TZ)
+    assert result.average_price == pytest.approx(0.5)
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_breaks_day_ties_by_closest_to_thirteen_then_earlier() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                10: 0.90,
+                11: 0.80,
+                12: 0.40,
+                13: 0.60,
+                14: 0.60,
+                15: 0.40,
+            }
+        ),
+        ENTITY_ID,
+        range_key="day",
+        range_start_hour=10,
+        range_end_hour=16,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.start_local == datetime(2026, 5, 8, 12, 0, tzinfo=TZ)
+    assert result.average_price == pytest.approx(0.5)
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_ignores_other_days_and_selects_requested_day_only() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours({0: 0.70, 1: 0.40, 2: 0.30, 3: 0.60})
+        + _buy_payload_for_hours({0: 0.05, 1: 0.05}, day=TOMORROW),
+        ENTITY_ID,
+        range_key="night",
+        range_start_hour=0,
+        range_end_hour=6,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.start_local.date() == TODAY
+    assert result.average_price == pytest.approx(0.35)
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_selects_tomorrow_when_evaluating_tomorrow() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours({10: 0.70, 11: 0.60}, day=TODAY)
+        + _buy_payload_for_hours(
+            {
+                10: 0.90,
+                11: 0.60,
+                12: -0.20,
+                13: 0.80,
+                14: 0.80,
+                15: 0.95,
+            },
+            day=TOMORROW,
+        ),
+        ENTITY_ID,
+        range_key="day",
+        range_start_hour=10,
+        range_end_hour=16,
+        now_local=datetime(2026, 5, 9, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.start_local == datetime(2026, 5, 9, 11, 0, tzinfo=TZ)
+    assert result.average_price == pytest.approx(0.2)
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_requires_two_contiguous_full_hours() -> None:
+    result = build_best_buy_window_result(
+        [
+            _hourly_entry(0, 0.40),
+            {"time": datetime(2026, 5, 8, 1, 30, tzinfo=TZ).isoformat(), "price": 0.20},
+            _hourly_entry(3, 0.10),
+        ],
+        ENTITY_ID,
+        range_key="night",
+        range_start_hour=0,
+        range_end_hour=6,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is None
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_returns_none_for_duplicate_hour_entries() -> None:
+    result = build_best_buy_window_result(
+        [
+            _hourly_entry(10, 0.70),
+            _hourly_entry(11, 0.40),
+            _hourly_entry(11, 0.30),
+            _hourly_entry(12, 0.20),
+        ],
+        ENTITY_ID,
+        range_key="day",
+        range_start_hour=10,
+        range_end_hour=16,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is None
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_preserves_negative_average() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                10: 0.40,
+                11: -0.20,
+                12: -0.30,
+                13: 0.50,
+            }
+        ),
+        ENTITY_ID,
+        range_key="day",
+        range_start_hour=10,
+        range_end_hour=16,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.start_local == datetime(2026, 5, 8, 11, 0, tzinfo=TZ)
+    assert result.average_price == pytest.approx(-0.25)
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_keeps_zero_average_available() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                10: 0.20,
+                11: -0.20,
+                12: 0.30,
+                13: 0.40,
+            }
+        ),
+        ENTITY_ID,
+        range_key="day",
+        range_start_hour=10,
+        range_end_hour=16,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.start_local == datetime(2026, 5, 8, 10, 0, tzinfo=TZ)
+    assert result.average_price == pytest.approx(0.0)

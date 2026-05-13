@@ -12,6 +12,8 @@ from .battery import (
 )
 from .pricing import (
     BuyPriceSensor,
+    DayBuyWindowSensor,
+    DayBuyWindowTomorrowSensor,
     EveningSellWindowSensor,
     EveningSellWindowTomorrowSensor,
     MiddaySellWindowSensor,
@@ -19,6 +21,8 @@ from .pricing import (
     MinArbitrageMarginSensor,
     MorningSellWindowSensor,
     MorningSellWindowTomorrowSensor,
+    NightBuyWindowSensor,
+    NightBuyWindowTomorrowSensor,
     SellPriceSensor,
 )
 from .tracking import (
@@ -37,6 +41,8 @@ __all__ = [
     "BatterySpaceSensor",
     "BatteryVoltageSensor",
     "BuyPriceSensor",
+    "DayBuyWindowSensor",
+    "DayBuyWindowTomorrowSensor",
     "EveningSellWindowSensor",
     "EveningSellWindowTomorrowSensor",
     "LastBalancingTimestampSensor",
@@ -48,6 +54,8 @@ __all__ = [
     "MinSocSensor",
     "MorningSellWindowSensor",
     "MorningSellWindowTomorrowSensor",
+    "NightBuyWindowSensor",
+    "NightBuyWindowTomorrowSensor",
     "OptimizationHistorySensor",
     "PvForecastCompensationSensor",
     "ScheduledActionsSensor",
