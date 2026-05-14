@@ -318,6 +318,27 @@ def test_build_ranked_sell_window_result_ignores_out_of_range_hours() -> None:
 
 
 @pytest.mark.unit
+def test_build_ranked_sell_window_result_excludes_wraparound_late_hour_candidate() -> None:
+    result = build_ranked_sell_window_result(
+        [
+            _hourly_entry(4, 0.625),
+            _hourly_entry(5, 0.619),
+            _hourly_entry(6, 0.652),
+            _hourly_entry(7, 0.677),
+            _hourly_entry(23, 0.738),
+        ],
+        ENTITY_ID,
+        range_start_hour=4,
+        range_end_hour=10,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result is not None
+    assert result.best_start_local == datetime(2026, 5, 8, 7, 0, tzinfo=TZ)
+    assert result.second_best_start_local == datetime(2026, 5, 8, 6, 0, tzinfo=TZ)
+
+
+@pytest.mark.unit
 def test_build_ranked_sell_window_result_returns_none_when_fewer_than_two_valid_candidates() -> None:
     result = build_ranked_sell_window_result(
         [_hourly_entry(5, 0.80)],
@@ -455,6 +476,32 @@ def test_build_best_buy_window_result_selects_today_night_window() -> None:
                 3: 0.30,
                 4: 0.80,
                 5: 0.90,
+            }
+        ),
+        ENTITY_ID,
+        range_key="night",
+        range_start_hour=0,
+        range_end_hour=6,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result == BuyWindowResult(
+        start_local=datetime(2026, 5, 8, 1, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 3, 0, tzinfo=TZ),
+        average_price=pytest.approx(0.15),
+    )
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_excludes_wraparound_late_window() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                1: 0.20,
+                2: 0.10,
+                3: 0.50,
+                22: 0.01,
+                23: 0.01,
             }
         ),
         ENTITY_ID,

@@ -100,6 +100,27 @@ def _parse_entry_time(raw_time: Any, local_tz: tzinfo) -> datetime | None:
     return parsed.astimezone(local_tz)
 
 
+def _is_window_within_range(
+    start_local: datetime,
+    end_local: datetime,
+    current_day: date,
+    range_start_hour: int,
+    range_end_hour: int,
+) -> bool:
+    """Return True when a time window stays fully inside one same-day hour range."""
+    range_start = datetime.combine(
+        current_day,
+        time(range_start_hour, 0),
+        tzinfo=start_local.tzinfo,
+    )
+    range_end = datetime.combine(
+        current_day,
+        time(range_end_hour, 0),
+        tzinfo=start_local.tzinfo,
+    )
+    return start_local >= range_start and end_local <= range_end
+
+
 def _extract_ranked_hourly_candidates(
     prices: list[dict[str, Any]],
     entity_id: str,
@@ -133,7 +154,13 @@ def _extract_ranked_hourly_candidates(
             continue
 
         end_local = start_local + HOUR_DURATION
-        if start_local.hour < range_start_hour or end_local.hour > range_end_hour:
+        if not _is_window_within_range(
+            start_local,
+            end_local,
+            current_day,
+            range_start_hour,
+            range_end_hour,
+        ):
             continue
 
         try:
@@ -243,15 +270,18 @@ def build_best_buy_window_result(
     entries_by_start = {entry.start_local: entry for entry in entries}
     candidates: list[BuyWindowResult] = []
     for entry in entries:
-        if entry.start_local.hour < range_start_hour:
-            continue
-
         second_entry = entries_by_start.get(entry.start_local + HOUR_DURATION)
         if second_entry is None:
             continue
 
         end_local = second_entry.end_local
-        if end_local.hour > range_end_hour:
+        if not _is_window_within_range(
+            entry.start_local,
+            end_local,
+            reference_now.date(),
+            range_start_hour,
+            range_end_hour,
+        ):
             continue
 
         candidates.append(
