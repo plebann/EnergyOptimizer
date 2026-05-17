@@ -409,7 +409,7 @@ async def _handle_normal_restoration(
     await set_program_soc(
         hass,
         prog2_soc,
-        min_soc,
+        min_soc - 4,
         entry=entry,
         logger=_LOGGER,
         context=integration_context,
@@ -449,7 +449,7 @@ async def _handle_normal_restoration(
         },
         entities_changed=[
             {"entity_id": prog1_soc, "value": min_soc},
-            {"entity_id": prog2_soc, "value": min_soc},
+            {"entity_id": prog2_soc, "value": min_soc - 4},
             {"entity_id": prog6_soc, "value": min_soc},
         ],
     )

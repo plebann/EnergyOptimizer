@@ -11,7 +11,6 @@ from homeassistant.util import dt as dt_util
 from ..calculations.energy import calculate_losses, hourly_demand
 from ..calculations.utils import build_hourly_usage_array
 from ..const import (
-    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
     CONF_DAYTIME_MIN_PRICE_SENSOR,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_MIN_SOC_PV,
@@ -29,7 +28,6 @@ from ..helpers import (
     get_float_state_info,
     get_required_float_state,
     resolve_daytime_min_price_time,
-    resolve_morning_max_price_hour,
 )
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from .common import get_entry_data, get_required_current_soc_state, resolve_entry
@@ -61,20 +59,6 @@ async def async_run_solar_charge_block(
         return
 
     now = dt_util.now()
-
-    morning_max_price_hour = resolve_morning_max_price_hour(
-        hass,
-        config,
-        default_hour=7,
-    )
-    morning_max_price_time = time(morning_max_price_hour, 0)
-    if now.time().hour <= morning_max_price_time.hour:
-        _LOGGER.debug(
-            "Solar charge block: current time %s is before morning max price time %s — skip",
-            now.time(),
-            morning_max_price_time,
-        )
-        return
 
     # Current price
     current_price = get_required_float_state(
