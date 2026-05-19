@@ -147,6 +147,9 @@ class MorningChargeStrategy(BaseChargeStrategy):
             capacity_ah=self.bc.capacity_ah,
             voltage=self.bc.voltage,
         )
+        if target_soc == self.bc.min_soc:
+            target_soc -= 4
+        
         outcome = build_no_action_outcome(
             scenario=self.scenario_name,
             reason=(
