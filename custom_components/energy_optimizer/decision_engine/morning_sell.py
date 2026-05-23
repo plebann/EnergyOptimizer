@@ -23,7 +23,7 @@ from ..decision_engine.common import (
 )
 from ..helpers import (
     get_float_state_info,
-    get_required_float_state,
+    get_required_float_state_or_attribute,
     resolve_morning_max_price_hour,
     resolve_tariff_end_hour,
 )
@@ -75,10 +75,11 @@ class MorningSellStrategy(BaseSellStrategy):
 
     def _get_price(self) -> float | None:
         """Resolve morning max price state."""
-        return get_required_float_state(
+        return get_required_float_state_or_attribute(
             self.hass,
             self.config.get(CONF_MORNING_MAX_PRICE_SENSOR),
             entity_name="Morning max price sensor",
+            attribute_name="price",
         )
 
     def _resolve_sell_hour(self) -> int:
@@ -258,10 +259,11 @@ class MorningSellStrategy(BaseSellStrategy):
                 self.battery_config.voltage,
             )
 
-        evening_price = get_required_float_state(
+        evening_price = get_required_float_state_or_attribute(
             self.hass,
             self.config.get(CONF_EVENING_MAX_PRICE_SENSOR),
             entity_name="Evening max price sensor",
+            attribute_name="price",
         )
 
         selected_surplus_kwh = surplus_kwh

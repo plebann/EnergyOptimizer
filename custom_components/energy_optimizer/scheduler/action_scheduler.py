@@ -15,12 +15,13 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from ..const import (
+    CONF_BUY_PRICE_SENSOR,
     CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
     CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
     CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
-    CONF_PRICE_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
+    CONF_SELL_PRICE_SENSOR,
     DOMAIN,
     SUN_ABOVE_HORIZON,
     SUN_ENTITY,
@@ -675,25 +676,26 @@ class ActionScheduler:
             )
         )
 
-        if self.entry.data.get(CONF_PRICE_SENSOR):
+        if self.entry.data.get(CONF_BUY_PRICE_SENSOR):
             actions.append(
                 self._build_action_entry(
                     key="solar_charge_block",
                     label="Solar charge block check",
                     scheduled_for=None,
                     kind="event_driven",
-                    source="price_sensor",
+                    source="buy_price_sensor",
                     order=999,
                     trigger="hourly_between_sunrise_and_sunset",
                 )
             )
+        if self.entry.data.get(CONF_SELL_PRICE_SENSOR):
             actions.append(
                 self._build_action_entry(
                     key="export_block_control",
                     label="Export block control",
                     scheduled_for=None,
                     kind="event_driven",
-                    source="price_sensor",
+                    source="sell_price_sensor",
                     order=1000,
                     trigger="hourly_between_sunrise_and_sunset",
                 )

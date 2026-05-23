@@ -11,10 +11,10 @@ from homeassistant.util import dt as dt_util
 from ..calculations.energy import calculate_losses, hourly_demand
 from ..calculations.utils import build_hourly_usage_array
 from ..const import (
+    CONF_SELL_PRICE_SENSOR,
     CONF_DAYTIME_MIN_PRICE_SENSOR,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_MIN_SOC_PV,
-    CONF_PRICE_SENSOR,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_MIN_SOC_PV,
     SUN_ABOVE_HORIZON,
@@ -27,6 +27,7 @@ from ..helpers import (
     get_active_program_entity,
     get_float_state_info,
     get_required_float_state,
+    get_required_float_state_or_attribute,
     resolve_daytime_min_price_time,
 )
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
@@ -63,8 +64,8 @@ async def async_run_solar_charge_block(
     # Current price
     current_price = get_required_float_state(
         hass,
-        config.get(CONF_PRICE_SENSOR),
-        entity_name="Price sensor",
+        config.get(CONF_SELL_PRICE_SENSOR),
+        entity_name="Sell price sensor",
     )
     if current_price is None:
         return
@@ -80,6 +81,13 @@ async def async_run_solar_charge_block(
         min_price_entity,
         entity_name="Daytime min price sensor",
     )
+    if min_price is None:
+        min_price = get_required_float_state_or_attribute(
+            hass,
+            min_price_entity,
+            entity_name="Daytime min price sensor",
+            attribute_name="price",
+        )
     if min_price is None:
         return
 

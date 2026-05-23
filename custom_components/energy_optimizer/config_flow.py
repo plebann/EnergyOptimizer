@@ -53,7 +53,6 @@ from .const import (
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
-    CONF_PRICE_SENSOR,
     CONF_PROG1_SOC_ENTITY,
     CONF_PROG1_TIME_START_ENTITY,
     CONF_PROG2_SOC_ENTITY,
@@ -156,9 +155,6 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_PRICE_SENSOR): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor")
-                ),
                 vol.Optional(CONF_TOMORROW_PRICE_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -540,7 +536,8 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Display configured entities for review
         review_data = {
-            "Price Sensor": self._data.get(CONF_PRICE_SENSOR, "Not configured"),
+            "Buy Price Sensor": self._data.get(CONF_BUY_PRICE_SENSOR, "Not configured"),
+            "Sell Price Sensor": self._data.get(CONF_SELL_PRICE_SENSOR, "Not configured"),
             "Battery SOC": self._data.get(CONF_BATTERY_SOC_SENSOR, "Not configured"),
             "Battery Capacity": f"{self._data.get(CONF_BATTERY_CAPACITY_AH, 0)} Ah",
             "Battery Voltage": f"{self._data.get(CONF_BATTERY_VOLTAGE, 0)} V",
@@ -572,14 +569,14 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any]
     ) -> dict[str, str]:
         """Validate price entity configuration."""
-        errors = {}
+        errors: dict[str, str] = {}
 
-        self._validate_entity(
-            entity_id=user_input.get(CONF_PRICE_SENSOR),
-            field=CONF_PRICE_SENSOR,
-            errors=errors,
-            value_type=float,
+        has_contextual_sensor = bool(
+            user_input.get(CONF_BUY_PRICE_SENSOR) or user_input.get(CONF_SELL_PRICE_SENSOR)
         )
+        if not has_contextual_sensor:
+            errors["base"] = "buy_or_sell_price_required"
+
         for field in (CONF_BUY_PRICE_SENSOR, CONF_SELL_PRICE_SENSOR):
             entity_id = user_input.get(field)
             if entity_id:
@@ -785,12 +782,6 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
 
         schema = vol.Schema(
             {
-                vol.Optional(
-                    CONF_PRICE_SENSOR,
-                    default=self._config_entry.data.get(CONF_PRICE_SENSOR),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor")
-                ),
                 vol.Optional(
                     CONF_TOMORROW_PRICE_SENSOR,
                     default=self._config_entry.data.get(CONF_TOMORROW_PRICE_SENSOR),

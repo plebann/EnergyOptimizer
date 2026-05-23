@@ -31,7 +31,7 @@ from ..decision_engine.common import (
     handle_no_action_soc_update,
 )
 from ..helpers import (
-    get_required_float_state,
+    get_required_float_state_or_attribute,
     is_balancing_ongoing,
     resolve_morning_max_price_hour,
     resolve_tariff_end_hour,
@@ -234,6 +234,7 @@ def _calculate_morning_arbitrage_kwh(
         hass,
         sell_price_entity,
         entity_name="Morning sell price",
+        attribute_name="price",
     )
     if sell_price is None:
         details["arbitrage_reason"] = "missing_morning_sell_price"

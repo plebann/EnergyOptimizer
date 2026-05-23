@@ -31,7 +31,7 @@ from ..decision_engine.common import (
     get_required_prog5_soc_state,
 )
 from ..helpers import (
-    get_required_float_state,
+    get_required_float_state_or_attribute,
     resolve_evening_max_price_hour,
     resolve_evening_second_max_price_hour,
     resolve_tariff_end_hour,
@@ -93,15 +93,17 @@ class EveningSellStrategy(BaseSellStrategy):
     def _get_price(self) -> float | None:
         self._resolve_window_context()
         if self._has_secondary_window and not self._is_primary:
-            return get_required_float_state(
+            return get_required_float_state_or_attribute(
                 self.hass,
                 self.config.get(CONF_EVENING_SECOND_MAX_PRICE_SENSOR),
                 entity_name="Evening second max price sensor",
+                attribute_name="second_window_price",
             )
-        return get_required_float_state(
+        return get_required_float_state_or_attribute(
             self.hass,
             self.config.get(CONF_EVENING_MAX_PRICE_SENSOR),
             entity_name="Evening max price sensor",
+            attribute_name="price",
         )
 
     def _resolve_sell_hour(self) -> int:
@@ -207,10 +209,11 @@ class EveningSellStrategy(BaseSellStrategy):
         if getattr(self, "_price_unavailable", False):
             # Price unknown - skip tomorrow comparison and proceed to surplus sell.
             return None
-        self._tomorrow_morning_price = get_required_float_state(
+        self._tomorrow_morning_price = get_required_float_state_or_attribute(
             self.hass,
             self.config.get(CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR),
             entity_name="Tomorrow morning max price sensor",
+            attribute_name="price",
         )
         if self._tomorrow_morning_price is None:
             return None

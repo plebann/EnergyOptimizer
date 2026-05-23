@@ -27,7 +27,7 @@ from ..decision_engine.common import (
     handle_no_action_soc_update,
 )
 from ..helpers import (
-    get_required_float_state,
+    get_required_float_state_or_attribute,
     resolve_evening_max_price_hour,
     resolve_tariff_start_hour,
 )
@@ -236,10 +236,11 @@ def _calculate_arbitrage_kwh(
     pv_forecast_remaining_entity = config.get(CONF_PV_FORECAST_REMAINING)
     pv_production_entity = config.get(CONF_PV_PRODUCTION_SENSOR)
 
-    sell_price = get_required_float_state(
+    sell_price = get_required_float_state_or_attribute(
         hass,
         sell_price_entity,
         entity_name="Sell window price",
+        attribute_name="price",
     )
     if sell_price is None:
         details["arbitrage_reason"] = "missing_sell_price"

@@ -278,6 +278,61 @@ def get_required_float_state(
     return value
 
 
+def get_required_float_state_or_attribute(
+    hass: HomeAssistant,
+    entity_id: str | None,
+    *,
+    entity_name: str,
+    attribute_name: str,
+) -> float | None:
+    """Fetch a float value from an attribute, falling back to the entity state.
+
+    This supports built-in pricing window sensors whose user-facing state is a time
+    while the business price lives in a dedicated attribute.
+    """
+    if not entity_id:
+        _LOGGER.error("%s not configured", entity_name)
+        return None
+
+    state = hass.states.get(str(entity_id))
+    if state is None:
+        _LOGGER.warning("%s %s unavailable", entity_name, entity_id)
+        return None
+
+    raw_attribute = state.attributes.get(attribute_name)
+    if raw_attribute not in _UNAVAILABLE_STATE_VALUES:
+        try:
+            return float(raw_attribute)
+        except (TypeError, ValueError):
+            _LOGGER.warning(
+                "%s %s has invalid attribute %s: %s",
+                entity_name,
+                entity_id,
+                attribute_name,
+                raw_attribute,
+            )
+            return None
+
+    value, raw_state, error = get_float_state_info(hass, str(entity_id))
+    if error is None and value is not None:
+        return value
+
+    if raw_attribute in _UNAVAILABLE_STATE_VALUES and attribute_name in state.attributes:
+        _LOGGER.warning(
+            "%s %s has unavailable attribute %s",
+            entity_name,
+            entity_id,
+            attribute_name,
+        )
+        return None
+
+    if error in ("missing", "unavailable"):
+        _LOGGER.warning("%s %s unavailable", entity_name, entity_id)
+    else:
+        _LOGGER.warning("%s %s has invalid value: %s", entity_name, entity_id, raw_state)
+    return None
+
+
 def get_float_value(
     hass: HomeAssistant,
     entity_id: str | None,
@@ -306,6 +361,46 @@ def _parse_hour_from_state_value(state_value: object) -> int | None:
         return int(float(raw_value))
     except (TypeError, ValueError):
         return None
+
+
+def _parse_time_from_state_value(state_value: object) -> time | None:
+    """Parse time from datetime, time, or first segment of a range state value."""
+    raw_value = str(state_value)
+    if "-" in raw_value:
+        raw_value = raw_value.split("-", 1)[0].strip()
+
+    dt_value = dt_util.parse_datetime(raw_value)
+    if dt_value is not None:
+        local_dt = dt_util.as_local(dt_value)
+        return time(local_dt.hour, local_dt.minute)
+
+    parsed_time = dt_util.parse_time(raw_value)
+    if parsed_time is not None:
+        return time(parsed_time.hour, parsed_time.minute)
+
+    return None
+
+
+def _resolve_time_from_state_or_attribute(
+    hass: HomeAssistant,
+    entity_id: str | None,
+    *,
+    attribute_name: str | None = None,
+) -> time | None:
+    """Resolve time from an entity attribute or, if absent, from its state."""
+    if not entity_id:
+        return None
+
+    state = hass.states.get(str(entity_id))
+    if state is None:
+        return None
+
+    if attribute_name:
+        raw_attribute = state.attributes.get(attribute_name)
+        if raw_attribute not in _UNAVAILABLE_STATE_VALUES:
+            return _parse_time_from_state_value(raw_attribute)
+
+    return _parse_time_from_state_value(state.state)
 
 
 def resolve_tariff_end_hour(
@@ -466,21 +561,22 @@ def resolve_evening_second_max_price_hour(
     if not entity:
         return None
 
-    state = hass.states.get(str(entity))
-    if state is None:
+    resolved_time = _resolve_time_from_state_or_attribute(
+        hass,
+        str(entity),
+        attribute_name="second_window_start",
+    )
+    if resolved_time is None:
+        state = hass.states.get(str(entity))
+        raw_value = None if state is None else state.attributes.get("second_window_start", state.state)
         _LOGGER.warning(
-            "Evening second max price hour entity %s unavailable", entity
+            "Evening second max price hour entity %s has invalid or unavailable value %s",
+            entity,
+            raw_value,
         )
         return None
 
-    parsed = _parse_hour_from_state_value(state.state)
-    if parsed is None:
-        _LOGGER.warning(
-            "Evening second max price hour entity %s has invalid value %s",
-            entity,
-            state.state,
-        )
-        return None
+    parsed = resolved_time.hour
 
     if parsed < 0 or parsed > 23:
         _LOGGER.warning(
@@ -547,19 +643,7 @@ def resolve_daytime_min_price_time(
     """Resolve daytime minimum price time (HH:MM) from configured sensor with fallback."""
     from .const import CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR
 
-    def _normalize_to_time(raw_value: object) -> time | None:
-        dt_value = dt_util.parse_datetime(str(raw_value))
-        if dt_value is not None:
-            local_dt = dt_util.as_local(dt_value)
-            return time(local_dt.hour, local_dt.minute)
-
-        parsed_time = dt_util.parse_time(str(raw_value))
-        if parsed_time is not None:
-            return time(parsed_time.hour, parsed_time.minute)
-
-        return None
-
-    default_resolved = _normalize_to_time(default_time)
+    default_resolved = _parse_time_from_state_value(default_time)
     if default_resolved is None:
         _LOGGER.warning(
             "Daytime min price default_time %s invalid, using 12:00",
@@ -569,6 +653,13 @@ def resolve_daytime_min_price_time(
 
     min_price_hour_entity = config.get(CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR)
     if min_price_hour_entity:
+        resolved_time = _resolve_time_from_state_or_attribute(
+            hass,
+            str(min_price_hour_entity),
+        )
+        if resolved_time is not None:
+            return resolved_time
+
         min_price_hour_state = hass.states.get(str(min_price_hour_entity))
         if min_price_hour_state is None:
             _LOGGER.warning(
@@ -577,9 +668,6 @@ def resolve_daytime_min_price_time(
                 default_resolved.strftime("%H:%M"),
             )
         else:
-            resolved_time = _normalize_to_time(min_price_hour_state.state)
-            if resolved_time is not None:
-                return resolved_time
             _LOGGER.warning(
                 "Daytime min price hour entity %s has invalid value %s, using default %s",
                 min_price_hour_entity,
