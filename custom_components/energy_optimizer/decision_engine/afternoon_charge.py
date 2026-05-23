@@ -27,7 +27,7 @@ from ..decision_engine.common import (
     handle_no_action_soc_update,
 )
 from ..helpers import (
-    get_required_float_state_or_attribute,
+    get_internal_window_price,
     resolve_evening_max_price_hour,
     resolve_tariff_start_hour,
 )
@@ -87,7 +87,11 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             self.config,
             forecasts=self.forecasts,
             bc=self.bc,
-            sell_start_hour=resolve_evening_max_price_hour(self.hass, self.config),
+            sell_start_hour=resolve_evening_max_price_hour(
+                self.hass,
+                self.config,
+                entry_id=self.entry.entry_id,
+            ),
             current_soc=self.current_soc,
             required_kwh=self._required_kwh,
             entry_id=self.entry.entry_id,
@@ -231,16 +235,21 @@ def _calculate_arbitrage_kwh(
     }
 
     min_arbitrage_price = float(config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0)
-    sell_price_entity = config.get(CONF_EVENING_MAX_PRICE_SENSOR)
     pv_forecast_today_entity = config.get(CONF_PV_FORECAST_TODAY)
     pv_forecast_remaining_entity = config.get(CONF_PV_FORECAST_REMAINING)
     pv_production_entity = config.get(CONF_PV_PRODUCTION_SENSOR)
 
-    sell_price = get_required_float_state_or_attribute(
+    if not entry_id:
+        details["arbitrage_reason"] = "missing_entry_id"
+        return 0.0, details
+
+    sell_price = get_internal_window_price(
         hass,
-        sell_price_entity,
+        entry_id=entry_id,
+        unique_id_suffix="evening_sell_window",
         entity_name="Sell window price",
         attribute_name="price",
+        fallback_entity_id=config.get(CONF_EVENING_MAX_PRICE_SENSOR),
     )
     if sell_price is None:
         details["arbitrage_reason"] = "missing_sell_price"

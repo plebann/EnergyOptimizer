@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime, time
 import logging
+import re
 from typing import TYPE_CHECKING, Any, Literal
 
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 if TYPE_CHECKING:
@@ -12,6 +14,32 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def get_internal_sensor_entity_id(
+    hass: HomeAssistant,
+    *,
+    entry_id: str,
+    unique_id_suffix: str,
+    entity_domain: str = "sensor",
+) -> str | None:
+    """Resolve an integration-owned entity_id from entry_id + unique_id suffix."""
+    from .const import DOMAIN
+
+    registry = er.async_get(hass)
+    unique_id = f"{entry_id}_{unique_id_suffix}"
+    try:
+        entity_id = registry.async_get_entity_id(entity_domain, DOMAIN, unique_id)
+    except AttributeError:
+        entity_id = None
+    if not entity_id:
+        _LOGGER.warning(
+            "Internal %s entity for unique_id %s not found",
+            entity_domain,
+            unique_id,
+        )
+        return None
+    return entity_id
 
 def is_test_mode(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Return True when test mode is enabled for the config entry."""
@@ -333,6 +361,32 @@ def get_required_float_state_or_attribute(
     return None
 
 
+def get_internal_window_price(
+    hass: HomeAssistant,
+    *,
+    entry_id: str,
+    unique_id_suffix: str,
+    entity_name: str,
+    attribute_name: str = "price",
+    fallback_entity_id: str | None = None,
+) -> float | None:
+    """Fetch price-like value from an internal window sensor attribute/state."""
+    entity_id = get_internal_sensor_entity_id(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix=unique_id_suffix,
+    )
+    if not entity_id and fallback_entity_id:
+        entity_id = fallback_entity_id
+
+    return get_required_float_state_or_attribute(
+        hass,
+        entity_id,
+        entity_name=entity_name,
+        attribute_name=attribute_name,
+    )
+
+
 def get_float_value(
     hass: HomeAssistant,
     entity_id: str | None,
@@ -366,7 +420,7 @@ def _parse_hour_from_state_value(state_value: object) -> int | None:
 def _parse_time_from_state_value(state_value: object) -> time | None:
     """Parse time from datetime, time, or first segment of a range state value."""
     raw_value = str(state_value)
-    if "-" in raw_value:
+    if re.match(r"^\s*\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\s*$", raw_value):
         raw_value = raw_value.split("-", 1)[0].strip()
 
     dt_value = dt_util.parse_datetime(raw_value)
@@ -378,7 +432,11 @@ def _parse_time_from_state_value(state_value: object) -> time | None:
     if parsed_time is not None:
         return time(parsed_time.hour, parsed_time.minute)
 
-    return None
+    try:
+        native_dt = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+        return time(native_dt.hour, native_dt.minute)
+    except ValueError:
+        return None
 
 
 def _resolve_time_from_state_or_attribute(
@@ -395,8 +453,12 @@ def _resolve_time_from_state_or_attribute(
     if state is None:
         return None
 
+    attributes = getattr(state, "attributes", {})
+    if not isinstance(attributes, dict):
+        attributes = {}
+
     if attribute_name:
-        raw_attribute = state.attributes.get(attribute_name)
+        raw_attribute = attributes.get(attribute_name)
         if raw_attribute not in _UNAVAILABLE_STATE_VALUES:
             return _parse_time_from_state_value(raw_attribute)
 
@@ -503,10 +565,24 @@ def resolve_evening_max_price_hour(
     hass: HomeAssistant,
     config: dict[str, object],
     *,
+    entry_id: str | None = None,
     default_hour: int = 17,
 ) -> int:
     """Resolve evening max price hour from configured sensor with fallback."""
     from .const import CONF_EVENING_MAX_PRICE_HOUR_SENSOR
+
+    if entry_id:
+        entity_id = get_internal_sensor_entity_id(
+            hass,
+            entry_id=entry_id,
+            unique_id_suffix="evening_sell_window",
+        )
+        resolved_time = _resolve_time_from_state_or_attribute(hass, entity_id)
+        if resolved_time is not None:
+            return resolved_time.hour
+        _LOGGER.warning(
+            "Internal evening sell window unavailable, trying configured fallback",
+        )
 
     evening_peak_hour = default_hour
     evening_peak_entity = config.get(CONF_EVENING_MAX_PRICE_HOUR_SENSOR)
@@ -550,12 +626,36 @@ def resolve_evening_max_price_hour(
 def resolve_evening_second_max_price_hour(
     hass: HomeAssistant,
     config: dict[str, object],
+    *,
+    entry_id: str | None = None,
 ) -> int | None:
     """Resolve evening second-best price hour from configured sensor.
 
     Returns None when not configured or sensor unavailable.
     """
     from .const import CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR
+
+    if entry_id:
+        entity_id = get_internal_sensor_entity_id(
+            hass,
+            entry_id=entry_id,
+            unique_id_suffix="evening_sell_window",
+        )
+        resolved_time = _resolve_time_from_state_or_attribute(
+            hass,
+            entity_id,
+            attribute_name="second_window_start",
+        )
+        if resolved_time is not None:
+            parsed = resolved_time.hour
+            if parsed < 0 or parsed > 23:
+                _LOGGER.warning(
+                    "Evening second max price hour %s out of range, ignoring", parsed
+                )
+                return None
+            return parsed
+
+        _LOGGER.warning("Internal second evening window unavailable, trying configured fallback")
 
     entity = config.get(CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR)
     if not entity:
@@ -568,7 +668,15 @@ def resolve_evening_second_max_price_hour(
     )
     if resolved_time is None:
         state = hass.states.get(str(entity))
-        raw_value = None if state is None else state.attributes.get("second_window_start", state.state)
+        raw_value = None
+        if state is not None:
+            raw_attributes = getattr(state, "attributes", {})
+            if not isinstance(raw_attributes, dict):
+                raw_attributes = {}
+            raw_value = raw_attributes.get("second_window_start", state.state)
+            parsed_hour = _parse_hour_from_state_value(state.state)
+            if parsed_hour is not None:
+                return parsed_hour
         _LOGGER.warning(
             "Evening second max price hour entity %s has invalid or unavailable value %s",
             entity,
@@ -591,10 +699,24 @@ def resolve_morning_max_price_hour(
     hass: HomeAssistant,
     config: dict[str, object],
     *,
+    entry_id: str | None = None,
     default_hour: int = 7,
 ) -> int:
     """Resolve morning max price hour from configured sensor with fallback."""
     from .const import CONF_MORNING_MAX_PRICE_HOUR_SENSOR
+
+    if entry_id:
+        entity_id = get_internal_sensor_entity_id(
+            hass,
+            entry_id=entry_id,
+            unique_id_suffix="morning_sell_window",
+        )
+        resolved_time = _resolve_time_from_state_or_attribute(hass, entity_id)
+        if resolved_time is not None:
+            return resolved_time.hour
+        _LOGGER.warning(
+            "Internal morning sell window unavailable, trying configured fallback",
+        )
 
     morning_peak_hour = default_hour
     morning_peak_entity = config.get(CONF_MORNING_MAX_PRICE_HOUR_SENSOR)
@@ -638,6 +760,7 @@ def resolve_daytime_min_price_time(
     hass: HomeAssistant,
     config: dict[str, object],
     *,
+    entry_id: str | None = None,
     default_time: str = "12:00",
 ) -> time:
     """Resolve daytime minimum price time (HH:MM) from configured sensor with fallback."""
@@ -650,6 +773,23 @@ def resolve_daytime_min_price_time(
             default_time,
         )
         default_resolved = time(12, 0)
+
+    if entry_id:
+        entity_id = get_internal_sensor_entity_id(
+            hass,
+            entry_id=entry_id,
+            unique_id_suffix="midday_sell_window",
+        )
+        resolved_time = _resolve_time_from_state_or_attribute(hass, entity_id)
+        if resolved_time is not None:
+            return resolved_time
+        _LOGGER.warning(
+            "Internal midday sell window unavailable, trying configured fallback",
+        )
+        _LOGGER.warning(
+            "If fallback is also missing, using default %s",
+            default_resolved.strftime("%H:%M"),
+        )
 
     min_price_hour_entity = config.get(CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR)
     if min_price_hour_entity:

@@ -13,15 +13,13 @@ from ..calculations.energy import (
 from ..calculations.utils import build_hourly_usage_array
 from ..const import (
     CONF_EVENING_MAX_PRICE_SENSOR,
+    CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
     CONF_MAX_EXPORT_POWER,
     CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
     DEFAULT_MAX_EXPORT_POWER,
     DOMAIN,
 )
-from ..const import (
-    CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
-    CONF_MIN_ARBITRAGE_PRICE,
-)
+from ..const import CONF_MIN_ARBITRAGE_PRICE
 from ..decision_engine.common import (
     ForecastData,
     build_evening_sell_outcome,
@@ -31,7 +29,7 @@ from ..decision_engine.common import (
     get_required_prog5_soc_state,
 )
 from ..helpers import (
-    get_required_float_state_or_attribute,
+    get_internal_window_price,
     resolve_evening_max_price_hour,
     resolve_evening_second_max_price_hour,
     resolve_tariff_end_hour,
@@ -93,17 +91,21 @@ class EveningSellStrategy(BaseSellStrategy):
     def _get_price(self) -> float | None:
         self._resolve_window_context()
         if self._has_secondary_window and not self._is_primary:
-            return get_required_float_state_or_attribute(
+            return get_internal_window_price(
                 self.hass,
-                self.config.get(CONF_EVENING_SECOND_MAX_PRICE_SENSOR),
+                entry_id=self.entry.entry_id,
+                unique_id_suffix="evening_sell_window",
                 entity_name="Evening second max price sensor",
                 attribute_name="second_window_price",
+                fallback_entity_id=self.config.get(CONF_EVENING_SECOND_MAX_PRICE_SENSOR),
             )
-        return get_required_float_state_or_attribute(
+        return get_internal_window_price(
             self.hass,
-            self.config.get(CONF_EVENING_MAX_PRICE_SENSOR),
+            entry_id=self.entry.entry_id,
+            unique_id_suffix="evening_sell_window",
             entity_name="Evening max price sensor",
             attribute_name="price",
+            fallback_entity_id=self.config.get(CONF_EVENING_MAX_PRICE_SENSOR),
         )
 
     def _resolve_sell_hour(self) -> int:
@@ -117,9 +119,14 @@ class EveningSellStrategy(BaseSellStrategy):
         self._primary_sell_hour = resolve_evening_max_price_hour(
             self.hass,
             self.config,
+            entry_id=self.entry.entry_id,
             default_hour=17,
         )
-        self._secondary_sell_hour = resolve_evening_second_max_price_hour(self.hass, self.config)
+        self._secondary_sell_hour = resolve_evening_second_max_price_hour(
+            self.hass,
+            self.config,
+            entry_id=self.entry.entry_id,
+        )
         self._has_secondary_window = self._secondary_sell_hour is not None
 
         if self._has_secondary_window and not self._is_primary:
@@ -209,11 +216,13 @@ class EveningSellStrategy(BaseSellStrategy):
         if getattr(self, "_price_unavailable", False):
             # Price unknown - skip tomorrow comparison and proceed to surplus sell.
             return None
-        self._tomorrow_morning_price = get_required_float_state_or_attribute(
+        self._tomorrow_morning_price = get_internal_window_price(
             self.hass,
-            self.config.get(CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR),
+            entry_id=self.entry.entry_id,
+            unique_id_suffix="morning_sell_window_tomorrow",
             entity_name="Tomorrow morning max price sensor",
             attribute_name="price",
+            fallback_entity_id=self.config.get(CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR),
         )
         if self._tomorrow_morning_price is None:
             return None

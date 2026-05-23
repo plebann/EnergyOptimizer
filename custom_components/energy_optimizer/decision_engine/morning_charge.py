@@ -31,7 +31,7 @@ from ..decision_engine.common import (
     handle_no_action_soc_update,
 )
 from ..helpers import (
-    get_required_float_state_or_attribute,
+    get_internal_window_price,
     is_balancing_ongoing,
     resolve_morning_max_price_hour,
     resolve_tariff_end_hour,
@@ -92,9 +92,14 @@ class MorningChargeStrategy(BaseChargeStrategy):
         self._arbitrage_kwh, self._arbitrage_details = _calculate_morning_arbitrage_kwh(
             self.hass,
             self.config,
+            entry_id=self.entry.entry_id,
             forecasts=self.forecasts,
             bc=self.bc,
-            sell_start_hour=resolve_morning_max_price_hour(self.hass, self.config),
+            sell_start_hour=resolve_morning_max_price_hour(
+                self.hass,
+                self.config,
+                entry_id=self.entry.entry_id,
+            ),
             current_soc=self.current_soc,
             required_kwh=self._sufficiency.required_kwh,
         )
@@ -212,6 +217,7 @@ def _calculate_morning_arbitrage_kwh(
     hass: HomeAssistant,
     config: dict[str, object],
     *,
+    entry_id: str,
     forecasts: ForecastData,
     bc: BatteryConfig,
     sell_start_hour: int,
@@ -227,14 +233,15 @@ def _calculate_morning_arbitrage_kwh(
     details: dict[str, float | str] = {"arbitrage_reason": "not_applicable"}
 
     min_arbitrage_price = float(config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0)
-    sell_price_entity = config.get(CONF_MORNING_MAX_PRICE_SENSOR)
     remaining_entity = config.get(CONF_PV_FORECAST_REMAINING)
 
-    sell_price = get_required_float_state(
+    sell_price = get_internal_window_price(
         hass,
-        sell_price_entity,
+        entry_id=entry_id,
+        unique_id_suffix="morning_sell_window",
         entity_name="Morning sell price",
         attribute_name="price",
+        fallback_entity_id=config.get(CONF_MORNING_MAX_PRICE_SENSOR),
     )
     if sell_price is None:
         details["arbitrage_reason"] = "missing_morning_sell_price"
