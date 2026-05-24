@@ -136,20 +136,6 @@ class ActionScheduler:
                 )
             )
 
-        evening_second_peak_hour_entity = get_internal_sensor_entity_id(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            unique_id_suffix="evening_sell_window",
-        )
-        if evening_second_peak_hour_entity:
-            self._listeners.append(
-                async_track_state_change_event(
-                    self.hass,
-                    [str(evening_second_peak_hour_entity)],
-                    self._handle_evening_second_peak_hour_change,
-                )
-            )
-
         morning_peak_hour_entity = get_internal_sensor_entity_id(
             self.hass,
             entry_id=self.entry.entry_id,

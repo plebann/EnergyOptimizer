@@ -216,6 +216,54 @@ def test_scheduler_publishes_structured_daily_snapshot(
         dt_util.set_default_time_zone(original_tz)
 
 
+def test_start_registers_single_evening_sell_window_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scheduler should only register one listener for the shared evening sell sensor."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    entry = _mock_entry(data={})
+    registered_entities: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
+        lambda *args, **kwargs: (lambda: None),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_sunrise",
+        lambda *args, **kwargs: (lambda: None),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_sunset",
+        lambda *args, **kwargs: (lambda: None),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_state_change_event",
+        lambda _hass, entities, _callback: registered_entities.append(tuple(entities))
+        or (lambda: None),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.get_internal_sensor_entity_id",
+        lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": (
+            f"{entity_domain}.{entry_id}_{unique_id_suffix}"
+        ),
+    )
+
+    scheduler = ActionScheduler(hass, entry)
+    scheduler._schedule_afternoon_charge = MagicMock()
+    scheduler._schedule_morning_sell = MagicMock()
+    scheduler._schedule_evening_sell = MagicMock()
+    scheduler._schedule_sell_restores = MagicMock()
+    scheduler._schedule_daytime_min_price_restore = MagicMock()
+    scheduler._start_price_hourly_listener = MagicMock()
+    scheduler._is_sun_above_horizon = MagicMock(return_value=False)
+    scheduler._publish_schedule_snapshot = MagicMock()
+
+    scheduler.start()
+
+    assert registered_entities.count(("sensor.entry-1_evening_sell_window",)) == 1
+
+
 @pytest.mark.asyncio
 async def test_price_hourly_handler_runs_export_and_solar_block_during_daylight(
     monkeypatch: pytest.MonkeyPatch,

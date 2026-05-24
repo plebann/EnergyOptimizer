@@ -64,15 +64,18 @@ async def async_run_solar_charge_block(
     now = dt_util.now()
 
     # Current price
-    current_price_entity = (
-        config.get(CONF_BUY_PRICE_SENSOR)
-        or config.get(CONF_SELL_PRICE_SENSOR)
-        or config.get(CONF_PRICE_SENSOR)
-    )
+    current_price_entity = config.get(CONF_BUY_PRICE_SENSOR)
+    current_price_entity_name = "Buy price sensor"
+    if current_price_entity is None:
+        current_price_entity = config.get(CONF_SELL_PRICE_SENSOR)
+        current_price_entity_name = "Sell price sensor"
+    if current_price_entity is None:
+        current_price_entity = config.get(CONF_PRICE_SENSOR)
+        current_price_entity_name = "Price sensor"
     current_price = get_required_float_state(
         hass,
         current_price_entity,
-        entity_name="Buy price sensor",
+        entity_name=current_price_entity_name,
     )
     if current_price is None:
         return
