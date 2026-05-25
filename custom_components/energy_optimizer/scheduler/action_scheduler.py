@@ -15,12 +15,10 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from ..const import (
-    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
-    CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
-    CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
-    CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
-    CONF_PRICE_SENSOR,
+    CONF_BUY_PRICE_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
+    CONF_PRICE_SENSOR,
+    CONF_SELL_PRICE_SENSOR,
     DOMAIN,
     SUN_ABOVE_HORIZON,
     SUN_ENTITY,
@@ -38,6 +36,7 @@ from ..service_handlers.sell_restore import (
     async_handle_sell_restore,
 )
 from ..helpers import (
+    get_internal_sensor_entity_id,
     resolve_daytime_min_price_time,
     resolve_evening_max_price_hour,
     resolve_evening_second_max_price_hour,
@@ -123,7 +122,11 @@ class ActionScheduler:
                 )
             )
 
-        evening_peak_hour_entity = self.entry.data.get(CONF_EVENING_MAX_PRICE_HOUR_SENSOR)
+        evening_peak_hour_entity = get_internal_sensor_entity_id(
+            self.hass,
+            entry_id=self.entry.entry_id,
+            unique_id_suffix="evening_sell_window",
+        )
         if evening_peak_hour_entity:
             self._listeners.append(
                 async_track_state_change_event(
@@ -133,19 +136,11 @@ class ActionScheduler:
                 )
             )
 
-        evening_second_peak_hour_entity = self.entry.data.get(
-            CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR
+        morning_peak_hour_entity = get_internal_sensor_entity_id(
+            self.hass,
+            entry_id=self.entry.entry_id,
+            unique_id_suffix="morning_sell_window",
         )
-        if evening_second_peak_hour_entity:
-            self._listeners.append(
-                async_track_state_change_event(
-                    self.hass,
-                    [str(evening_second_peak_hour_entity)],
-                    self._handle_evening_second_peak_hour_change,
-                )
-            )
-
-        morning_peak_hour_entity = self.entry.data.get(CONF_MORNING_MAX_PRICE_HOUR_SENSOR)
         if morning_peak_hour_entity:
             self._listeners.append(
                 async_track_state_change_event(
@@ -155,7 +150,11 @@ class ActionScheduler:
                 )
             )
 
-        daytime_min_price_hour_entity = self.entry.data.get(CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR)
+        daytime_min_price_hour_entity = get_internal_sensor_entity_id(
+            self.hass,
+            entry_id=self.entry.entry_id,
+            unique_id_suffix="midday_sell_window",
+        )
         if daytime_min_price_hour_entity:
             self._listeners.append(
                 async_track_state_change_event(
@@ -232,8 +231,17 @@ class ActionScheduler:
 
     def _primary_evening_window_is_first(self) -> bool:
         """Return whether the primary evening window occurs before the secondary one."""
-        primary_hour = resolve_evening_max_price_hour(self.hass, self.entry.data, default_hour=17)
-        secondary_hour = resolve_evening_second_max_price_hour(self.hass, self.entry.data)
+        primary_hour = resolve_evening_max_price_hour(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+            default_hour=17,
+        )
+        secondary_hour = resolve_evening_second_max_price_hour(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+        )
         if secondary_hour is None:
             return True
         return primary_hour <= secondary_hour
@@ -370,7 +378,12 @@ class ActionScheduler:
             self._evening_sell_second_listener()
             self._evening_sell_second_listener = None
 
-        hour = resolve_evening_max_price_hour(self.hass, self.entry.data, default_hour=17)
+        hour = resolve_evening_max_price_hour(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+            default_hour=17,
+        )
         self._evening_sell_listener = async_track_time_change(
             self.hass,
             self._handle_evening_sell,
@@ -379,7 +392,11 @@ class ActionScheduler:
             second=1,
         )
 
-        second_hour = resolve_evening_second_max_price_hour(self.hass, self.entry.data)
+        second_hour = resolve_evening_second_max_price_hour(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+        )
         if second_hour is not None:
             self._evening_sell_second_listener = async_track_time_change(
                 self.hass,
@@ -396,7 +413,12 @@ class ActionScheduler:
             self._morning_sell_listener()
             self._morning_sell_listener = None
 
-        hour = resolve_morning_max_price_hour(self.hass, self.entry.data, default_hour=7)
+        hour = resolve_morning_max_price_hour(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+            default_hour=7,
+        )
         self._morning_sell_listener = async_track_time_change(
             self.hass,
             self._handle_morning_sell,
@@ -416,12 +438,11 @@ class ActionScheduler:
             self._daytime_min_price_listener()
             self._daytime_min_price_listener = None
 
-        if not self.entry.data.get(CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR):
-            _LOGGER.debug("Daytime min price restore: hour sensor not configured — skipping schedule")
-            self._publish_schedule_snapshot()
-            return
-
-        daytime_min_price_time = resolve_daytime_min_price_time(self.hass, self.entry.data)
+        daytime_min_price_time = resolve_daytime_min_price_time(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+        )
         hour = daytime_min_price_time.hour
         minute = daytime_min_price_time.minute
         self._daytime_min_price_listener = async_track_time_change(
@@ -469,7 +490,12 @@ class ActionScheduler:
             self._evening_restore_listener()
             self._evening_restore_listener = None
 
-        morning_hour = resolve_morning_max_price_hour(self.hass, self.entry.data, default_hour=7)
+        morning_hour = resolve_morning_max_price_hour(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+            default_hour=7,
+        )
         self._morning_restore_listener = async_track_time_change(
             self.hass,
             self._handle_morning_restore,
@@ -478,8 +504,17 @@ class ActionScheduler:
             second=1,
         )
 
-        evening_hour = resolve_evening_max_price_hour(self.hass, self.entry.data, default_hour=17)
-        second_evening_hour = resolve_evening_second_max_price_hour(self.hass, self.entry.data)
+        evening_hour = resolve_evening_max_price_hour(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+            default_hour=17,
+        )
+        second_evening_hour = resolve_evening_second_max_price_hour(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+        )
         effective_evening_restore_hour = (
             (max(evening_hour, second_evening_hour) + 1) % 24
             if second_evening_hour is not None
@@ -556,6 +591,7 @@ class ActionScheduler:
         morning_sell_hour = resolve_morning_max_price_hour(
             self.hass,
             self.entry.data,
+            entry_id=self.entry.entry_id,
             default_hour=7,
         )
         actions.append(
@@ -590,6 +626,7 @@ class ActionScheduler:
         evening_sell_hour = resolve_evening_max_price_hour(
             self.hass,
             self.entry.data,
+            entry_id=self.entry.entry_id,
             default_hour=17,
         )
         actions.append(
@@ -610,6 +647,7 @@ class ActionScheduler:
         second_evening_sell_hour = resolve_evening_second_max_price_hour(
             self.hass,
             self.entry.data,
+            entry_id=self.entry.entry_id,
         )
         evening_restore_source = "evening_max_price_hour_sensor_plus_1h"
         effective_evening_restore_hour = (evening_sell_hour + 1) % 24
@@ -647,22 +685,25 @@ class ActionScheduler:
             )
         )
 
-        if self.entry.data.get(CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR):
-            daytime_min_price_time = resolve_daytime_min_price_time(self.hass, self.entry.data)
-            actions.append(
-                self._build_action_entry(
-                    key="daytime_min_price_restore",
-                    label="Daytime min price restore",
-                    scheduled_for=self._resolve_local_datetime(
-                        hour=daytime_min_price_time.hour,
-                        minute=daytime_min_price_time.minute,
-                        now=now,
-                    ),
-                    kind="dynamic",
-                    source="daytime_min_price_hour_sensor",
-                    order=130,
-                )
+        daytime_min_price_time = resolve_daytime_min_price_time(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+        )
+        actions.append(
+            self._build_action_entry(
+                key="daytime_min_price_restore",
+                label="Daytime min price restore",
+                scheduled_for=self._resolve_local_datetime(
+                    hour=daytime_min_price_time.hour,
+                    minute=daytime_min_price_time.minute,
+                    now=now,
+                ),
+                kind="dynamic",
+                source="daytime_min_price_hour_sensor",
+                order=130,
             )
+        )
 
         actions.append(
             self._build_action_entry(
@@ -675,25 +716,39 @@ class ActionScheduler:
             )
         )
 
-        if self.entry.data.get(CONF_PRICE_SENSOR):
+        solar_price_source: str | None = None
+        if self.entry.data.get(CONF_BUY_PRICE_SENSOR):
+            solar_price_source = "buy_price_sensor"
+        elif self.entry.data.get(CONF_SELL_PRICE_SENSOR):
+            solar_price_source = "sell_price_sensor"
+        elif self.entry.data.get(CONF_PRICE_SENSOR):
+            solar_price_source = "price_sensor"
+        has_price_context = solar_price_source is not None
+        has_sell_context = bool(
+            self.entry.data.get(CONF_SELL_PRICE_SENSOR) or self.entry.data.get(CONF_PRICE_SENSOR)
+        )
+
+        if has_price_context:
+            assert solar_price_source is not None
             actions.append(
                 self._build_action_entry(
                     key="solar_charge_block",
                     label="Solar charge block check",
                     scheduled_for=None,
                     kind="event_driven",
-                    source="price_sensor",
+                    source=solar_price_source,
                     order=999,
                     trigger="hourly_between_sunrise_and_sunset",
                 )
             )
+        if has_sell_context:
             actions.append(
                 self._build_action_entry(
                     key="export_block_control",
                     label="Export block control",
                     scheduled_for=None,
                     kind="event_driven",
-                    source="price_sensor",
+                    source="sell_price_sensor",
                     order=1000,
                     trigger="hourly_between_sunrise_and_sunset",
                 )

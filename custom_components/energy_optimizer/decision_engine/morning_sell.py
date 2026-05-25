@@ -23,7 +23,7 @@ from ..decision_engine.common import (
 )
 from ..helpers import (
     get_float_state_info,
-    get_required_float_state,
+    get_internal_window_price,
     resolve_morning_max_price_hour,
     resolve_tariff_end_hour,
 )
@@ -75,15 +75,23 @@ class MorningSellStrategy(BaseSellStrategy):
 
     def _get_price(self) -> float | None:
         """Resolve morning max price state."""
-        return get_required_float_state(
+        return get_internal_window_price(
             self.hass,
-            self.config.get(CONF_MORNING_MAX_PRICE_SENSOR),
+            entry_id=self.entry.entry_id,
+            unique_id_suffix="morning_sell_window",
             entity_name="Morning max price sensor",
+            attribute_name="price",
+            fallback_entity_id=self.config.get(CONF_MORNING_MAX_PRICE_SENSOR),
         )
 
     def _resolve_sell_hour(self) -> int:
         """Resolve morning sell hour."""
-        return resolve_morning_max_price_hour(self.hass, self.config, default_hour=7)
+        return resolve_morning_max_price_hour(
+            self.hass,
+            self.config,
+            entry_id=self.entry.entry_id,
+            default_hour=7,
+        )
 
     async def _on_price_unavailable(self) -> bool:
         """Fall back to surplus-over-space sell when morning price sensor is unavailable."""
@@ -258,10 +266,13 @@ class MorningSellStrategy(BaseSellStrategy):
                 self.battery_config.voltage,
             )
 
-        evening_price = get_required_float_state(
+        evening_price = get_internal_window_price(
             self.hass,
-            self.config.get(CONF_EVENING_MAX_PRICE_SENSOR),
+            entry_id=self.entry.entry_id,
+            unique_id_suffix="evening_sell_window",
             entity_name="Evening max price sensor",
+            attribute_name="price",
+            fallback_entity_id=self.config.get(CONF_EVENING_MAX_PRICE_SENSOR),
         )
 
         selected_surplus_kwh = surplus_kwh

@@ -19,6 +19,7 @@ from custom_components.energy_optimizer.const import (
     CONF_PROG3_SOC_ENTITY,
     CONF_PROG3_TIME_START_ENTITY,
     CONF_PV_FORECAST_TODAY,
+    CONF_SELL_PRICE_SENSOR,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_VOLTAGE,
@@ -67,6 +68,7 @@ def _setup_hass(
     max_charge_current_state: str = "23",
     soc_value: str = "80",
     min_soc_pv: int = DEFAULT_MIN_SOC_PV,
+    price_sensor_key: str = CONF_PRICE_SENSOR,
     work_mode_entity: str | None = None,
     prog3_soc_entity: str | None = None,
     prog3_time_start: str | None = None,
@@ -77,7 +79,7 @@ def _setup_hass(
     entry.domain = DOMAIN
     entry.options = {}
     entry.data = {
-        CONF_PRICE_SENSOR: _PRICE_ENTITY,
+        price_sensor_key: _PRICE_ENTITY,
         CONF_DAYTIME_MIN_PRICE_SENSOR: _MIN_PRICE_ENTITY,
         CONF_BATTERY_SOC_SENSOR: _SOC_ENTITY,
         CONF_BATTERY_CAPACITY_AH: DEFAULT_BATTERY_CAPACITY_AH,
@@ -376,3 +378,28 @@ async def test_skip_when_min_price_hour_sensor_not_configured() -> None:
     with p_now, p_pv:
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
     hass.services.async_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_uses_sell_price_label_when_sell_sensor_selected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Current-price reads should use the matching sensor label."""
+    hass = _setup_hass(price_sensor_key=CONF_SELL_PRICE_SENSOR)
+    get_required_float_state = MagicMock(return_value=800.0)
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_required_float_state",
+        get_required_float_state,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_internal_window_price",
+        MagicMock(return_value=None),
+    )
+
+    await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+
+    get_required_float_state.assert_called_once_with(
+        hass,
+        _PRICE_ENTITY,
+        entity_name="Sell price sensor",
+    )

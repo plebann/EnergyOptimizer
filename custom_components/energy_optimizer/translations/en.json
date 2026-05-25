@@ -184,6 +184,7 @@
       "not_binary_sensor": "Entity must be a binary sensor.",
       "not_number_entity": "Entity must be a number entity.",
       "not_switch_entity": "Entity must be a switch entity.",
+      "buy_or_sell_price_required": "Configure at least one of Buy Price Sensor or Sell Price Sensor.",
       "min_greater_than_max": "Minimum SOC must be less than maximum SOC.",
       "no_target_configured": "You must configure either a single target SOC entity or at least one time-based program.",
       "cannot_connect": "Failed to connect.",

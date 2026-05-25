@@ -1,19 +1,25 @@
 """Tests for helper functions."""
-from datetime import datetime
-from unittest.mock import MagicMock
+from datetime import datetime, time
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
 from homeassistant.util import dt as dt_util
 
 from custom_components.energy_optimizer.const import (
+    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
     CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
+    CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
 )
 from custom_components.energy_optimizer.helpers import (
+    _parse_time_from_state_value,
     get_active_program_entity,
+    resolve_daytime_min_price_time,
     resolve_evening_max_price_hour,
+    resolve_evening_second_max_price_hour,
+    resolve_morning_max_price_hour,
     resolve_tariff_end_hour,
     resolve_tariff_start_hour,
 )
@@ -305,3 +311,215 @@ def test_resolve_high_tariff_start_hour_from_time_string_sensor() -> None:
     config = {CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.today_min_price_hour_start"}
 
     assert resolve_tariff_start_hour(hass, config, default_hour=15) == 15
+
+
+# ---------------------------------------------------------------------------
+# Tests for _parse_time_from_state_value
+# ---------------------------------------------------------------------------
+
+class TestParseTimeFromStateValue:
+    """Tests for _parse_time_from_state_value."""
+
+    def test_hh_mm_range_returns_start_time(self) -> None:
+        """'HH:MM-HH:MM' range returns the start segment as a time object."""
+        result = _parse_time_from_state_value("18:00-22:00")
+        assert result == time(18, 0)
+
+    def test_hh_mm_range_with_spaces_returns_start_time(self) -> None:
+        """'HH:MM - HH:MM' range with surrounding spaces returns start time."""
+        result = _parse_time_from_state_value("18:30 - 21:00")
+        assert result == time(18, 30)
+
+    def test_hh_mm_format(self) -> None:
+        """Plain 'HH:MM' format is parsed to the correct time."""
+        result = _parse_time_from_state_value("15:30")
+        assert result == time(15, 30)
+
+    def test_hh_mm_ss_format(self) -> None:
+        """'HH:MM:SS' format is parsed to the correct time (seconds ignored)."""
+        result = _parse_time_from_state_value("08:45:00")
+        assert result == time(8, 45)
+
+    def test_iso_datetime_format(self) -> None:
+        """ISO datetime string is converted to local time."""
+        original_tz = dt_util.get_default_time_zone()
+        dt_util.set_default_time_zone(ZoneInfo("UTC"))
+        try:
+            result = _parse_time_from_state_value("2026-02-26T18:00:00+00:00")
+            assert result == time(18, 0)
+        finally:
+            dt_util.set_default_time_zone(original_tz)
+
+    def test_invalid_format_returns_none(self) -> None:
+        """Unrecognised string returns None."""
+        assert _parse_time_from_state_value("not-a-time") is None
+
+    def test_unknown_state_returns_none(self) -> None:
+        """HA sentinel values 'unknown' and 'unavailable' return None."""
+        assert _parse_time_from_state_value("unknown") is None
+        assert _parse_time_from_state_value("unavailable") is None
+
+    def test_midnight_time(self) -> None:
+        """Midnight boundary '00:00' is parsed correctly."""
+        result = _parse_time_from_state_value("00:00")
+        assert result == time(0, 0)
+
+    def test_hh_mm_range_non_zero_minutes_start(self) -> None:
+        """'HH:MM-HH:MM' range with non-zero start minutes is handled."""
+        result = _parse_time_from_state_value("7:45-9:00")
+        assert result == time(7, 45)
+
+
+# ---------------------------------------------------------------------------
+# Tests for entry_id-based resolve_* paths
+# ---------------------------------------------------------------------------
+
+_INTERNAL_SENSOR_PATCH = (
+    "custom_components.energy_optimizer.helpers.get_internal_sensor_entity_id"
+)
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_evening_max_price_hour_from_internal_sensor_hh_mm(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_evening_max_price_hour reads start hour from internal sensor state (HH:MM)."""
+    mock_get_internal.return_value = "sensor.eo_evening_sell_window"
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state("19:00", domain="sensor")
+
+    result = resolve_evening_max_price_hour(hass, {}, entry_id="entry_abc", default_hour=17)
+
+    assert result == 19
+    mock_get_internal.assert_called_once()
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_evening_max_price_hour_from_internal_sensor_hh_mm_range(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_evening_max_price_hour extracts start hour from HH:MM-HH:MM range state."""
+    mock_get_internal.return_value = "sensor.eo_evening_sell_window"
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state("18:00-22:00", domain="sensor")
+
+    result = resolve_evening_max_price_hour(hass, {}, entry_id="entry_abc", default_hour=17)
+
+    assert result == 18
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_evening_max_price_hour_internal_sensor_not_found_falls_back(
+    mock_get_internal: MagicMock,
+) -> None:
+    """Falls back to config sensor when internal window entity is not in registry."""
+    mock_get_internal.return_value = None
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state("20:00", domain="sensor")
+    config = {CONF_EVENING_MAX_PRICE_HOUR_SENSOR: "sensor.evening_max"}
+
+    result = resolve_evening_max_price_hour(hass, config, entry_id="entry_abc", default_hour=17)
+
+    assert result == 20
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_evening_second_max_price_hour_from_internal_sensor_attribute(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_evening_second_max_price_hour reads second_window_start attribute."""
+    mock_get_internal.return_value = "sensor.eo_evening_sell_window"
+    hass = create_mock_hass()
+    state = MagicMock()
+    state.state = "18:00-22:00"
+    state.attributes = {"second_window_start": "20:00"}
+    hass.states.get.return_value = state
+
+    result = resolve_evening_second_max_price_hour(hass, {}, entry_id="entry_abc")
+
+    assert result == 20
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_evening_second_max_price_hour_internal_sensor_not_found_returns_none(
+    mock_get_internal: MagicMock,
+) -> None:
+    """Returns None when internal sensor is unavailable and no config sensor is set."""
+    mock_get_internal.return_value = None
+    hass = create_mock_hass()
+    hass.states.get.return_value = None
+
+    result = resolve_evening_second_max_price_hour(hass, {}, entry_id="entry_abc")
+
+    assert result is None
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_morning_max_price_hour_from_internal_sensor(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_morning_max_price_hour reads start hour from internal morning window sensor."""
+    mock_get_internal.return_value = "sensor.eo_morning_sell_window"
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state("07:30", domain="sensor")
+
+    result = resolve_morning_max_price_hour(hass, {}, entry_id="entry_abc", default_hour=8)
+
+    assert result == 7
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_morning_max_price_hour_from_internal_sensor_hh_mm_range(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_morning_max_price_hour extracts start hour from HH:MM-HH:MM range state."""
+    mock_get_internal.return_value = "sensor.eo_morning_sell_window"
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state("06:00-09:00", domain="sensor")
+
+    result = resolve_morning_max_price_hour(hass, {}, entry_id="entry_abc", default_hour=8)
+
+    assert result == 6
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_daytime_min_price_time_from_internal_sensor_hh_mm(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_daytime_min_price_time reads time from internal midday window sensor."""
+    mock_get_internal.return_value = "sensor.eo_midday_sell_window"
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state("11:30", domain="sensor")
+
+    result = resolve_daytime_min_price_time(hass, {}, entry_id="entry_abc", default_time="12:00")
+
+    assert result == time(11, 30)
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_daytime_min_price_time_from_internal_sensor_hh_mm_range(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_daytime_min_price_time extracts start time from HH:MM-HH:MM range state."""
+    mock_get_internal.return_value = "sensor.eo_midday_sell_window"
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state("11:00-13:00", domain="sensor")
+
+    result = resolve_daytime_min_price_time(hass, {}, entry_id="entry_abc", default_time="12:00")
+
+    assert result == time(11, 0)
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_daytime_min_price_time_internal_sensor_not_found_falls_back(
+    mock_get_internal: MagicMock,
+) -> None:
+    """Falls back to config sensor when internal midday window entity is not in registry."""
+    mock_get_internal.return_value = None
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state("10:00", domain="sensor")
+    config = {CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR: "sensor.daytime_min"}
+
+    result = resolve_daytime_min_price_time(hass, config, entry_id="entry_abc", default_time="12:00")
+
+    assert result == time(10, 0)

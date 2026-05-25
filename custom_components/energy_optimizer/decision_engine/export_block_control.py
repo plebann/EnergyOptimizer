@@ -9,6 +9,7 @@ from homeassistant.core import Context
 from ..const import (
     CONF_INVERTER_EXPORT_SURPLUS_SWITCH,
     CONF_PRICE_SENSOR,
+    CONF_SELL_PRICE_SENSOR,
     SUN_ABOVE_HORIZON,
     SUN_ENTITY,
 )
@@ -44,10 +45,19 @@ async def async_run_export_block_control(
         _LOGGER.debug("Export block control: sun not above horizon — skip")
         return
 
+    price_entity = config.get(CONF_SELL_PRICE_SENSOR) or config.get(CONF_PRICE_SENSOR)
+    if not price_entity:
+        _LOGGER.debug("Export block control: no sell or legacy price sensor configured — skip")
+        return
+
     price = get_required_float_state(
         hass,
-        config.get(CONF_PRICE_SENSOR),
-        entity_name="Price sensor",
+        price_entity,
+        entity_name=(
+            "Sell price sensor"
+            if config.get(CONF_SELL_PRICE_SENSOR)
+            else "Price sensor"
+        ),
     )
     if price is None:
         return
