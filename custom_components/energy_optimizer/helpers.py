@@ -580,7 +580,7 @@ def resolve_evening_max_price_hour(
         resolved_time = _resolve_time_from_state_or_attribute(hass, entity_id)
         if resolved_time is not None:
             return resolved_time.hour
-        _LOGGER.warning(
+        _LOGGER.debug(
             "Internal evening sell window unavailable, trying configured fallback",
         )
 
