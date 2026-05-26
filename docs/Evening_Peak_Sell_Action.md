@@ -92,39 +92,34 @@ Logika działa niezależnie od kolejności czasowej okien (`A First` albo `B Fir
 ## Diagram (Mermaid)
 
 ```mermaid
-flowchart TD
-   ES_start([Run evening peak sell window]) --> ES_meta[Resolve window metadata: A/B and first/second]
-   ES_meta --> ES_price{Current price > tomorrow morning?}
+graph TD
+   A[Run evening peak sell window] --> B[Resolve window metadata]
+   B --> C[Compare current window price with tomorrow morning price]
 
-   ES_price -->|no, first window| ES_no_action[No action]
-   ES_price -->|no, second window and sell active| ES_restore[Run sell_restore]
-   ES_price -->|yes| ES_branch{Current price > arbitrage threshold?}
+   C --> D[No action in first window when price is not better]
+   C --> E[Run sell restore in second window when sell is active]
+   C --> F[Choose base path high sell or surplus sell]
 
-   ES_branch -->|yes| HP_inputs[High sell base evaluation]
-   ES_branch -->|no| SP_window2[Surplus sell base evaluation]
+   F --> G[Compute base sellable surplus]
+   G --> H[Apply window order rules]
 
-   HP_inputs --> ES_base[Base sellable surplus_kwh]
-   SP_window2 --> ES_base
+   H --> I[A First current A sell min surplus and hourly cap]
+   H --> J[A First current B sell remaining surplus]
+   H --> K[B First current B sell only overflow above reserve]
+   H --> L[B First current A sell min surplus and hourly cap]
 
-   ES_base --> ES_order{Window order?}
+   I --> M[Prepare execution]
+   J --> N[Check whether sellable amount remains]
+   K --> N
+   L --> N
 
-   ES_order -->|A First, current A| A1[Sell min surplus and hourly cap]
-   ES_order -->|A First, current B| A2[Sell remaining surplus only]
-   ES_order -->|B First, current B| B1[Sell only overflow above reserve for A]
-   ES_order -->|B First, current A| B2[Sell min surplus and hourly cap]
+   N --> E
+   N --> O[No action when nothing remains and no sell is active]
+   N --> M
 
-   A1 --> ES_exec
-   A2 --> ES_second{Sellable amount > 0?}
-   B1 --> ES_second
-   B2 --> ES_second
-
-   ES_second -->|no and second window sell active| ES_restore
-   ES_second -->|no and no active sell| ES_no_action2[No action]
-   ES_second -->|yes| ES_exec[Clamp to PV production and execute sell]
-
-   ES_exec --> ES_target{Target SOC < Current SOC?}
-   ES_target -->|no| ES_no_action3[No action]
-   ES_target -->|yes| ES_sell[Persist restore and write inverter settings]
+   M --> P[Clamp by PV production and compute target SOC]
+   P --> Q[No action when target SOC is not below current SOC]
+   P --> R[Persist restore and write inverter settings]
 ```
 
 ### Szczegóły decyzyjne

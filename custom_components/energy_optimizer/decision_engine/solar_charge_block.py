@@ -105,7 +105,7 @@ async def async_run_solar_charge_block(
         return
 
     # Price gate: proceed only when current price is significantly above minimum
-    _PRICE_MARGIN = max(100, _PRICE_BLOCK_FACTOR * current_price)  # Avoid blocking at very low prices
+    _PRICE_MARGIN = max(0.01, _PRICE_BLOCK_FACTOR * current_price)  # Keep a tiny floor for very low/negative prices
     if current_price - _PRICE_MARGIN < min_price:
         _LOGGER.debug(
             "Solar charge block: price gate skip — %.4f * %.4f = %.4f < min %.4f",
