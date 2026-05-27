@@ -56,17 +56,10 @@ EXAMPLES:
 # Source common functions
 . "$PSScriptRoot/common.ps1"
 
-# Get feature paths and validate branch
+# Get feature paths
 $paths = Get-FeaturePathsEnv
 
-# If feature.json pins an existing feature directory, branch naming is not required.
-if (-not (Test-FeatureJsonMatchesFeatureDir -RepoRoot $paths.REPO_ROOT -ActiveFeatureDir $paths.FEATURE_DIR)) {
-    if (-not (Test-FeatureBranch -Branch $paths.CURRENT_BRANCH -HasGit:$paths.HAS_GIT)) { 
-        exit 1 
-    }
-}
-
-# If paths-only mode, output paths and exit (support combined -Json -PathsOnly)
+# If paths-only mode, output paths and exit (no validation)
 if ($PathsOnly) {
     if ($Json) {
         [PSCustomObject]@{
@@ -86,6 +79,11 @@ if ($PathsOnly) {
         Write-Output "TASKS: $($paths.TASKS)"
     }
     exit 0
+}
+
+# Validate branch name
+if (-not (Test-FeatureBranch -Branch $paths.CURRENT_BRANCH -HasGit:$paths.HAS_GIT)) {
+    exit 1
 }
 
 # Validate required directories and files
