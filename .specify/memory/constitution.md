@@ -23,12 +23,12 @@ Ten dokument definiuje trwałe zasady rozwoju integracji `energy_optimizer`. Ma 
 - Integracja MUST pozostawać Home Assistant custom component w domenie `energy_optimizer`, konfigurowanym przez `config_flow` i gotowym do dystrybucji przez HACS.
 - Publiczne platformy encji MUST być ograniczane do tych, które są uzasadnione modelem domeny; bazowy zestaw platform tej integracji stanowią `sensor`, `binary_sensor` i `switch`, a każde rozszerzenie MUST być uzasadnione przypadkiem domenowym.
 - Integracja SHOULD korzystać z mechanizmów natywnych Home Assistant, takich jak config entries, usługi domenowe, event listeners i restore-state, zamiast wprowadzać równoległe warstwy infrastrukturalne.
-- Zależności zewnętrzne SHOULD pozostawać na poziomie integracji Home Assistant i encji HA; integracja MUST NOT uzależniać się od bibliotek zewnętrznych bez wyraźnej potrzeby domenowej.
+- Zależności zewnętrzne SHOULD pozostawać na poziomie integracji Home Assistant i encji HA; nowa zależność PyPI MUST być uzasadniona brakiem równoważnego mechanizmu natywnego HA i integracja MUST NOT uzależniać się od bibliotek zewnętrznych bez wyraźnej potrzeby domenowej.
 
 ## Architectural principles
 
 - Każdy wpis konfiguracyjny MUST być obsługiwany przez pojedynczy coordinator odpowiedzialny za wspólny dostęp do odczytywanych stanów i współdzielone dane runtime.
-- Odczyt danych SHOULD być scentralizowany, a encje SHOULD konsumować dane przez wspólną warstwę bazową zamiast duplikować bezpośrednie pobieranie stanów.
+- Odczyt danych MUST być scentralizowany, a encje MUST konsumować dane przez wspólną warstwę bazową zamiast duplikować bezpośrednie pobieranie stanów.
 - Kod MUST pozostawać rozdzielony na moduły odpowiedzialności: obliczenia, logikę decyzyjną, sterowanie encjami HA, obsługę usług oraz harmonogramowanie.
 - Pliki platform root-level MUST pełnić rolę warstwy rejestracji encji i integracji z `hass.data`, a nie miejsca dla ciężkiej logiki biznesowej.
 - Logika scenariuszy decyzyjnych SHOULD być utrzymywana jako osobna warstwa domenowa, możliwa do uruchomienia zarówno przez scheduler, jak i przez usługi ręczne.
@@ -46,6 +46,22 @@ Ten dokument definiuje trwałe zasady rozwoju integracji `energy_optimizer`. Ma 
 - Nazwy usług domenowych MUST pozostawać krótkie, opisowe i spójne z językiem scenariuszy decyzyjnych.
 - Logowanie MUST używać lokalnego loggera modułowego i SHOULD rozróżniać poziomy `debug`, `info`, `warning` i `error` zgodnie z wagą zdarzenia.
 
+## Versioning & config entry migrations
+
+- `VERSION` i `MINOR_VERSION` śledzą wyłącznie schemat `config_entry.data` i `config_entry.options` – nie wersję integracji ani zakres funkcji. Każda zmiana kodu która nie dotyka tych struktur MUST NOT podbijać żadnej z tych wartości.
+- `VERSION` MUST być inkrementowany wyłącznie gdy zmiana schematu `config_entry.data` lub `config_entry.options` jest niekompatybilna wstecznie: usunięcie klucza, zmiana jego nazwy, zmiana typu wartości lub zmiana semantyki istniejącej wartości.
+- `MINOR_VERSION` SHOULD być inkrementowany gdy dodawany jest nowy opcjonalny klucz z wartością domyślną, który stary entry może nie zawierać.
+- Integracja MUST NOT podbijać `VERSION` bez jednoczesnej implementacji `async_migrate_entry` obsługującej wszystkie wcześniejsze wersje sekwencyjnie.
+- Odczyt wartości z `config_entry.data` i `config_entry.options` MUST używać `.get()` z wartością domyślną zamiast bezpośredniego dostępu przez klucz, co eliminuje `KeyError` gdy entry pochodzi ze starszej wersji kodu.
+- Dopóki `VERSION` nie zostanie celowo podbity, integracja ładuje się normalnie po każdym upgrade bez żadnej procedury migracyjnej po stronie użytkownika.
+
+## Data degradation & unavailability
+
+- Encja MUST przejść w stan `unavailable` gdy jej źródłowa encja HA jest niedostępna, ma stan `unavailable` lub `unknown`, albo jej wartość nie jest numeryczna tam gdzie jest wymagana.
+- Encja SHOULD powrócić do normalnego stanu bez restartu integracji, gdy dane źródłowe staną się ponownie dostępne.
+- Coordinator MUST NOT logować każdorazowego braku danych na poziomie `warning` lub wyższym podczas cyklicznych odczytów; powtarzalne zdarzenia degradacji SHOULD być logowane co najwyżej raz przy pierwszym wystąpieniu (log-once pattern).
+- Integracja MUST NOT implementować własnej retry policy dla odczytu stanów encji HA; ponowny odczyt następuje w kolejnym naturalnym cyklu coordinatora.
+
 ## Constraints & non-goals
 
 - Integracja MUST pozostać konfigurowana przez UI; nowe funkcje MUST NOT wymagać YAML jako podstawowego kanału konfiguracji.
@@ -58,6 +74,6 @@ Ten dokument definiuje trwałe zasady rozwoju integracji `energy_optimizer`. Ma 
 ## Quality, Testing & Observability
 
 - Kluczowe ścieżki decyzyjne (wybór scenariuszy ładowania/rozładowania) MUST mieć testy jednostkowe lub integracyjne z deterministycznymi danymi wejściowymi.
-- Testy obliczeń SHOULD być niezależne od Home Assistant i opierać się na czystych funkcjach domenowych.
+- Testy obliczeń MUST być niezależne od Home Assistant i opierać się na czystych funkcjach domenowych.
 - Nowe funkcje optymalizacji MUST dodawać przynajmniej jedną formę obserwowalności: sensor diagnostyczny, atrybut stanu, event lub wpis logu, który pozwala odtworzyć tok decyzji.
 - Logowanie błędów i degradacji SHOULD być spójne i zawierać informacje niezbędne do debugowania bez wchodzenia w kod.
