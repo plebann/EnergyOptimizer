@@ -78,7 +78,7 @@ async def async_run_export_block_control(
         "on" if is_enabled else "off",
     )
 
-    desired_is_enabled = price > 0
+    desired_is_enabled = round(price, 1) > 0
 
     if desired_is_enabled != is_enabled:
         if desired_is_enabled:
@@ -108,7 +108,7 @@ async def async_run_export_block_control(
         )
         return
 
-    if price <= 0:
+    if round(price, 1) <= 0:
         _LOGGER.info(
             "Export block control: no change — price negative or zero (%.4f) but switch already off",
             price,
