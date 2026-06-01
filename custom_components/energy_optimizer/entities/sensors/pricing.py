@@ -272,7 +272,7 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
         return getattr(self, "_attr_native_value", None)
 
     @property
-    def extra_state_attributes(self) -> dict[str, float]:
+    def extra_state_attributes(self) -> dict[str, float | str]:
         """Return the rounded average price when a valid window exists."""
         self._apply_result(self._get_result())
         return getattr(self, "_attr_extra_state_attributes", {})
