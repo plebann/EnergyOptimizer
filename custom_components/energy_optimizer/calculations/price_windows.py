@@ -444,7 +444,7 @@ def _filter_midday_points(
 def select_midday_window(
     points: list[QuarterHourPricePoint],
 ) -> MiddaySellWindowResult | None:
-    """Select the cheapest contiguous 8-quarter-hour midday window."""
+    """Select the midday sell window per zero-price expansion and 8-slot fallback rules."""
     midday_points = _filter_midday_points(sorted(points, key=lambda point: point.start_local))
     if not midday_points:
         return None
