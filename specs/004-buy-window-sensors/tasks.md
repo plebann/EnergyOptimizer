@@ -43,7 +43,7 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [X] T009 [P] [US1] Add today night and day candidate-selection tests in `tests/test_price_windows.py`
+- [X] T009 [P] [US1] Add today night and day candidate-selection tests (including day-range 10:00-16:00 boundaries) in `tests/test_price_windows.py`
 - [X] T010 [P] [US1] Add today buy-window sensor state and attribute tests in `tests/test_pricing_sensors.py`
 
 ### Implementation for User Story 1
@@ -87,7 +87,7 @@
 
 ### Tests for User Story 3
 
-- [X] T021 [P] [US3] Add tie-break, invalid-record, non-full-hour, and negative-average tests in `tests/test_price_windows.py`
+- [X] T021 [P] [US3] Add tie-break, missing-hourly-slice-data, invalid-record, non-full-hour, and negative-average tests in `tests/test_price_windows.py`
 - [X] T022 [P] [US3] Add slice-local unavailable, `is_negative`, and identity/coexistence tests in `tests/test_pricing_sensors.py`
 - [X] T023 [P] [US3] Add explicit `price == 0` -> `is_negative == false` boundary tests in `tests/test_price_windows.py` and `tests/test_pricing_sensors.py`
 - [X] T024 [P] [US3] Add explicit unchanged-existing-sensor behavior regression tests in `tests/test_pricing_sensors.py`
@@ -95,7 +95,7 @@
 
 ### Implementation for User Story 3
 
-- [X] T026 [US3] Enforce night/day tie-break ordering and invalid-candidate rejection in `custom_components/energy_optimizer/calculations/price_windows.py`
+- [X] T026 [US3] Enforce night/day tie-break ordering plus missing-slice and invalid-candidate handling in `custom_components/energy_optimizer/calculations/price_windows.py`
 - [X] T027 [US3] Apply unavailable attribute omission and `is_negative` publication rules in `custom_components/energy_optimizer/entities/sensors/pricing.py`
 - [X] T028 [US3] Preserve additive sensor exports for new and existing pricing sensors in `custom_components/energy_optimizer/entities/sensors/__init__.py`
 
@@ -109,7 +109,7 @@
 
 - [X] T029 [P] Align `specs/004-buy-window-sensors/quickstart.md` with final entity names and validation commands in `specs/004-buy-window-sensors/quickstart.md`
 - [X] T030 [P] Align final output semantics in `specs/004-buy-window-sensors/contracts/buy-window-sensors.md`
-- [X] T031 Run focused validation from `specs/004-buy-window-sensors/quickstart.md`
+- [X] T031 Run focused validation command from `specs/004-buy-window-sensors/quickstart.md` in shell (`wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py -q'`)
 
 ---
 
@@ -168,7 +168,7 @@ Task: "Add tomorrow buy-window sensor publication and unavailable-state tests in
 
 ```bash
 # Harden tie-breaks, degradation, and additive registration in parallel
-Task: "Add tie-break, invalid-record, non-full-hour, and negative-average tests in tests/test_price_windows.py"
+Task: "Add tie-break, missing-hourly-slice-data, invalid-record, non-full-hour, and negative-average tests in tests/test_price_windows.py"
 Task: "Add slice-local unavailable, is_negative, and identity/coexistence tests in tests/test_pricing_sensors.py"
 Task: "Add explicit price == 0 -> is_negative == false boundary tests in tests/test_price_windows.py and tests/test_pricing_sensors.py"
 Task: "Add explicit unchanged-existing-sensor behavior regression tests in tests/test_pricing_sensors.py"

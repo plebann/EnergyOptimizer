@@ -40,7 +40,7 @@ The payloads are consumed from coordinator-managed shared state rather than by d
 |----------|-------------|-----------|----------------|--------------|
 | Entity domain | `sensor` | `sensor` | `sensor` | `sensor` |
 | Translation key | `night_buy_window` | `day_buy_window` | `night_buy_window_tomorrow` | `day_buy_window_tomorrow` |
-| Evaluated range | `00:00-06:00` | `10:00-18:00` | `00:00-06:00` | `10:00-18:00` |
+| Evaluated range | `00:00-06:00` | `10:00-16:00` | `00:00-06:00` | `10:00-16:00` |
 | State when available | `HH:MM` best start | `HH:MM` best start | `HH:MM` best start | `HH:MM` best start |
 | `price` when available | Rounded float average price, 3 decimals | Rounded float average price, 3 decimals | Rounded float average price, 3 decimals | Rounded float average price, 3 decimals |
 | `is_negative` when available | Boolean derived from average price < 0 | Boolean derived from average price < 0 | Boolean derived from average price < 0 | Boolean derived from average price < 0 |
@@ -58,7 +58,7 @@ The payloads are consumed from coordinator-managed shared state rather than by d
 
 | Condition | Result |
 |-----------|--------|
-| No complete valid two-hour candidate in the sensor's day/range slice | The corresponding sensor becomes `unavailable` |
+| No hourly buy-price data in the sensor's day/range slice | The corresponding sensor becomes `unavailable` |
 | `prices_tomorrow` is an empty list | Both tomorrow sensors become `unavailable` |
 | Required `time` or `price` missing inside the evaluated slice | The affected candidate is invalid, and the corresponding sensor becomes `unavailable` if no valid candidate remains |
 | `price` is non-numeric inside the evaluated slice | The affected candidate is invalid, and the corresponding sensor becomes `unavailable` if no valid candidate remains |

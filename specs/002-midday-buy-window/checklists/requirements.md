@@ -2,6 +2,7 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-05-09
+**Last Updated**: 2026-06-01
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
@@ -31,5 +32,6 @@
 
 ## Notes
 
-- Validation passed after updating the scope for the `price` attribute and the analogous tomorrow sensor.
+- Validation passed after updating the scope for the `price` attribute and the analogous tomorrow sensor (2026-05-09).
+- **2026-06-01 modifications**: Added zero-price logic (prices < 0.05 PLN/kWh treated as 0; window expands to all zero-price hours when >2 such hours exist), `is_active` attribute for today's sensor, User Stories 4 & 5, FR-015 through FR-020, SC-007 through SC-010, and updated Key Entities and Assumptions sections.
 - The revised spec is ready for `/speckit.plan`.

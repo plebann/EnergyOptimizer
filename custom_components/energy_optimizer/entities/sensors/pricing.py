@@ -185,7 +185,7 @@ class DayBuyWindowSensor(_BuyWindowBaseSensor):
     _payload_key = "prices_today"
     _range_key = "day"
     _range_start_hour = 10
-    _range_end_hour = 18
+    _range_end_hour = 16
 
 
 class NightBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
@@ -208,7 +208,7 @@ class DayBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
     _payload_key = "prices_tomorrow"
     _range_key = "day"
     _range_start_hour = 10
-    _range_end_hour = 18
+    _range_end_hour = 16
     _day_offset = 1
 
 
@@ -218,6 +218,7 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
     _attr_icon = "mdi:clock-time-eight-outline"
     _payload_key: str
     _day_offset: int = 0
+    _include_is_active: bool = False
 
     def __init__(self, coordinator, config_entry, config) -> None:
         """Initialize the sensor with the current coordinator snapshot."""
@@ -253,9 +254,18 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
             return
 
         self._attr_native_value = format_sell_window(result)
-        self._attr_extra_state_attributes = {
+        attributes: dict[str, object] = {
             "price": round(result.average_price, 2)
         }
+        if self._include_is_active:
+            now_local = dt_util.now()
+            if now_local.tzinfo is None:
+                now_local = now_local.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+            attributes["is_active"] = (
+                "on" if result.start_local <= now_local < result.end_local else "off"
+            )
+
+        self._attr_extra_state_attributes = attributes
 
     @property
     def native_value(self) -> str | None:
@@ -281,6 +291,7 @@ class MiddaySellWindowSensor(_MiddaySellWindowBaseSensor):
     _attr_translation_key = "midday_sell_window"
     _attr_unique_id = "midday_sell_window"
     _payload_key = "prices_today"
+    _include_is_active = True
 
 
 class MiddaySellWindowTomorrowSensor(_MiddaySellWindowBaseSensor):

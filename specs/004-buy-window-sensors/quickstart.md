@@ -10,7 +10,7 @@ Add four derived Home Assistant sensors alongside the current pricing sensor set
    - consumes hourly `prices_today` and `prices_tomorrow` buy-price records directly,
    - filters entries by business day,
    - forms contiguous two-hour candidates starting only on full hours,
-   - evaluates candidates inside either the night range `00:00-06:00` or the day range `10:00-18:00`,
+   - evaluates candidates inside either the night range `00:00-06:00` or the day range `10:00-16:00`,
    - ranks candidates by average buy price ascending with the clarified night/day tie-break policies,
    - returns one selected candidate with raw average price and enough information for HA publication.
 2. Add four buy-window sensor variants in `custom_components/energy_optimizer/entities/sensors/pricing.py` while leaving the current sell-window, midday sell-window, and other pricing sensor classes unchanged:
@@ -22,7 +22,7 @@ Add four derived Home Assistant sensors alongside the current pricing sensor set
    - publishes `HH:MM` as the state,
    - publishes `price` rounded to 3 decimals when available,
    - publishes `is_negative` as a boolean when available,
-   - becomes `unavailable` when no full valid two-hour candidate exists for its slice,
+   - becomes `unavailable` when the evaluated slice has no hourly price data,
    - keeps tomorrow sensors `unavailable` when `prices_tomorrow` is an empty list.
 4. Update `custom_components/energy_optimizer/entities/sensors/__init__.py` and `custom_components/energy_optimizer/sensor.py` so the new four sensor classes are registered additively while the existing pricing sensor list remains intact.
 5. Extend `custom_components/energy_optimizer/translations/en.json` with translation keys for the four buy-window sensors.

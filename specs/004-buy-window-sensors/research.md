@@ -60,11 +60,11 @@
 - Replace existing pricing sensors with buy-window sensors: rejected because the clarified scope is additive and existing sensors must not change behavior or count.
 - Publish a verbose `HH:MM-HH:MM` state: rejected because the spec fixes state to start time only and the end time is implied by the fixed 2-hour duration.
 
-## Decision: Treat empty `prices_tomorrow`, invalid records, and incomplete two-hour slices as controlled degradation to `unavailable` for only the affected sensor slice.
+## Decision: Treat empty `prices_tomorrow` and missing hourly slice data as controlled degradation to `unavailable` for only the affected sensor slice.
 
 **Rationale**
 - The constitution requires controlled degradation when optional or missing data prevents a reliable result.
-- The clarified spec explicitly states that empty `prices_tomorrow` means tomorrow sensors remain `unavailable`, not that they should guess a result or affect today's sensors.
+- The clarified spec explicitly states that empty `prices_tomorrow` means tomorrow sensors remain `unavailable`, and FR-013 defines `unavailable` behavior when hourly data for the evaluated slice is missing.
 - Per-slice degradation keeps unaffected today/night/day slices stable and easy to reason about.
 
 **Alternatives considered**

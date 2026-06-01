@@ -27,7 +27,7 @@ Uzytkownik chce widziec osobne sensory dla najlepszego nocnego i dziennego dwugo
 **Acceptance Scenarios**:
 
 1. **Given** dostepne sa kompletne dane cen zakupu dla biezacej nocy w zakresie 00:00-06:00, **When** system wyznacza nocny sensor dla dzisiaj, **Then** publikuje godzine startu najlepszego dwugodzinnego okna w formacie `HH:MM`.
-2. **Given** dostepne sa kompletne dane cen zakupu dla biezacego dnia w zakresie 10:00-18:00, **When** system wyznacza dzienny sensor dla dzisiaj, **Then** publikuje godzine startu najlepszego dwugodzinnego okna w formacie `HH:MM`.
+2. **Given** dostepne sa kompletne dane cen zakupu dla biezacego dnia w zakresie 10:00-16:00, **When** system wyznacza dzienny sensor dla dzisiaj, **Then** publikuje godzine startu najlepszego dwugodzinnego okna w formacie `HH:MM`.
 3. **Given** ktorykolwiek z dzisiejszych sensorow ma wyznaczone poprawne okno, **When** uzytkownik sprawdza jego atrybuty, **Then** widzi atrybut `price` ze srednia cena wybranego okna zaokraglona do 3 miejsc po przecinku oraz atrybut `is_negative` informujacy, czy cena okna jest ujemna.
 
 ---
@@ -87,7 +87,7 @@ Uzytkownik chce, aby nowe sensory zachowywaly sie przewidywalnie przy remisach c
 - **FR-003a**: System MUST traktowac pusty payload `prices_tomorrow` jako brak wiarygodnych danych dla jutra i w takiej sytuacji utrzymywac oba jutrzejsze sensory w stanie `unavailable`.
 - **FR-003b**: System MUST korzystac z istniejacego zrodla cen zakupu udostepniajacego payloady `prices_today` i `prices_tomorrow`, gdzie kazdy rekord godzinowy zawiera wymagane pola `time` oraz `price`.
 - **FR-004**: System MUST oceniac dla sensorow nocnych tylko kandydackie okna o dlugosci dokladnie 2 godzin, mieszczace sie w calosci pomiedzy 00:00 a 06:00 czasu lokalnego.
-- **FR-005**: System MUST oceniac dla sensorow dziennych tylko kandydackie okna o dlugosci dokladnie 2 godzin, mieszczace sie w calosci pomiedzy 10:00 a 18:00 czasu lokalnego.
+- **FR-005**: System MUST oceniac dla sensorow dziennych tylko kandydackie okna o dlugosci dokladnie 2 godzin, mieszczace sie w calosci pomiedzy 10:00 a 16:00 czasu lokalnego.
 - **FR-005a**: System MUST dopuszczac jako kandydatow tylko okna rozpoczynajace sie o pelnej godzinie.
 - **FR-006**: System MUST obliczac cene kazdego kandydackiego okna jako srednia cene zakupu z calego dwugodzinnego przedzialu.
 - **FR-007**: System MUST wybierac jako wynik sensora okno z najnizsza srednia cena zakupu w zakresie dnia i pory obslugiwanej przez dany sensor.
@@ -97,7 +97,7 @@ Uzytkownik chce, aby nowe sensory zachowywaly sie przewidywalnie przy remisach c
 - **FR-011**: System MUST przy remisie minimalnej ceny dla nocnych kandydatow wybierac okno, ktore konczy sie najblizej godziny 06:00.
 - **FR-012**: System MUST przy remisie minimalnej ceny dla dziennych kandydatow wybierac okno, ktore zaczyna sie najblizej godziny 13:00.
 - **FR-012a**: System MUST przy dalszym remisie po zastosowaniu reguly bliskosci do 13:00 wybierac wczesniejsze dzienne okno, aby wynik byl deterministyczny.
-- **FR-013**: System MUST traktowac sensor jako niedostepny, jesli dla jego dnia i zakresu czasu nie da sie wiarygodnie wyznaczyc pelnego dwugodzinnego okna.
+- **FR-013**: System MUST traktowac sensor jako niedostepny, jesli dla jego dnia i zakresu czasu brakuje jakichkolwiek danych godzinowych sensora ceny.
 - **FR-014**: System MUST publikowac atrybuty ceny i flagi ceny ujemnej tylko wtedy, gdy sensor ma wyznaczone poprawne okno.
 - **FR-015**: System MUST utrzymywac niezaleznosc wynikow pomiedzy dniem i noca oraz pomiedzy dzisiaj i jutrem, tak aby brak danych lub zmiana ceny w jednym wycinku nie zmienialy pozostalych trzech sensorow poza ich wlasnym zakresem.
 
