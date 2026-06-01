@@ -9,9 +9,9 @@ from homeassistant.util import dt as dt_util
 from ..base import EnergyOptimizerSensor
 from ...calculations.price_windows import (
     build_best_buy_window_result,
-    build_midday_sell_window_result,
+    build_midday_buy_window_result,
     build_ranked_sell_window_result,
-    format_sell_window,
+    format_buy_window,
 )
 from ...const import (
     CONF_BUY_PRICE_SENSOR,
@@ -225,8 +225,8 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
         self._apply_result(self._get_result())
 
     def _get_result(self):
-        """Return the selected midday sell window result for this sensor variant."""
-        entity_id = self.config.get(CONF_SELL_PRICE_SENSOR)
+        """Return the selected midday buy window result for this sensor variant."""
+        entity_id = self.config.get(CONF_BUY_PRICE_SENSOR)
         if not entity_id or self.coordinator.data is None:
             return None
 
@@ -243,7 +243,7 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
             return None
 
         now_local = dt_util.now() + timedelta(days=self._day_offset)
-        return build_midday_sell_window_result(prices, entity_id, now_local=now_local)
+        return build_midday_buy_window_result(prices, entity_id, now_local=now_local)
 
     def _apply_result(self, result) -> None:
         """Update cached state and attributes from a computed window result."""
@@ -252,14 +252,22 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
             self._attr_extra_state_attributes = {}
             return
 
-        self._attr_native_value = format_sell_window(result)
-        self._attr_extra_state_attributes = {
+        self._attr_native_value = format_buy_window(result)
+        attributes: dict[str, object] = {
             "price": round(result.average_price, 2)
         }
+        if self._day_offset == 0:
+            now_local = dt_util.now()
+            attributes["is_active"] = (
+                "on"
+                if result.start_local <= now_local <= result.end_local
+                else "off"
+            )
+        self._attr_extra_state_attributes = attributes
 
     @property
     def native_value(self) -> str | None:
-        """Return the cheapest midday sell-price window as HH:MM-HH:MM, or None."""
+        """Return the selected midday buy window as HH:MM-HH:MM, or None."""
         self._apply_result(self._get_result())
         return getattr(self, "_attr_native_value", None)
 
@@ -276,18 +284,18 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
 
 
 class MiddaySellWindowSensor(_MiddaySellWindowBaseSensor):
-    """Sensor publishing the cheapest 8-quarter-hour midday sell-price window."""
+    """Sensor publishing the selected midday buy window for today."""
 
-    _attr_translation_key = "midday_sell_window"
-    _attr_unique_id = "midday_sell_window"
+    _attr_translation_key = "midday_buy_window"
+    _attr_unique_id = "midday_buy_window"
     _payload_key = "prices_today"
 
 
 class MiddaySellWindowTomorrowSensor(_MiddaySellWindowBaseSensor):
-    """Sensor publishing the cheapest midday sell window for tomorrow."""
+    """Sensor publishing the selected midday buy window for tomorrow."""
 
-    _attr_translation_key = "midday_sell_window_tomorrow"
-    _attr_unique_id = "midday_sell_window_tomorrow"
+    _attr_translation_key = "midday_buy_window_tomorrow"
+    _attr_unique_id = "midday_buy_window_tomorrow"
     _payload_key = "prices_tomorrow"
     _day_offset = 1
 

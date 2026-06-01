@@ -275,7 +275,7 @@ class TestGetActiveProgramEntity:
 
 def test_resolve_evening_max_price_hour_from_timestamp_sensor() -> None:
     """Resolve evening hour from ISO timestamp sensor state."""
-    original_tz = dt_util.get_default_time_zone()
+    original_tz = dt_util.DEFAULT_TIME_ZONE
     dt_util.set_default_time_zone(ZoneInfo("Europe/Warsaw"))
     hass = create_mock_hass()
     hass.states.get.return_value = create_time_state("2026-02-26T18:00:00+01:00", domain="sensor")
@@ -290,7 +290,7 @@ def test_resolve_evening_max_price_hour_from_timestamp_sensor() -> None:
 
 def test_resolve_high_tariff_end_hour_from_timestamp_sensor() -> None:
     """Resolve high tariff end hour from ISO timestamp sensor state."""
-    original_tz = dt_util.get_default_time_zone()
+    original_tz = dt_util.DEFAULT_TIME_ZONE
     dt_util.set_default_time_zone(ZoneInfo("Europe/Warsaw"))
     hass = create_mock_hass()
     hass.states.get.return_value = create_time_state("2026-02-26T13:00:00+01:00", domain="sensor")
@@ -342,7 +342,7 @@ class TestParseTimeFromStateValue:
 
     def test_iso_datetime_format(self) -> None:
         """ISO datetime string is converted to local time."""
-        original_tz = dt_util.get_default_time_zone()
+        original_tz = dt_util.DEFAULT_TIME_ZONE
         dt_util.set_default_time_zone(ZoneInfo("UTC"))
         try:
             result = _parse_time_from_state_value("2026-02-26T18:00:00+00:00")

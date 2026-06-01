@@ -1,26 +1,26 @@
-# Quickstart: Rozszerzenie Sensorów Okna Najniższej Ceny Sprzedaży
+# Quickstart: Rozszerzenie Sensorów Okna Najniższej Ceny Zakupu
 
 ## Goal
 
-Add two derived Home Assistant text sensors that expose the cheapest 8-quarter-hour sell-price window between 08:00 and 16:00 for the current local day and for the next local day, with a `price` attribute representing the rounded average price of the selected window.
+Add two derived Home Assistant sensors that expose the selected midday buy window between `08:00` and `16:00` for today and tomorrow, publish the average selected price as `price`, and publish `is_active` only for the today sensor.
 
 ## Implementation Steps
 
-1. Extend the pure calculation module under `custom_components/energy_optimizer/calculations/` so it:
-   - accepts day-scoped hourly payloads for either `prices_today` or `prices_tomorrow`,
-   - expands each hour into 4 quarter-hour slots with the same price,
-   - filters the target local day and the 08:00-16:00 interval,
-   - chooses the cheapest contiguous 8-slot window,
-   - returns the selected window plus its average price,
-   - returns no valid result when data is incomplete,
-   - resolves ties by earliest start time.
-2. Add or extend derived sensor entities under `custom_components/energy_optimizer/entities/sensors/` so the integration publishes:
-   - the existing current-day midday sell window sensor backed by `prices_today`,
-   - an analogous tomorrow midday sell window sensor backed by `prices_tomorrow`.
-3. Ensure each sensor publishes state in `HH:MM-HH:MM` format, includes `price` only when available, and omits `price` when the sensor is `unavailable`.
-4. Wire both sensors into `custom_components/energy_optimizer/sensor.py` and/or shared sensor registration so payload-source updates trigger recalculation through the existing refresh path.
-5. Extend translations in `custom_components/energy_optimizer/translations/en.json` for both derived sensors.
-6. Add focused tests for calculation behavior, day separation, `price`, and entity publication.
+1. Extend `custom_components/energy_optimizer/calculations/price_windows.py` so it:
+   - consumes hourly buy-price payloads from `prices_today` and `prices_tomorrow`,
+   - filters records to the evaluated local day,
+   - expands each full hour into four quarter-hour slots with the same price semantics,
+   - gives priority to the full span from the first to the last buy-price entry below `0.05 PLN/kWh`,
+   - falls back to the cheapest contiguous 8-quarter-hour midday window when no quasi-zero entries exist,
+   - resolves standard-window ties by earliest start,
+   - returns no result when a valid day-scoped window cannot be proven.
+2. Extend `custom_components/energy_optimizer/entities/sensors/pricing.py` so the integration publishes:
+   - the existing today midday buy-window sensor backed by `prices_today`, with `price` and `is_active`,
+   - the tomorrow midday buy-window sensor backed by `prices_tomorrow`, with `price` and without `is_active`.
+3. Ensure each sensor publishes state in `HH:MM-HH:MM` format, omits dependent attributes when unavailable, and keeps the tomorrow sensor free of `is_active` even when it has a valid result.
+4. Wire both sensors through the existing registration and coordinator refresh path in `custom_components/energy_optimizer/sensor.py` and shared entity exports.
+5. Extend translation keys in `custom_components/energy_optimizer/translations/en.json` for `midday_buy_window` and `midday_buy_window_tomorrow`.
+6. Add focused tests for quasi-zero precedence, standard fallback, today/tomorrow separation, `price`, `is_active`, and unavailable-state attribute omission.
 
 ## Suggested File Touches
 
@@ -35,23 +35,26 @@ Add two derived Home Assistant text sensors that expose the cheapest 8-quarter-h
 
 ## Validation
 
-Run focused tests first:
+Run focused feature tests first:
 
 ```bash
 wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py -q'
 ```
 
-If day-separation logic is also covered in a broader time-window regression file, run the expanded focused set:
+If helper or supporting payload behavior also moved, rerun the expanded focused set:
 
 ```bash
-wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py tests/test_time_windows.py -q'
+wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py tests/test_helpers.py -q'
 ```
 
 ## Manual Verification
 
-1. Ensure the configured sell-price source exposes both `prices_today` and `prices_tomorrow` payloads.
+1. Ensure the configured buy-price source exposes both `prices_today` and `prices_tomorrow` payloads.
 2. Reload the integration.
-3. Confirm the current-day sensor publishes a value like `12:00-14:00` and a `price` attribute when complete `prices_today` data exists.
-4. Confirm the tomorrow sensor publishes its own value and `price` when complete `prices_tomorrow` data exists.
-5. Remove or corrupt one required hourly input for only one day and confirm only the corresponding sensor becomes `unavailable` and omits `price`.
-6. Change only the buy-price input and confirm neither derived sell-window sensor changes.
+3. Confirm the today sensor publishes a value like `10:00-12:00`, a rounded `price`, and `is_active` set to `on` or `off` when complete `prices_today` data exists.
+4. Confirm the tomorrow sensor publishes its own `HH:MM-HH:MM` value and rounded `price` when complete `prices_tomorrow` data exists.
+5. Confirm the tomorrow sensor does **not** publish `is_active` even when it has a valid window.
+6. Introduce at least one buy-price entry below `0.05 PLN/kWh` and confirm the published window expands to the full span from the first to the last such occurrence in that day.
+7. Remove or corrupt one required hourly input for only one day and confirm only the corresponding sensor becomes `unavailable` and omits dependent attributes.
+8. Use a current local time inside the published today window and confirm `is_active == on`; move outside the window and confirm `is_active == off`.
+9. Change only the sell-price input and confirm neither midday buy-window sensor changes.

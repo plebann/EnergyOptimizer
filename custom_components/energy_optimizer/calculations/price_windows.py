@@ -15,6 +15,7 @@ MIDDAY_END = time(16, 0)
 WINDOW_SLOTS = 8
 SLOT_DURATION = timedelta(minutes=15)
 HOUR_DURATION = timedelta(hours=1)
+QUASI_ZERO_PRICE_THRESHOLD = 0.05
 
 
 @dataclass
@@ -36,6 +37,16 @@ class MiddaySellWindowResult:
     start_local: datetime
     end_local: datetime
     total_cost: float
+    average_price: float
+    slot_count: int = field(default=WINDOW_SLOTS)
+
+
+@dataclass
+class MiddayBuyWindowResult:
+    """Result of the selected midday buy-price window."""
+
+    start_local: datetime
+    end_local: datetime
     average_price: float
     slot_count: int = field(default=WINDOW_SLOTS)
 
@@ -242,6 +253,77 @@ def _extract_buy_hourly_entries(
         )
 
     return sorted(entries_by_start.values(), key=lambda entry: entry.start_local)
+
+
+def _filter_midday_buy_entries(
+    entries: list[HourlyBuyPriceEntry],
+) -> list[HourlyBuyPriceEntry]:
+    """Keep only buy-price entries fully inside the 08:00-16:00 midday range."""
+    return [
+        entry
+        for entry in entries
+        if entry.start_local.time() >= MIDDAY_START
+        and entry.end_local.time() <= MIDDAY_END
+    ]
+
+
+def _build_quasi_zero_midday_buy_window_result(
+    entries: list[HourlyBuyPriceEntry],
+) -> MiddayBuyWindowResult | None:
+    """Return the full span from first to last quasi-zero midday buy-price entry."""
+    qualifying = [
+        entry for entry in entries if entry.buy_price_value < QUASI_ZERO_PRICE_THRESHOLD
+    ]
+    if not qualifying:
+        return None
+
+    first_entry = qualifying[0]
+    last_entry = qualifying[-1]
+    selected_entries = [
+        entry
+        for entry in entries
+        if first_entry.start_local <= entry.start_local <= last_entry.start_local
+    ]
+    if not selected_entries:
+        return None
+
+    average_price = sum(entry.buy_price_value for entry in selected_entries) / len(
+        selected_entries
+    )
+    return MiddayBuyWindowResult(
+        start_local=selected_entries[0].start_local,
+        end_local=selected_entries[-1].end_local,
+        average_price=average_price,
+        slot_count=len(selected_entries) * 4,
+    )
+
+
+def _build_standard_midday_buy_window_result(
+    entries: list[HourlyBuyPriceEntry],
+) -> MiddayBuyWindowResult | None:
+    """Return the cheapest standard two-hour midday buy window."""
+    if len(entries) < 2:
+        return None
+
+    entries_by_start = {entry.start_local: entry for entry in entries}
+    best: MiddayBuyWindowResult | None = None
+
+    for entry in entries:
+        second_entry = entries_by_start.get(entry.start_local + HOUR_DURATION)
+        if second_entry is None:
+            continue
+
+        average_price = (entry.buy_price_value + second_entry.buy_price_value) / 2
+        candidate = MiddayBuyWindowResult(
+            start_local=entry.start_local,
+            end_local=second_entry.end_local,
+            average_price=average_price,
+            slot_count=WINDOW_SLOTS,
+        )
+        if best is None or candidate.average_price < best.average_price:
+            best = candidate
+
+    return best
 
 
 def build_best_buy_window_result(
@@ -467,41 +549,51 @@ def select_midday_window(
     return best
 
 
-def build_midday_sell_window_result(
+def build_midday_buy_window_result(
     prices_today: list[dict[str, Any]],
     entity_id: str,
     *,
     now_local: datetime | None = None,
-) -> MiddaySellWindowResult | None:
-    """Build the cheapest midday sell window from hourly shared-state payload."""
+) -> MiddayBuyWindowResult | None:
+    """Build the midday buy window from hourly shared-state payload."""
     reference_now = now_local or dt_util.now()
     if reference_now.tzinfo is None:
         reference_now = reference_now.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+    local_tz = reference_now.tzinfo or dt_util.DEFAULT_TIME_ZONE
 
-    points = expand_hourly_sell_prices(
-        prices_today,
-        entity_id,
-        reference_now.date(),
-        reference_now.tzinfo,
+    entries = _filter_midday_buy_entries(
+        _extract_buy_hourly_entries(
+            prices_today,
+            entity_id,
+            reference_now.date(),
+            local_tz,
+        )
     )
-    return select_midday_window(points)
+    if not entries:
+        return None
+
+    quasi_zero_result = _build_quasi_zero_midday_buy_window_result(entries)
+    if quasi_zero_result is not None:
+        return quasi_zero_result
+
+    return _build_standard_midday_buy_window_result(entries)
 
 
-def format_sell_window(result: MiddaySellWindowResult) -> str:
-    """Format a midday sell window result as HH:MM-HH:MM."""
+def format_buy_window(result: MiddayBuyWindowResult) -> str:
+    """Format a midday buy window result as HH:MM-HH:MM."""
     start = result.start_local.strftime("%H:%M")
     end = result.end_local.strftime("%H:%M")
     return f"{start}-{end}"
 
 
-def find_cheapest_midday_sell_window(
+def find_cheapest_midday_buy_window(
     prices_today: list[dict[str, Any]],
     entity_id: str,
     *,
     now_local: datetime | None = None,
-) -> MiddaySellWindowResult | None:
-    """Compatibility wrapper for midday sell window calculation."""
-    return build_midday_sell_window_result(
+) -> MiddayBuyWindowResult | None:
+    """Compatibility wrapper for midday buy window calculation."""
+    return build_midday_buy_window_result(
         prices_today,
         entity_id,
         now_local=now_local,
