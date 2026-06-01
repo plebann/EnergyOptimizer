@@ -5,7 +5,7 @@
 
 ## Summary
 
-Add four additive Home Assistant pricing sensors for the best two-hour buy windows: today night, today day, tomorrow night, and tomorrow day. The implementation will reuse coordinator-managed buy-price payloads `prices_today` and `prices_tomorrow`, extend `price_windows.py` with a pure two-hour minimum-average selector for buy windows, publish state as `HH:MM` with `price` and `is_negative` attributes, apply deterministic tie-breaking specific to night and day ranges, keep the affected slice `unavailable` when a full valid window cannot be formed, and preserve all existing sensors and pricing behavior unchanged.
+Add four additive Home Assistant pricing sensors for the best two-hour buy windows: today night, today day, tomorrow night, and tomorrow day. The implementation will reuse coordinator-managed buy-price payloads `prices_today` and `prices_tomorrow`, extend `price_windows.py` with a pure two-hour minimum-average selector for buy windows, publish state as `HH:MM` with `price` and `is_negative` attributes, apply deterministic tie-breaking specific to night and day ranges, keep the affected slice `unavailable` when hourly data for that day/range is missing, and preserve all existing sensors and pricing behavior unchanged.
 
 ## Technical Context
 
@@ -16,7 +16,7 @@ Add four additive Home Assistant pricing sensors for the best two-hour buy windo
 **Target Platform**: Home Assistant custom integration distributed via HACS
 **Project Type**: Single-project Home Assistant custom integration  
 **Performance Goals**: Recompute all four derived sensors inside the existing refresh/listener path with negligible overhead by scanning at most the hourly buy-price entries already held for `prices_today` and `prices_tomorrow`  
-**Constraints**: UI-only configuration; no blocking I/O; no new external APIs; buy-price data only; input payloads come from existing buy-price shared-state snapshots; each record must expose `time` and `price`; candidate starts are limited to full hours; windows last exactly 2 hours; night range is `00:00-06:00`; day range is `10:00-18:00`; state format is `HH:MM`; `price` rounds to 3 decimals; `is_negative` is true only when the selected average is below zero; empty `prices_tomorrow` keeps tomorrow sensors `unavailable`; translation-backed naming and stable config-entry-scoped unique IDs; no removal or regression of existing sensors  
+**Constraints**: UI-only configuration; no blocking I/O; no new external APIs; buy-price data only; input payloads come from existing buy-price shared-state snapshots; each record must expose `time` and `price`; candidate starts are limited to full hours; windows last exactly 2 hours; night range is `00:00-06:00`; day range is `10:00-16:00`; state format is `HH:MM`; `price` rounds to 3 decimals; `is_negative` is true only when the selected average is below zero; empty `prices_tomorrow` keeps tomorrow sensors `unavailable`; translation-backed naming and stable config-entry-scoped unique IDs; no removal or regression of existing sensors  
 **Scale/Scope**: Four additional derived sensors, one generalized buy-window selection core, additive entity publication beside the existing pricing sensors, translation updates, and targeted tests for range filtering, tie-breaks, day separation, attribute publication, and controlled degradation
 
 ## Constitution Check
@@ -25,7 +25,7 @@ Add four additive Home Assistant pricing sensors for the best two-hour buy windo
 
 - **HA-first scope**: PASS before design. The feature remains a read-only Home Assistant output derived from existing buy-price entities and does not add a parallel data source or control path.
 - **Module separation**: PASS before design. The plan keeps window-selection logic in the calculations layer and limits Home Assistant publication concerns to pricing sensor entities and registration files.
-- **Controlled degradation**: PASS before design. The spec requires per-slice `unavailable` behavior for missing or invalid two-hour candidates and explicitly treats empty `prices_tomorrow` as missing data for tomorrow only.
+- **Controlled degradation**: PASS before design. The spec requires per-slice `unavailable` behavior when hourly data is missing for the evaluated slice and explicitly treats empty `prices_tomorrow` as missing data for tomorrow only.
 - **Naming and registry stability**: PASS before design. New sensors will stay translation-backed, inherit `_attr_has_entity_name = True`, keep stable unique IDs scoped to the config entry, and coexist with the current pricing sensor set.
 - **Testing and observability**: PASS before design. The feature increases observability through explicit derived sensors and requires deterministic tests for calculation rules, attribute publication, and additive registration.
 
@@ -33,7 +33,7 @@ Add four additive Home Assistant pricing sensors for the best two-hour buy windo
 
 - **HA-first scope**: PASS after design. `research.md`, `data-model.md`, and the contract keep the feature within additive HA-derived sensor publication using coordinator state as the sole source.
 - **Module separation**: PASS after design. The design centralizes candidate parsing and two-hour selection helpers in `calculations/price_windows.py` while keeping `pricing.py` thin and declarative.
-- **Controlled degradation**: PASS after design. The design requires `unavailable` for any slice without a complete valid two-hour window, isolates today/tomorrow and night/day behavior, and omits attributes whenever the sensor is unavailable.
+- **Controlled degradation**: PASS after design. The design requires `unavailable` when evaluated slice data is missing, isolates today/tomorrow and night/day behavior, and omits attributes whenever the sensor is unavailable.
 - **Naming and registry stability**: PASS after design. The design uses four explicit translation-backed sensor variants with stable IDs and preserves the existing integration sensor surface.
 - **Testing and observability**: PASS after design. The design adds explicit attribute publication, preserves deterministic tie-breaking, and requires targeted tests for both algorithmic and HA-facing behavior.
 

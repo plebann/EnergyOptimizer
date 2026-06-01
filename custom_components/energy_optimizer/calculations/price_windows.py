@@ -15,6 +15,7 @@ MIDDAY_END = time(16, 0)
 WINDOW_SLOTS = 8
 SLOT_DURATION = timedelta(minutes=15)
 HOUR_DURATION = timedelta(hours=1)
+ZERO_PRICE_THRESHOLD = 0.05
 
 
 @dataclass
@@ -407,6 +408,9 @@ def expand_hourly_sell_prices(
             _LOGGER.debug("Skipping invalid hourly sell-price entry: %s", entry)
             continue
 
+        if sell_price < ZERO_PRICE_THRESHOLD:
+            sell_price = 0.0
+
         source_period = f"{slot_start:%H:%M}-{(slot_start + HOUR_DURATION):%H:%M}"
         for quarter in range(4):
             quarter_start = slot_start + quarter * SLOT_DURATION
@@ -440,8 +444,41 @@ def _filter_midday_points(
 def select_midday_window(
     points: list[QuarterHourPricePoint],
 ) -> MiddaySellWindowResult | None:
-    """Select the cheapest contiguous 8-quarter-hour midday window."""
+    """Select the midday sell window per zero-price expansion and 8-slot fallback rules."""
     midday_points = _filter_midday_points(sorted(points, key=lambda point: point.start_local))
+    if not midday_points:
+        return None
+
+    # Zero mode: when >2 midday hours are zero-priced, span from the earliest
+    # zero hour start to the latest zero hour end (including non-zero gaps).
+    zero_hour_starts = sorted(
+        {
+            point.start_local.replace(minute=0, second=0, microsecond=0)
+            for point in midday_points
+            if point.sell_price_value == 0
+        }
+    )
+    if len(zero_hour_starts) > 2:
+        window_start = zero_hour_starts[0]
+        window_end = zero_hour_starts[-1] + HOUR_DURATION
+        window_points = [
+            point
+            for point in midday_points
+            if point.start_local >= window_start and point.end_local <= window_end
+        ]
+        if not window_points:
+            return None
+
+        total_cost = sum(point.sell_price_value for point in window_points)
+        slot_count = len(window_points)
+        return MiddaySellWindowResult(
+            start_local=window_start,
+            end_local=window_end,
+            total_cost=total_cost,
+            average_price=total_cost / slot_count,
+            slot_count=slot_count,
+        )
+
     if len(midday_points) < WINDOW_SLOTS:
         return None
 

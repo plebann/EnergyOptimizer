@@ -211,6 +211,7 @@ mypy custom_components/energy_optimizer
 - Config Entries: https://developers.home-assistant.io/docs/config_entries_index
 
 <!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+For additional context about technologies, architecture, coding standards,
+HACS/HA constraints, and implementation commands, read:
+`specs/004-buy-window-sensors/plan.md`
 <!-- SPECKIT END -->

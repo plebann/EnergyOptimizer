@@ -280,7 +280,7 @@ def test_midday_sell_window_sensor_publishes_correct_window(monkeypatch: pytest.
     sensor = _midday_sensor(_payload(low_start_hour=10))
 
     assert sensor.native_value == "10:00-12:00"
-    assert sensor.extra_state_attributes == {"price": 0.5}
+    assert sensor.extra_state_attributes == {"price": 0.5, "is_active": "off"}
 
 
 @pytest.mark.unit
@@ -293,6 +293,48 @@ def test_midday_sell_window_tomorrow_sensor_publishes_correct_window(monkeypatch
 
     assert sensor.native_value == "11:00-13:00"
     assert sensor.extra_state_attributes == {"price": 0.5}
+
+
+@pytest.mark.unit
+def test_midday_sell_window_sensor_sets_is_active_on_inside_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 10, 30, tzinfo=TZ))
+
+    sensor = _midday_sensor(_payload(low_start_hour=10))
+
+    assert sensor.native_value == "10:00-12:00"
+    assert sensor.extra_state_attributes == {"price": 0.5, "is_active": "on"}
+
+
+@pytest.mark.unit
+def test_midday_sell_window_sensor_sets_is_active_off_outside_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 13, 0, tzinfo=TZ))
+
+    sensor = _midday_sensor(_payload(low_start_hour=10))
+
+    assert sensor.native_value == "10:00-12:00"
+    assert sensor.extra_state_attributes == {"price": 0.5, "is_active": "off"}
+
+
+@pytest.mark.unit
+def test_midday_sell_window_tomorrow_sensor_does_not_publish_is_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 10, 30, tzinfo=TZ))
+
+    sensor = _midday_tomorrow_sensor(_payload_for_day(9, low_start_hour=11))
+
+    assert sensor.native_value == "11:00-13:00"
+    assert "is_active" not in sensor.extra_state_attributes
 
 
 @pytest.mark.unit
@@ -437,7 +479,7 @@ def test_tomorrow_sensor_unavailable_omits_price_without_affecting_today(
     tomorrow_sensor.hass = MagicMock()
 
     assert today_sensor.native_value == "10:00-12:00"
-    assert today_sensor.extra_state_attributes == {"price": 0.5}
+    assert today_sensor.extra_state_attributes == {"price": 0.5, "is_active": "off"}
     assert tomorrow_sensor.native_value is None
     assert tomorrow_sensor.extra_state_attributes == {}
 
@@ -930,9 +972,9 @@ def test_day_buy_window_sensor_publishes_expected_result_for_real_may_13_prices(
         ]
     )
 
-    assert sensor.native_value == "15:00"
+    assert sensor.native_value == "14:00"
     assert sensor.extra_state_attributes == {
-        "price": 0.714,
+        "price": 0.845,
         "is_negative": False,
     }
 
