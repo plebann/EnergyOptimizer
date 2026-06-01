@@ -222,6 +222,7 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
     def __init__(self, coordinator, config_entry, config) -> None:
         """Initialize the sensor with the current coordinator snapshot."""
         super().__init__(coordinator, config_entry, config)
+        self._attr_available = False
         self._apply_result(self._get_result())
 
     def _get_result(self):
@@ -248,10 +249,12 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
     def _apply_result(self, result) -> None:
         """Update cached state and attributes from a computed window result."""
         if result is None:
+            self._attr_available = False
             self._attr_native_value = None
             self._attr_extra_state_attributes = {}
             return
 
+        self._attr_available = True
         self._attr_native_value = format_buy_window(result)
         attributes: dict[str, object] = {
             "price": round(result.average_price, 2)
@@ -264,6 +267,11 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
                 else "off"
             )
         self._attr_extra_state_attributes = attributes
+
+    @property
+    def available(self) -> bool:
+        """Return True only when the coordinator and midday buy-window result are available."""
+        return super().available and self._attr_available
 
     @property
     def native_value(self) -> str | None:
