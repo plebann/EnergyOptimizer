@@ -153,7 +153,7 @@ class ActionScheduler:
         daytime_min_price_hour_entity = get_internal_sensor_entity_id(
             self.hass,
             entry_id=self.entry.entry_id,
-            unique_id_suffix="midday_sell_window",
+            unique_id_suffix="midday_buy_window",
         )
         if daytime_min_price_hour_entity:
             self._listeners.append(
