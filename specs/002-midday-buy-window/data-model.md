@@ -1,128 +1,122 @@
-# Data Model: Rozszerzenie Sensorów Okna Najniższej Ceny Zakupu
+# Data Model: Rozszerzenie Sensorów Okna Najniższej Ceny Sprzedaży
 
-## 1. HourlyBuyPriceEntry
+## 1. DayScopedPricePayload
 
-**Purpose**: One hourly buy-price record consumed from `prices_today` or `prices_tomorrow`.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `start_local` | `datetime` | Local start timestamp of the represented full hour |
-| `end_local` | `datetime` | Local end timestamp exactly one hour after `start_local` |
-| `business_date` | `date` | Local day derived from `start_local` |
-| `buy_price_value` | `float` | Parsed buy-price value for that hour |
-| `source_entity_id` | `str` | Configured buy-price source entity |
-
-**Validation rules**
-- `buy_price_value` must be numeric.
-- `end_local` must equal `start_local + 1 hour`.
-- The record must belong to the evaluated local business day.
-- Duplicate hourly starts for the same day are treated as invalid for deterministic selection.
-
-**Relationships**
-- Many `HourlyBuyPriceEntry` objects form one `DayScopedBuyPricePayload`.
-- The same entries can feed either a `QuasiZeroMiddayBuyWindow` result or a `StandardMiddayBuyWindowCandidate` result.
-
-## 2. DayScopedBuyPricePayload
-
-**Purpose**: One day-specific payload of buy-price entries sourced from coordinator-managed shared state.
+**Purpose**: Hourly sell-price payload for one specific local business day, sourced from shared integration state.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `payload_key` | `str` | Either `prices_today` or `prices_tomorrow` |
-| `evaluation_date_local` | `date` | Local date the payload is expected to represent |
-| `source_entity_id` | `str` | Configured buy-price source entity |
-| `entries` | `list[HourlyBuyPriceEntry]` | Hourly buy-price entries for that day |
+| `payload_key` | `str` | Source key used by the integration, either `prices_today` or `prices_tomorrow` |
+| `evaluation_date_local` | `date` | Local business day represented by the payload |
+| `entries` | `list[HourlyPriceEntry]` | Hourly source entries for that day |
+| `source_entity_id` | `str` | Entity ID of the configured sell-price source |
 
 **Validation rules**
-- `payload_key` must be either `prices_today` or `prices_tomorrow`.
-- All valid entries must belong to `evaluation_date_local`.
-- The payload is treated as buy-price data only and must not mix with sell-price state.
-- An empty or invalid payload cannot produce an available sensor state.
+- `payload_key` must be one of `prices_today` or `prices_tomorrow`.
+- `entries` may be empty, but an empty payload cannot produce an available sensor state.
+- `evaluation_date_local` must match the day semantics of the payload key.
+- The payload must be treated as sell-price data only and must not be mixed with buy-price state.
 
 **Relationships**
-- One payload feeds exactly one day-scoped sensor variant.
-- One payload may produce zero or more standard candidates, or one quasi-zero span result.
+- One `DayScopedPricePayload` produces zero or more `QuarterHourPricePoint` objects.
+- One payload drives exactly one published derived sensor.
 
-## 3. StandardMiddayBuyWindowCandidate
+## 2. HourlyPriceEntry
 
-**Purpose**: One standard contiguous midday candidate used when the evaluated day contains no quasi-zero buy prices.
+**Purpose**: One hourly sell-price source item before quarter-hour expansion.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `start_local` | `datetime` | Local start timestamp of the represented hour |
+| `end_local` | `datetime` | Local end timestamp of the represented hour |
+| `sell_price_value` | `float` | Sell-price value for the hour |
+| `source_period` | `str` | Original textual period from the source payload |
+
+**Validation rules**
+- `sell_price_value` must be numeric.
+- `end_local` must be exactly one hour after `start_local`.
+- The entry must belong to the payload's `evaluation_date_local`.
+
+## 3. QuarterHourPricePoint
+
+**Purpose**: Normalized quarter-hour sell-price sample derived from one hourly entry.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `start_local` | `datetime` | Local start timestamp of the quarter-hour slot |
+| `end_local` | `datetime` | Local end timestamp of the quarter-hour slot |
+| `evaluation_date_local` | `date` | Local business date inherited from the payload |
+| `sell_price_value` | `float` | Parsed sell price value used for comparisons and averaging |
+| `payload_key` | `str` | Source key that produced the point |
+
+**Validation rules**
+- `start_local` and `end_local` must describe one 15-minute slot.
+- The point must belong to the payload's `evaluation_date_local`.
+- Only slots fully inside 08:00-16:00 are candidates for this feature.
+- Each hourly entry must expand into 4 consecutive quarter-hour points with the same `sell_price_value`.
+
+**Relationships**
+- Many `QuarterHourPricePoint` objects feed one `MiddaySellWindowCandidate`.
+
+## 4. MiddaySellWindowCandidate
+
+**Purpose**: One contiguous 8-slot candidate window evaluated against other windows for a single day-scoped payload.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `start_local` | `datetime` | Local start timestamp of the candidate window |
-| `end_local` | `datetime` | Local end timestamp after 8 quarter-hours / 2 hours |
-| `slot_count` | `int` | Number of quarter-hour slots represented; always 8 for valid standard candidates |
-| `average_price` | `float` | Arithmetic mean of the two hourly buy-price values backing the window |
-| `source_entries` | `tuple[HourlyBuyPriceEntry, HourlyBuyPriceEntry]` | Ordered hourly records forming the window |
+| `end_local` | `datetime` | Local end timestamp after 8 quarter-hours |
+| `slot_count` | `int` | Number of quarter-hour points; always 8 for valid candidates |
+| `total_cost` | `float` | Sum of the 8 sell-price values |
+| `average_price` | `float` | Arithmetic mean of the 8 sell-price values before final sensor publication |
+| `points` | `list[QuarterHourPricePoint]` | Ordered points making up the candidate |
 
 **Validation rules**
 - `slot_count` must equal 8.
-- `start_local` must be `>= 08:00` and `end_local` must be `<= 16:00` for the evaluated day.
-- The second source entry must start exactly one hour after the first.
-- `average_price` must be derived only from buy-price values.
+- `points` must be contiguous with no quarter-hour gaps.
+- `start_local` must be `>= 08:00` and `end_local` must be `<= 16:00` for the evaluated local day.
+- `total_cost` and `average_price` are derived only from sell-price values.
 
 **Selection rules**
-- This candidate type is used only when no quasi-zero buy-price entries exist in the evaluated day.
-- The chosen candidate is the one with the lowest `average_price`.
-- On equal `average_price`, the earliest `start_local` wins.
+- Choose the candidate with the lowest `total_cost`.
+- On equal `total_cost`, choose the earliest `start_local`.
 
-## 4. QuasiZeroMiddayBuyWindow
+**Relationships**
+- Many candidates may be derived from one `DayScopedPricePayload`.
+- Exactly zero or one candidate becomes the published sensor state for a given day.
 
-**Purpose**: Priority result used when the evaluated day contains at least one buy-price entry below `0.05 PLN/kWh`.
+## 5. MiddaySellWindowSensorState
+
+**Purpose**: Published Home Assistant state contract for one day-scoped derived sensor.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `start_local` | `datetime` | Start of the first quasi-zero hourly entry in the day |
-| `end_local` | `datetime` | End of the last quasi-zero hourly entry in the day |
-| `slot_count` | `int` | Number of quarter-hour slots covered by the full selected span |
-| `average_price` | `float` | Arithmetic mean of all hourly buy-price values between the first and last quasi-zero entries, inclusive |
-| `selected_entries` | `list[HourlyBuyPriceEntry]` | Ordered hourly entries covered by the published span |
-
-**Validation rules**
-- At least one entry in the evaluated day must satisfy `buy_price_value < 0.05`.
-- The span begins at the first qualifying entry and ends at the last qualifying entry.
-- All hourly entries between those boundaries are included in the published span, even if some intermediate prices are higher.
-- `slot_count` equals `len(selected_entries) * 4`.
-
-**Selection rules**
-- This result has priority over the standard midday 8-quarter-hour selector.
-- If any quasi-zero entry exists, no standard candidate may replace it for that day.
-
-## 5. MiddayBuyWindowSensorState
-
-**Purpose**: Published Home Assistant state contract for one today/tomorrow midday buy-window sensor.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `sensor_key` | `str` | Stable identifier such as `midday_buy_window` or `midday_buy_window_tomorrow` |
+| `sensor_key` | `str` | Stable identifier for the derived sensor, e.g. current-day or tomorrow variant |
 | `state` | `str \| unavailable` | Published sensor value in `HH:MM-HH:MM` format or `unavailable` |
-| `price` | `float \| omitted` | Rounded average buy price in PLN/kWh when available |
-| `is_active` | `"on" \| "off" \| omitted` | Today-only informational attribute indicating whether the current local time falls inside the published today window |
-| `selected_start_local` | `datetime \| None` | Selected start time when a valid result exists |
-| `selected_end_local` | `datetime \| None` | Selected end time when a valid result exists |
+| `price` | `float \| omitted` | Rounded average price in PLN/kWh when available; omitted when unavailable |
+| `selected_start_local` | `datetime \| None` | Selected start time when a valid window exists |
+| `selected_end_local` | `datetime \| None` | Selected end time when a valid window exists |
 | `evaluation_date_local` | `date` | Local day used for selection |
-| `payload_key` | `str` | Source payload key used for this sensor |
-| `source_entity_id` | `str` | Buy-price source entity used to build the current state |
+| `payload_key` | `str` | Source key used for this sensor instance |
+| `source_entity_id` | `str` | Source entity used to build the current state |
 
 **Validation rules**
 - `state` must match `HH:MM-HH:MM` when available.
 - `price` must be rounded to 2 decimal places when present.
 - `price` must be omitted when `state` is `unavailable`.
-- `is_active` must be published only for the today sensor and only when a valid today window exists.
-- `is_active` must be omitted for the tomorrow sensor.
-- Buy-window sensor state depends only on buy-price payload data, not on sell-price changes.
+- The sensor must ignore buy-price state changes for both calculation and published output.
 
 ## State Transitions
 
 | From | To | Trigger |
 |------|----|---------|
-| `unavailable` | `available` | The relevant day payload contains enough valid buy-price data to produce either a quasi-zero span or a standard midday window |
-| `available` | `available` | The selected window, rounded `price`, or today-only `is_active` changes after a payload or current-time update |
-| `available` | `unavailable` | The relevant day payload becomes empty, invalid, duplicated, sparse, or otherwise insufficient to prove a valid result |
-| `unavailable` | `unavailable` | Updates still fail to produce one valid day-scoped result |
+| `unavailable` | `available` | Sufficient valid quarter-hour data appears for that sensor's day-scoped payload |
+| `available` | `available` | The cheapest valid window or rounded `price` changes after a payload update for that same day |
+| `available` | `unavailable` | Source data for that day becomes incomplete, non-numeric, or no longer covers a full 8-slot window |
+| `unavailable` | `unavailable` | Updates still do not provide enough contiguous valid data for that sensor's day |
 
 ## Notes
 
-- No feature-specific persistence is required; both sensors reflect current coordinator state.
-- The same day-scoped input model applies to today and tomorrow; only `payload_key`, `evaluation_date_local`, and the today-only `is_active` publication rule differ.
-- The existing buy-window presentation remains the primary output; `price` and `is_active` are additive informational attributes.
+- No feature-specific persistence is required; both sensors reflect current shared Home Assistant price data for their respective day scopes.
+- The entity layer remains read-only and does not own scheduler or configuration state.
+- The same calculation model applies to both sensors; only the payload key and evaluated local day differ.

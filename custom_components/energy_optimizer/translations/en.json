@@ -303,11 +303,11 @@
       "evening_sell_window_tomorrow": {
         "name": "Evening sell window tomorrow"
       },
-      "midday_buy_window": {
-        "name": "Midday buy window"
+      "midday_sell_window": {
+        "name": "Midday sell window"
       },
-      "midday_buy_window_tomorrow": {
-        "name": "Midday buy window tomorrow"
+      "midday_sell_window_tomorrow": {
+        "name": "Midday sell window tomorrow"
       },
       "scheduled_actions": {
         "name": "Scheduled actions"

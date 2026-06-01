@@ -83,7 +83,7 @@ async def async_run_solar_charge_block(
     min_price = get_internal_window_price(
         hass,
         entry_id=entry.entry_id,
-        unique_id_suffix="midday_buy_window",
+        unique_id_suffix="midday_sell_window",
         entity_name="Daytime min price sensor",
         attribute_name="price",
         fallback_entity_id=config.get(CONF_DAYTIME_MIN_PRICE_SENSOR),

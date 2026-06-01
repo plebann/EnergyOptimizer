@@ -26,16 +26,8 @@ def get_internal_sensor_entity_id(
     """Resolve an integration-owned entity_id from entry_id + unique_id suffix."""
     from .const import DOMAIN
 
+    registry = er.async_get(hass)
     unique_id = f"{entry_id}_{unique_id_suffix}"
-    try:
-        registry = er.async_get(hass)
-    except (KeyError, AttributeError, TypeError):
-        _LOGGER.warning(
-            "Entity registry unavailable while resolving internal %s entity for unique_id %s",
-            entity_domain,
-            unique_id,
-        )
-        return None
     try:
         entity_id = registry.async_get_entity_id(entity_domain, DOMAIN, unique_id)
     except AttributeError:
@@ -786,7 +778,7 @@ def resolve_daytime_min_price_time(
         entity_id = get_internal_sensor_entity_id(
             hass,
             entry_id=entry_id,
-            unique_id_suffix="midday_buy_window",
+            unique_id_suffix="midday_sell_window",
         )
         resolved_time = _resolve_time_from_state_or_attribute(hass, entity_id)
         if resolved_time is not None:
