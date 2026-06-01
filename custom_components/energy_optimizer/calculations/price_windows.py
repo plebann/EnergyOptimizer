@@ -572,9 +572,14 @@ def build_midday_buy_window_result(
     if not entries:
         return None
 
+    has_quasi_zero = any(
+        entry.buy_price_value < QUASI_ZERO_PRICE_THRESHOLD for entry in entries
+    )
     quasi_zero_result = _build_quasi_zero_midday_buy_window_result(entries)
     if quasi_zero_result is not None:
         return quasi_zero_result
+    if has_quasi_zero:
+        return None
 
     return _build_standard_midday_buy_window_result(entries)
 
