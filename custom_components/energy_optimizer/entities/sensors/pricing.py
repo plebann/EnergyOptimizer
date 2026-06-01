@@ -9,7 +9,7 @@ from homeassistant.util import dt as dt_util
 from ..base import EnergyOptimizerSensor
 from ...calculations.price_windows import (
     build_best_buy_window_result,
-    build_midday_buy_window_result,
+    build_midday_sell_window_result,
     build_ranked_sell_window_result,
     format_buy_window,
 )
@@ -226,8 +226,8 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
         self._apply_result(self._get_result())
 
     def _get_result(self):
-        """Return the selected midday buy window result for this sensor variant."""
-        entity_id = self.config.get(CONF_BUY_PRICE_SENSOR)
+        """Return the selected midday sell window result for this sensor variant."""
+        entity_id = self.config.get(CONF_SELL_PRICE_SENSOR)
         if not entity_id or self.coordinator.data is None:
             return None
 
@@ -244,7 +244,7 @@ class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):
             return None
 
         now_local = dt_util.now() + timedelta(days=self._day_offset)
-        return build_midday_buy_window_result(prices, entity_id, now_local=now_local)
+        return build_midday_sell_window_result(prices, entity_id, now_local=now_local)
 
     def _apply_result(self, result) -> None:
         """Update cached state and attributes from a computed window result."""

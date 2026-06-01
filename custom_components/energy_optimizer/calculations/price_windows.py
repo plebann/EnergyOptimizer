@@ -598,3 +598,90 @@ def find_cheapest_midday_buy_window(
         entity_id,
         now_local=now_local,
     )
+
+
+def _build_quasi_zero_midday_sell_window_result(
+    candidates: list[HourlySellPriceCandidate],
+) -> MiddayBuyWindowResult | None:
+    """Return the full span from first to last quasi-zero midday sell-price candidate."""
+    qualifying = [
+        c for c in candidates if c.sell_price_value < QUASI_ZERO_PRICE_THRESHOLD
+    ]
+    if not qualifying:
+        return None
+
+    first_c = qualifying[0]
+    last_c = qualifying[-1]
+    selected = [
+        c
+        for c in candidates
+        if first_c.start_local <= c.start_local <= last_c.start_local
+    ]
+    if not selected:
+        return None
+
+    average_price = sum(c.sell_price_value for c in selected) / len(selected)
+    return MiddayBuyWindowResult(
+        start_local=selected[0].start_local,
+        end_local=selected[-1].end_local,
+        average_price=average_price,
+        slot_count=len(selected) * 4,
+    )
+
+
+def _build_standard_midday_sell_window_result(
+    candidates: list[HourlySellPriceCandidate],
+) -> MiddayBuyWindowResult | None:
+    """Return the cheapest standard two-hour midday sell window."""
+    if len(candidates) < 2:
+        return None
+
+    candidates_by_start = {c.start_local: c for c in candidates}
+    best: MiddayBuyWindowResult | None = None
+
+    for candidate in candidates:
+        second = candidates_by_start.get(candidate.start_local + HOUR_DURATION)
+        if second is None:
+            continue
+
+        average_price = (candidate.sell_price_value + second.sell_price_value) / 2
+        result = MiddayBuyWindowResult(
+            start_local=candidate.start_local,
+            end_local=second.end_local,
+            average_price=average_price,
+            slot_count=WINDOW_SLOTS,
+        )
+        if best is None or result.average_price < best.average_price:
+            best = result
+
+    return best
+
+
+def build_midday_sell_window_result(
+    prices_today: list[dict[str, Any]],
+    entity_id: str,
+    *,
+    now_local: datetime | None = None,
+) -> MiddayBuyWindowResult | None:
+    """Build the midday window with the worst sell prices from hourly shared-state payload."""
+    reference_now = now_local or dt_util.now()
+    if reference_now.tzinfo is None:
+        reference_now = reference_now.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+    local_tz = reference_now.tzinfo or dt_util.DEFAULT_TIME_ZONE
+
+    candidates = _extract_ranked_hourly_candidates(
+        prices_today,
+        entity_id,
+        reference_now.date(),
+        local_tz,
+        range_start_hour=8,
+        range_end_hour=16,
+    )
+    if not candidates:
+        return None
+
+    quasi_zero_result = _build_quasi_zero_midday_sell_window_result(candidates)
+    if quasi_zero_result is not None:
+        return quasi_zero_result
+
+    return _build_standard_midday_sell_window_result(candidates)

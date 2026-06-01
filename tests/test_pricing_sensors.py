@@ -119,8 +119,8 @@ def _coordinator_with_prices(
 
 
 def _midday_sensor(prices_today: list[dict[str, object]], config: dict[str, object] | None = None) -> MiddaySellWindowSensor:
-    config = config or {CONF_BUY_PRICE_SENSOR: "sensor.buy"}
-    coordinator = _coordinator_with_prices(prices_today, None, str(config[CONF_BUY_PRICE_SENSOR]))
+    config = config or {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
+    coordinator = _coordinator_with_prices(prices_today, None, str(config[CONF_SELL_PRICE_SENSOR]))
     sensor = MiddaySellWindowSensor(coordinator, _mock_entry(), config)
     sensor.hass = MagicMock()
     return sensor
@@ -130,8 +130,8 @@ def _midday_tomorrow_sensor(
     prices_tomorrow: list[dict[str, object]],
     config: dict[str, object] | None = None,
 ) -> MiddaySellWindowTomorrowSensor:
-    config = config or {CONF_BUY_PRICE_SENSOR: "sensor.buy"}
-    coordinator = _coordinator_with_prices(None, prices_tomorrow, str(config[CONF_BUY_PRICE_SENSOR]))
+    config = config or {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
+    coordinator = _coordinator_with_prices(None, prices_tomorrow, str(config[CONF_SELL_PRICE_SENSOR]))
     sensor = MiddaySellWindowTomorrowSensor(coordinator, _mock_entry(), config)
     sensor.hass = MagicMock()
     return sensor
@@ -308,25 +308,25 @@ def test_midday_sell_window_tomorrow_sensor_publishes_correct_window(monkeypatch
 
 
 @pytest.mark.unit
-def test_midday_sell_window_sensor_ignores_buy_price_only_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_midday_sell_window_sensor_ignores_state_only_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     from homeassistant.util import dt as dt_util
 
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
 
     config = {
-        CONF_BUY_PRICE_SENSOR: "sensor.buy",
+        CONF_SELL_PRICE_SENSOR: "sensor.sell",
     }
     coordinator = _coordinator_with_prices(
         prices_today=_payload(low_start_hour=10),
-        price_entity="sensor.buy",
+        price_entity="sensor.sell",
     )
-    coordinator.data["states"]["sensor.buy"] = 0.25
+    coordinator.data["states"]["sensor.sell"] = 0.25
 
     sensor = MiddaySellWindowSensor(coordinator, _mock_entry(), config)
     sensor.hass = MagicMock()
 
     first_value = sensor.native_value
-    coordinator.data["states"]["sensor.buy"] = 9.99
+    coordinator.data["states"]["sensor.sell"] = 9.99
     second_value = sensor.native_value
 
     assert first_value == "10:00-12:00"
@@ -352,17 +352,17 @@ def test_midday_sell_window_sensor_updates_when_shared_payload_changes(
 
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
 
-    coordinator = _coordinator_with_prices(_payload(low_start_hour=10), None, "sensor.buy")
+    coordinator = _coordinator_with_prices(_payload(low_start_hour=10), None, "sensor.sell")
     sensor = MiddaySellWindowSensor(
         coordinator,
         _mock_entry(),
-        {CONF_BUY_PRICE_SENSOR: "sensor.buy"},
+        {CONF_SELL_PRICE_SENSOR: "sensor.sell"},
     )
     sensor.hass = MagicMock()
 
     assert sensor.native_value == "10:00-12:00"
 
-    coordinator.data["price_payloads"]["sensor.buy"] = {"prices_today": _payload(low_start_hour=8)}
+    coordinator.data["price_payloads"]["sensor.sell"] = {"prices_today": _payload(low_start_hour=8)}
 
     assert sensor.native_value == "08:00-10:00"
 
@@ -411,9 +411,9 @@ def test_today_and_tomorrow_sensors_are_isolated_by_payload(monkeypatch: pytest.
     coordinator = _coordinator_with_prices(
         _payload(low_start_hour=10),
         _payload_for_day(9, low_start_hour=11),
-        "sensor.buy",
+        "sensor.sell",
     )
-    config = {CONF_BUY_PRICE_SENSOR: "sensor.buy"}
+    config = {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
 
     today_sensor = MiddaySellWindowSensor(coordinator, _mock_entry(), config)
     tomorrow_sensor = MiddaySellWindowTomorrowSensor(coordinator, _mock_entry(), config)
@@ -423,7 +423,7 @@ def test_today_and_tomorrow_sensors_are_isolated_by_payload(monkeypatch: pytest.
     assert today_sensor.native_value == "10:00-12:00"
     assert tomorrow_sensor.native_value == "11:00-13:00"
 
-    coordinator.data["price_payloads"]["sensor.buy"]["prices_tomorrow"] = _payload_for_day(
+    coordinator.data["price_payloads"]["sensor.sell"]["prices_tomorrow"] = _payload_for_day(
         9, low_start_hour=8
     )
 
@@ -439,8 +439,8 @@ def test_tomorrow_sensor_unavailable_omits_price_without_affecting_today(
 
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
 
-    coordinator = _coordinator_with_prices(_payload(low_start_hour=10), [], "sensor.buy")
-    config = {CONF_BUY_PRICE_SENSOR: "sensor.buy"}
+    coordinator = _coordinator_with_prices(_payload(low_start_hour=10), [], "sensor.sell")
+    config = {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
 
     today_sensor = MiddaySellWindowSensor(coordinator, _mock_entry(), config)
     tomorrow_sensor = MiddaySellWindowTomorrowSensor(coordinator, _mock_entry(), config)

@@ -6,6 +6,7 @@ from .price_windows import (
     MiddaySellWindowResult,
     QuarterHourPricePoint,
     build_midday_buy_window_result,
+    build_midday_sell_window_result,
     expand_hourly_sell_prices,
     find_cheapest_midday_buy_window,
     format_buy_window,
@@ -28,6 +29,7 @@ from .utils import clamp, interpolate, is_valid_percentage, safe_float
 __all__ = [
     # Price windows
     "build_midday_buy_window_result",
+    "build_midday_sell_window_result",
     "expand_hourly_sell_prices",
     "find_cheapest_midday_buy_window",
     "format_buy_window",
