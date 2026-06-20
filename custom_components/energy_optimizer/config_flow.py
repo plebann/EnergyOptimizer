@@ -31,6 +31,7 @@ from .const import (
     CONF_HEAT_PUMP_FORECAST_DOMAIN,
     CONF_HEAT_PUMP_FORECAST_SERVICE,
     CONF_INVERTER_EXPORT_SURPLUS_SWITCH,
+    CONF_INVERTER_OFFGRID_SWITCH,
     CONF_LOAD_USAGE_00_04,
     CONF_LOAD_USAGE_04_08,
     CONF_LOAD_USAGE_08_12,
@@ -280,6 +281,9 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="select")
                 ),
                 vol.Optional(CONF_INVERTER_EXPORT_SURPLUS_SWITCH): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="switch")
+                ),
+                vol.Optional(CONF_INVERTER_OFFGRID_SWITCH): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="switch")
                 ),
                 vol.Optional(CONF_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
@@ -656,6 +660,16 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 domain_error="not_switch_entity",
             )
 
+        offgrid_switch = user_input.get(CONF_INVERTER_OFFGRID_SWITCH)
+        if offgrid_switch:
+            self._validate_entity(
+                entity_id=offgrid_switch,
+                field=CONF_INVERTER_OFFGRID_SWITCH,
+                errors=errors,
+                expected_domain="switch",
+                domain_error="not_switch_entity",
+            )
+
         return errors
 
     async def _validate_program_entities(
@@ -916,6 +930,12 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_INVERTER_EXPORT_SURPLUS_SWITCH,
                     default=self._config_entry.data.get(CONF_INVERTER_EXPORT_SURPLUS_SWITCH),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="switch")
+                ),
+                vol.Optional(
+                    CONF_INVERTER_OFFGRID_SWITCH,
+                    default=self._config_entry.data.get(CONF_INVERTER_OFFGRID_SWITCH),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="switch")
                 ),

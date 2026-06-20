@@ -8,6 +8,7 @@ from homeassistant.core import Context
 
 from ..const import (
     CONF_INVERTER_EXPORT_SURPLUS_SWITCH,
+    CONF_INVERTER_OFFGRID_SWITCH,
     CONF_PRICE_SENSOR,
     CONF_SELL_PRICE_SENSOR,
     SUN_ABOVE_HORIZON,
@@ -33,13 +34,6 @@ async def async_run_export_block_control(
         return
     config = entry.data
 
-    export_surplus_switch = config.get(CONF_INVERTER_EXPORT_SURPLUS_SWITCH)
-    if not export_surplus_switch:
-        _LOGGER.warning(
-            "Export block control: inverter export surplus switch not configured — skip"
-        )
-        return
-
     sun_state = hass.states.get(SUN_ENTITY)
     if sun_state is None or sun_state.state != SUN_ABOVE_HORIZON:
         _LOGGER.debug("Export block control: sun not above horizon — skip")
@@ -60,6 +54,74 @@ async def async_run_export_block_control(
         ),
     )
     if price is None:
+        return
+
+    offgrid_switch = config.get(CONF_INVERTER_OFFGRID_SWITCH)
+    if offgrid_switch:
+        offgrid_state = hass.states.get(str(offgrid_switch))
+        if offgrid_state is None:
+            _LOGGER.warning(
+                "Export block control: off-grid switch entity %s unavailable — skip",
+                offgrid_switch,
+            )
+            return
+        if str(offgrid_state.state).lower() in ("unavailable", "unknown"):
+            _LOGGER.warning(
+                "Export block control: off-grid switch entity %s is %s — skip",
+                offgrid_switch,
+                offgrid_state.state,
+            )
+            return
+
+        is_offgrid = str(offgrid_state.state).lower() == "on"
+        desired_offgrid = round(price, 1) <= 0
+
+        _LOGGER.info(
+            "Export block control (off-grid path): price=%.4f, switch=%s, desired=%s",
+            price,
+            "on" if is_offgrid else "off",
+            "on" if desired_offgrid else "off",
+        )
+
+        if desired_offgrid == is_offgrid:
+            _LOGGER.debug(
+                "Export block control: no change — off-grid switch already in desired state (%s)",
+                "on" if is_offgrid else "off",
+            )
+            return
+
+        if desired_offgrid:
+            _LOGGER.info(
+                "Export block control: activating off-grid mode (price %.4f, switch off -> on)",
+                price,
+            )
+            await turn_on_switch(
+                hass,
+                str(offgrid_switch),
+                entry=entry,
+                logger=_LOGGER,
+                context=Context(),
+            )
+            return
+
+        _LOGGER.info(
+            "Export block control: deactivating off-grid mode (price %.4f, switch on -> off)",
+            price,
+        )
+        await turn_off_switch(
+            hass,
+            str(offgrid_switch),
+            entry=entry,
+            logger=_LOGGER,
+            context=Context(),
+        )
+        return
+
+    export_surplus_switch = config.get(CONF_INVERTER_EXPORT_SURPLUS_SWITCH)
+    if not export_surplus_switch:
+        _LOGGER.warning(
+            "Export block control: inverter export surplus switch not configured — skip"
+        )
         return
 
     switch_state = hass.states.get(str(export_surplus_switch))

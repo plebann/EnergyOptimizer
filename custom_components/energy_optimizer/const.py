@@ -34,6 +34,7 @@ CONF_BATTERY_CAPACITY_ENTITY = "battery_capacity_entity"
 
 CONF_WORK_MODE_ENTITY = "work_mode_entity"
 CONF_INVERTER_EXPORT_SURPLUS_SWITCH = "inverter_export_surplus_switch"
+CONF_INVERTER_OFFGRID_SWITCH = "inverter_offgrid_switch"
 CONF_CHARGE_CURRENT_ENTITY = "charge_current_entity"
 CONF_DISCHARGE_CURRENT_ENTITY = "discharge_current_entity"
 CONF_EXPORT_POWER_ENTITY = "export_power_entity"
