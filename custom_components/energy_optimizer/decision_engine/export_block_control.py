@@ -65,6 +65,13 @@ async def async_run_export_block_control(
                 offgrid_switch,
             )
             return
+        if str(offgrid_state.state).lower() in ("unavailable", "unknown"):
+            _LOGGER.warning(
+                "Export block control: off-grid switch entity %s is %s — skip",
+                offgrid_switch,
+                offgrid_state.state,
+            )
+            return
 
         is_offgrid = str(offgrid_state.state).lower() == "on"
         desired_offgrid = round(price, 1) <= 0
