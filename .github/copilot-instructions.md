@@ -213,5 +213,5 @@ mypy custom_components/energy_optimizer
 <!-- SPECKIT START -->
 For additional context about technologies, architecture, coding standards,
 HACS/HA constraints, and implementation commands, read:
-`specs/004-buy-window-sensors/plan.md`
+`specs/005-inverter-offgrid-zero-price/plan.md`
 <!-- SPECKIT END -->
