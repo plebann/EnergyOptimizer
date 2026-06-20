@@ -173,6 +173,31 @@ async def test_offgrid_turns_on_when_price_zero_and_switch_off() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("price", "offgrid_switch_state", "expected_service"),
+    [
+        ("0.04", "off", "turn_on"),  # rounds to 0.0 at 1dp
+        ("0.05", "on", "turn_off"),  # rounds above 0.0 at 1dp
+    ],
+)
+async def test_offgrid_zero_price_threshold_boundary(
+    price: str, offgrid_switch_state: str, expected_service: str
+) -> None:
+    """Validate rounding-based zero-price threshold behavior."""
+    hass = _setup_hass_with_offgrid(price=price, offgrid_switch_state=offgrid_switch_state)
+
+    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
+
+    hass.services.async_call.assert_called_once_with(
+        "switch",
+        expected_service,
+        {"entity_id": _OFFGRID_SWITCH},
+        blocking=True,
+        context=hass.services.async_call.call_args.kwargs.get("context"),
+    )
+
+
+@pytest.mark.asyncio
 async def test_offgrid_no_action_when_price_zero_and_already_on() -> None:
     """Do nothing when price is effectively zero and off-grid is already on."""
     hass = _setup_hass_with_offgrid(price="0.0", offgrid_switch_state="on")
