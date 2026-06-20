@@ -284,6 +284,14 @@ async def test_offgrid_entity_unavailable_skip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_offgrid_entity_state_unavailable_skip() -> None:
+    """Do nothing when off-grid switch state is unavailable."""
+    hass = _setup_hass_with_offgrid(price="0.0", offgrid_switch_state="unavailable")
+
+    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
+
+    hass.services.async_call.assert_not_called()
+@pytest.mark.asyncio
 async def test_offgrid_no_action_when_sun_not_above_horizon() -> None:
     """Do nothing when sun is below horizon and off-grid switch is configured."""
     hass = _setup_hass_with_offgrid(
