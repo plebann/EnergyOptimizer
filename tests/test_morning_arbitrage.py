@@ -243,6 +243,7 @@ def test_morning_arbitrage_missing_sell_price():
     kwh, details = _calculate_morning_arbitrage_kwh(
         hass,
         _arb_config(),
+        entry_id="entry-1",
         forecasts=_forecasts(),
         bc=_bc(),
         sell_start_hour=10,
@@ -259,6 +260,7 @@ def test_morning_arbitrage_sell_price_below_threshold():
     kwh, details = _calculate_morning_arbitrage_kwh(
         hass,
         _arb_config(min_price=0.5),
+        entry_id="entry-1",
         forecasts=_forecasts(),
         bc=_bc(),
         sell_start_hour=10,
@@ -276,6 +278,7 @@ def test_morning_arbitrage_missing_remaining_forecast():
     kwh, details = _calculate_morning_arbitrage_kwh(
         hass,
         _arb_config(),
+        entry_id="entry-1",
         forecasts=_forecasts(),
         bc=_bc(),
         sell_start_hour=10,
@@ -292,6 +295,7 @@ def test_morning_arbitrage_invalid_remaining_forecast():
     kwh, details = _calculate_morning_arbitrage_kwh(
         hass,
         _arb_config(),
+        entry_id="entry-1",
         forecasts=_forecasts(),
         bc=_bc(),
         sell_start_hour=10,
@@ -308,6 +312,7 @@ def test_morning_arbitrage_arb_limit_zero():
     kwh, details = _calculate_morning_arbitrage_kwh(
         hass,
         _arb_config(),
+        entry_id="entry-1",
         forecasts=_forecasts(),
         bc=_bc(),
         sell_start_hour=10,
@@ -326,6 +331,7 @@ def test_morning_arbitrage_enabled():
     kwh, details = _calculate_morning_arbitrage_kwh(
         hass,
         _arb_config(),
+        entry_id="entry-1",
         forecasts=_forecasts(),
         bc=_bc(),
         sell_start_hour=10,
