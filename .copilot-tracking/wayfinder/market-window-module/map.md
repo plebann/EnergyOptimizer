@@ -10,6 +10,7 @@ children:
   - tickets/003-choose-the-external-seam-for-market-window-resolution.md
   - tickets/004-decide-adapters-and-fallback-policy.md
   - tickets/005-define-migration-and-test-strategy.md
+  - tickets/006-decide-market-window-result-shape.md
 ---
 
 ## Destination
@@ -29,11 +30,11 @@ This map covers all price/tariff window knowledge: buy windows, sell windows, mi
 ## Decisions so far
 
 - [Name the Market Window domain language](tickets/001-name-the-market-window-domain-language.md) — confirmed Market Window vocabulary for categories, rankings, sources, and validity states.
+- [Inventory current window behavior and compatibility rules](tickets/002-inventory-current-window-behavior-and-compatibility-rules.md) — captured the behavior the deepened Market Window module must preserve across helpers, calculations, sensors, Scheduler, Decision Engine reads, warnings, and tests.
 
 ## Not yet specified
 
 - Whether Scheduler schedule snapshots should remain part of the Market Window module or become a separate Schedule Intent module depends on the seam decision.
-- Whether buy-window and sell-window result shapes should converge depends on the behavior inventory.
 - Whether any compatibility adapter is temporary or permanent depends on fallback policy and migration risk.
 
 ## Out of scope

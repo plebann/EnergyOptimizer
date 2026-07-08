@@ -8,6 +8,7 @@ parent: ../map.md
 blocked_by:
   - 001-name-the-market-window-domain-language.md
   - 002-inventory-current-window-behavior-and-compatibility-rules.md
+  - 006-decide-market-window-result-shape.md
 blocks:
   - 004-decide-adapters-and-fallback-policy.md
   - 005-define-migration-and-test-strategy.md
