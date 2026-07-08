@@ -2,8 +2,8 @@
 title: Deepen the Market Window Module
 labels:
   - wayfinder:map
-status: open
-assignee:
+status: closed
+assignee: GitHub Copilot
 children:
   - tickets/001-name-the-market-window-domain-language.md
   - tickets/002-inventory-current-window-behavior-and-compatibility-rules.md
@@ -31,11 +31,14 @@ This map covers all price/tariff window knowledge: buy windows, sell windows, mi
 
 - [Name the Market Window domain language](tickets/001-name-the-market-window-domain-language.md) — confirmed Market Window vocabulary for categories, rankings, sources, and validity states.
 - [Inventory current window behavior and compatibility rules](tickets/002-inventory-current-window-behavior-and-compatibility-rules.md) — captured the behavior the deepened Market Window module must preserve across helpers, calculations, sensors, Scheduler, Decision Engine reads, warnings, and tests.
+- [Decide Market Window result shape](tickets/006-decide-market-window-result-shape.md) — preserve distinct category-specific internal results behind a smaller caller-facing Market Window interface.
+- [Choose the external seam for Market Window resolution](tickets/003-choose-the-external-seam-for-market-window-resolution.md) — place the seam in a new `market_windows` package crossed by pricing sensors, Scheduler, and Decision Engine Market Window reads.
+- [Decide adapters and fallback policy](tickets/004-decide-adapters-and-fallback-policy.md) — keep adapters internal and preserve coordinator-only sensor reads plus internal-sensor, fallback-entity, and default resolution policy.
+- [Define migration and test strategy](tickets/005-define-migration-and-test-strategy.md) — migrate by thin slices through compatibility wrappers, using existing behavior tests plus new seam-level tests.
 
 ## Not yet specified
 
-- Whether Scheduler schedule snapshots should remain part of the Market Window module or become a separate Schedule Intent module depends on the seam decision.
-- Whether any compatibility adapter is temporary or permanent depends on fallback policy and migration risk.
+- None for this planning map.
 
 ## Out of scope
 
