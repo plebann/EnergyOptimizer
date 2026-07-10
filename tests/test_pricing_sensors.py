@@ -21,6 +21,7 @@ from custom_components.energy_optimizer.entities.sensors.pricing import (
     MiddaySellWindowSensor,
     MiddaySellWindowTomorrowSensor,
     MinArbitrageMarginSensor,
+    MorningSellBuyReferenceSensor,
     MorningSellWindowSensor,
     MorningSellWindowTomorrowSensor,
     NightBuyWindowSensor,
@@ -143,6 +144,26 @@ def _morning_sensor(prices_today: list[dict[str, object]]) -> MorningSellWindowS
         coordinator,
         _mock_entry(),
         {CONF_SELL_PRICE_SENSOR: "sensor.sell"},
+    )
+    sensor.hass = MagicMock()
+    return sensor
+
+
+def _morning_sell_buy_reference_sensor(
+    prices_today: list[dict[str, object]],
+    *,
+    config: dict[str, object] | None = None,
+) -> MorningSellBuyReferenceSensor:
+    config = config or {CONF_BUY_PRICE_SENSOR: "sensor.buy"}
+    coordinator = _coordinator_with_prices(
+        prices_today,
+        None,
+        str(config[CONF_BUY_PRICE_SENSOR]),
+    )
+    sensor = MorningSellBuyReferenceSensor(
+        coordinator,
+        _mock_entry(),
+        config,
     )
     sensor.hass = MagicMock()
     return sensor
@@ -804,11 +825,15 @@ def test_today_buy_window_sensors_publish_state_and_attributes(
 
     assert night_sensor.native_value == "01:00"
     assert night_sensor.extra_state_attributes == {
+        "end": "03:00",
+        "duration_hours": 2,
         "price": 0.15,
         "is_negative": False,
     }
     assert day_sensor.native_value == "11:00"
     assert day_sensor.extra_state_attributes == {
+        "end": "13:00",
+        "duration_hours": 2,
         "price": 0.25,
         "is_negative": False,
     }
@@ -845,11 +870,15 @@ def test_tomorrow_buy_window_sensors_publish_state_and_attributes(
 
     assert night_sensor.native_value == "02:00"
     assert night_sensor.extra_state_attributes == {
+        "end": "04:00",
+        "duration_hours": 2,
         "price": 0.15,
         "is_negative": False,
     }
     assert day_sensor.native_value == "11:00"
     assert day_sensor.extra_state_attributes == {
+        "end": "13:00",
+        "duration_hours": 2,
         "price": 0.2,
         "is_negative": False,
     }
@@ -876,6 +905,8 @@ def test_tomorrow_buy_window_sensors_are_unavailable_for_empty_payload_without_a
 
     assert today_sensor.native_value == "01:00"
     assert today_sensor.extra_state_attributes == {
+        "end": "03:00",
+        "duration_hours": 2,
         "price": 0.15,
         "is_negative": False,
     }
@@ -898,6 +929,8 @@ def test_buy_window_sensor_sets_is_negative_true_only_for_negative_average(
 
     assert sensor.native_value == "11:00"
     assert sensor.extra_state_attributes == {
+        "end": "13:00",
+        "duration_hours": 2,
         "price": -0.25,
         "is_negative": True,
     }
@@ -917,6 +950,8 @@ def test_buy_window_sensor_keeps_zero_average_available_with_false_is_negative(
 
     assert sensor.native_value == "10:00"
     assert sensor.extra_state_attributes == {
+        "end": "12:00",
+        "duration_hours": 2,
         "price": 0.0,
         "is_negative": False,
     }
@@ -928,11 +963,73 @@ def test_buy_window_sensors_have_translation_keys_and_prefixed_unique_ids() -> N
     tomorrow_day = _day_buy_tomorrow_sensor(
         _buy_payload_for_hours(9, {10: 0.90, 11: 0.60, 12: -0.20, 13: 0.80})
     )
+    morning_reference = _morning_sell_buy_reference_sensor(
+        _buy_payload_for_hours(8, {8: 0.5, 9: 0.4, 10: 0.3, 11: 0.2, 12: 0.1})
+    )
 
     assert today_night.translation_key == "night_buy_window"
     assert today_night.unique_id == "entry-1_night_buy_window"
     assert tomorrow_day.translation_key == "day_buy_window_tomorrow"
     assert tomorrow_day.unique_id == "entry-1_day_buy_window_tomorrow"
+    assert morning_reference.translation_key == "morning_sell_buy_reference"
+    assert morning_reference.unique_id == "entry-1_morning_sell_buy_reference"
+
+
+@pytest.mark.unit
+def test_morning_sell_buy_reference_sensor_averages_restore_to_tariff_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.entities.sensors.pricing.resolve_morning_max_price_hour",
+        lambda hass, config, entry_id, default_hour=7: 7,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.entities.sensors.pricing.resolve_tariff_end_hour",
+        lambda hass, config, default_hour=13: 13,
+    )
+
+    sensor = _morning_sell_buy_reference_sensor(
+        _buy_payload_for_hours(
+            8,
+            {8: 0.30, 9: 0.40, 10: 0.50, 11: 0.20, 12: 0.10},
+        )
+    )
+
+    assert sensor.native_value == "08:00"
+    assert sensor.extra_state_attributes == {
+        "end": "13:00",
+        "duration_hours": 5,
+        "price": 0.3,
+        "is_negative": False,
+    }
+
+
+@pytest.mark.unit
+def test_morning_sell_buy_reference_sensor_is_unavailable_without_matching_hours(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.entities.sensors.pricing.resolve_morning_max_price_hour",
+        lambda hass, config, entry_id, default_hour=7: 7,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.entities.sensors.pricing.resolve_tariff_end_hour",
+        lambda hass, config, default_hour=13: 13,
+    )
+
+    sensor = _morning_sell_buy_reference_sensor(
+        _buy_payload_for_hours(8, {13: 0.30, 14: 0.40})
+    )
+
+    assert sensor.native_value is None
+    assert sensor.available is False
+    assert sensor.extra_state_attributes == {}
 
 
 @pytest.mark.unit
@@ -974,6 +1071,8 @@ def test_day_buy_window_sensor_publishes_expected_result_for_real_may_13_prices(
 
     assert sensor.native_value == "14:00"
     assert sensor.extra_state_attributes == {
+        "end": "16:00",
+        "duration_hours": 2,
         "price": 0.845,
         "is_negative": False,
     }

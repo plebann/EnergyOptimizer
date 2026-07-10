@@ -31,6 +31,7 @@ from .common import (
     BatteryConfig,
     get_battery_config,
     get_required_current_soc_state,
+    resolve_arbitrage_margin_gate,
     resolve_entry,
 )
 
@@ -78,6 +79,8 @@ class BaseSellStrategy(ABC):
         self.margin: float
         self.integration_context: Context
         self._now_hour: int
+        self._arbitrage_margin_ok: bool
+        self._arbitrage_gate_details: dict[str, float | str]
 
     @property
     @abstractmethod
@@ -93,6 +96,16 @@ class BaseSellStrategy(ABC):
     def clamp_surplus_to_pv(self) -> bool:
         """Whether to clamp surplus by today's PV production."""
         return False
+
+    @property
+    @abstractmethod
+    def arbitrage_buy_reference_suffix(self) -> str:
+        """Unique-id suffix of the Arbitrage Buy Reference sensor."""
+
+    @property
+    @abstractmethod
+    def arbitrage_buy_reference_name(self) -> str:
+        """Human-readable name of the Arbitrage Buy Reference sensor."""
 
     def _get_target_soc_floor(self, *, surplus_kwh: float) -> float:
         """Return minimal target SOC clamp for current strategy context."""
@@ -122,6 +135,29 @@ class BaseSellStrategy(ABC):
     async def _check_early_exit(self) -> DecisionOutcome | None:
         """Optional early-exit hook executed before evaluation."""
         return None
+
+    def _resolve_arbitrage_margin_gate(self) -> tuple[bool, dict[str, float | str]]:
+        """Resolve the shared Arbitrage Margin gate for high-price sell paths."""
+        return resolve_arbitrage_margin_gate(
+            self.hass,
+            entry_id=self.entry.entry_id,
+            sell_price=self.price,
+            min_arbitrage_price=self.threshold_price,
+            buy_reference_unique_id_suffix=self.arbitrage_buy_reference_suffix,
+            buy_reference_entity_name=self.arbitrage_buy_reference_name,
+        )
+
+    def _arbitrage_gate_details_for_outcome(self) -> dict[str, float | str]:
+        """Return Arbitrage Margin details suitable for outcome payloads."""
+        if getattr(self, "_price_unavailable", False):
+            return {}
+        return dict(self._arbitrage_gate_details)
+
+    def _apply_arbitrage_gate_details(self, outcome: DecisionOutcome) -> DecisionOutcome:
+        """Augment an outcome with shared Arbitrage Margin diagnostics."""
+        if details := self._arbitrage_gate_details_for_outcome():
+            outcome.details.update(details)
+        return outcome
 
     def _get_battery_config(self) -> BatteryConfig:
         """Return strategy battery configuration."""
@@ -194,6 +230,12 @@ class BaseSellStrategy(ABC):
         self.margin = self._raw_margin if self._raw_margin is not None else 1.1
         self.battery_config = self._get_battery_config()
         self._now_hour = dt_util.as_local(dt_util.utcnow()).hour
+        self._arbitrage_margin_ok = False
+        self._arbitrage_gate_details = {}
+        if not getattr(self, "_price_unavailable", False):
+            self._arbitrage_margin_ok, self._arbitrage_gate_details = (
+                self._resolve_arbitrage_margin_gate()
+            )
 
         early_outcome = await self._check_early_exit()
         if early_outcome is not None:

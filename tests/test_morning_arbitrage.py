@@ -12,6 +12,7 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
     CONF_DAILY_LOAD_SENSOR,
+    CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
     CONF_MIN_ARBITRAGE_PRICE,
@@ -26,6 +27,10 @@ from custom_components.energy_optimizer.decision_engine.common import (
     BatteryConfig,
     ForecastData,
     _compute_arbitrage_from_cap,
+    resolve_arbitrage_margin_gate,
+)
+from custom_components.energy_optimizer.decision_engine.afternoon_charge import (
+    _calculate_arbitrage_kwh,
 )
 from custom_components.energy_optimizer.decision_engine.morning_charge import (
     _calculate_morning_arbitrage_kwh,
@@ -33,6 +38,8 @@ from custom_components.energy_optimizer.decision_engine.morning_charge import (
 )
 
 pytestmark = pytest.mark.enable_socket
+
+_INTERNAL_SENSOR_PATCH = "custom_components.energy_optimizer.helpers.get_internal_sensor_entity_id"
 
 
 # ---------------------------------------------------------------------------
@@ -225,19 +232,46 @@ def _arb_config(
     }
 
 
+def _afternoon_arb_config(
+    sell_price_entity: str = "sensor.evening_price",
+    min_price: float = 0.5,
+) -> dict:
+    return {
+        CONF_EVENING_MAX_PRICE_SENSOR: sell_price_entity,
+        CONF_MIN_ARBITRAGE_PRICE: min_price,
+    }
+
+
+def _internal_sensor_id(_hass, *, entry_id: str, unique_id_suffix: str, entity_domain: str = "sensor") -> str | None:
+    mapping = {
+        "night_buy_window": "sensor.night_buy_window_internal",
+        "day_buy_window": "sensor.day_buy_window_internal",
+    }
+    return mapping.get(unique_id_suffix)
+
+
 def _arb_hass(
     sell_price: str | None = "0.8",
     remaining: str | None = "3.0",
+    *,
+    night_buy_price: float | None = 0.2,
+    day_buy_price: float | None = 0.3,
 ) -> MagicMock:
     states = {}
     if sell_price is not None:
         states["sensor.morning_price"] = sell_price
+        states["sensor.evening_price"] = sell_price
     if remaining is not None:
         states["sensor.pv_remaining"] = remaining
+    if night_buy_price is not None:
+        states["sensor.night_buy_window_internal"] = ("02:00", {"price": night_buy_price})
+    if day_buy_price is not None:
+        states["sensor.day_buy_window_internal"] = ("13:00", {"price": day_buy_price})
     return _hass_with_states({}, states)
 
 
-def test_morning_arbitrage_missing_sell_price():
+@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
+def test_morning_arbitrage_missing_sell_price(_mock_internal):
     """Returns (0.0, ...) with reason 'missing_morning_sell_price' when entity absent."""
     hass = _arb_hass(sell_price=None)
     kwh, details = _calculate_morning_arbitrage_kwh(
@@ -254,8 +288,9 @@ def test_morning_arbitrage_missing_sell_price():
     assert details["arbitrage_reason"] == "missing_morning_sell_price"
 
 
-def test_morning_arbitrage_sell_price_below_threshold():
-    """Returns (0.0, ...) with reason 'sell_price_below_threshold'."""
+@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
+def test_morning_arbitrage_margin_below_threshold(_mock_internal):
+    """Returns (0.0, ...) with reason 'margin_below_threshold'."""
     hass = _arb_hass(sell_price="0.4")  # below min_price=0.5
     kwh, details = _calculate_morning_arbitrage_kwh(
         hass,
@@ -268,11 +303,32 @@ def test_morning_arbitrage_sell_price_below_threshold():
         required_kwh=0.5,
     )
     assert kwh == 0.0
-    assert details["arbitrage_reason"] == "sell_price_below_threshold"
+    assert details["arbitrage_reason"] == "margin_below_threshold"
     assert details["sell_price"] == pytest.approx(0.4)
+    assert details["buy_reference_price"] == pytest.approx(0.2)
+    assert details["arbitrage_margin"] == pytest.approx(0.2)
 
 
-def test_morning_arbitrage_missing_remaining_forecast():
+@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
+def test_morning_arbitrage_missing_buy_reference_price(_mock_internal):
+    """Returns (0.0, ...) with reason 'missing_buy_reference_price'."""
+    hass = _arb_hass(night_buy_price=None)
+    kwh, details = _calculate_morning_arbitrage_kwh(
+        hass,
+        _arb_config(min_price=0.5),
+        entry_id="entry-1",
+        forecasts=_forecasts(),
+        bc=_bc(),
+        sell_start_hour=10,
+        current_soc=50.0,
+        required_kwh=0.5,
+    )
+    assert kwh == 0.0
+    assert details["arbitrage_reason"] == "missing_buy_reference_price"
+
+
+@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
+def test_morning_arbitrage_missing_remaining_forecast(_mock_internal):
     """Returns (0.0, ...) with reason 'missing_remaining_forecast' when entity absent."""
     hass = _arb_hass(remaining=None)
     kwh, details = _calculate_morning_arbitrage_kwh(
@@ -289,7 +345,8 @@ def test_morning_arbitrage_missing_remaining_forecast():
     assert details["arbitrage_reason"] == "missing_remaining_forecast"
 
 
-def test_morning_arbitrage_invalid_remaining_forecast():
+@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
+def test_morning_arbitrage_invalid_remaining_forecast(_mock_internal):
     """Returns (0.0, ...) with reason 'invalid_remaining_forecast' when state non-numeric."""
     hass = _arb_hass(remaining="unavailable")
     kwh, details = _calculate_morning_arbitrage_kwh(
@@ -306,7 +363,8 @@ def test_morning_arbitrage_invalid_remaining_forecast():
     assert details["arbitrage_reason"] == "invalid_remaining_forecast"
 
 
-def test_morning_arbitrage_arb_limit_zero():
+@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
+def test_morning_arbitrage_arb_limit_zero(_mock_internal):
     """Returns (0.0, ...) with reason 'arb_limit_zero' when battery is full."""
     hass = _arb_hass(sell_price="1.0", remaining="3.0")
     kwh, details = _calculate_morning_arbitrage_kwh(
@@ -324,7 +382,8 @@ def test_morning_arbitrage_arb_limit_zero():
     assert "remaining_forecast_kwh" in details
 
 
-def test_morning_arbitrage_enabled():
+@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
+def test_morning_arbitrage_enabled(_mock_internal):
     """Returns arbitrage_kwh > 0 with reason 'enabled' when all conditions met."""
     # bc: 5 kWh; soc=50 -> 2.5 kWh; required=0.5 -> free_after=2.0; cap=2.0
     hass = _arb_hass(sell_price="1.0", remaining="2.0")
@@ -341,6 +400,8 @@ def test_morning_arbitrage_enabled():
     assert kwh == pytest.approx(2.0)
     assert details["arbitrage_reason"] == "enabled"
     assert details["sell_price"] == pytest.approx(1.0)
+    assert details["buy_reference_price"] == pytest.approx(0.2)
+    assert details["arbitrage_margin"] == pytest.approx(0.8)
     assert details["remaining_forecast_kwh"] == pytest.approx(2.0)
     assert "arb_limit_kwh" in details
     assert "surplus_kwh" in details
@@ -354,7 +415,8 @@ def test_morning_arbitrage_enabled():
 
 
 @pytest.mark.asyncio
-async def test_morning_charge_arbitrage_increases_gap() -> None:
+@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
+async def test_morning_charge_arbitrage_increases_gap(_mock_internal) -> None:
     """Morning charge logs higher gap_kwh when arbitrage is active."""
     base_config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
@@ -393,6 +455,7 @@ async def test_morning_charge_arbitrage_increases_gap() -> None:
         **base_states,
         "sensor.morning_price": "1.0",
         "sensor.pv_remaining": "1.5",
+        "sensor.night_buy_window_internal": ("02:00", {"price": 0.2}),
     }
     hass_arb = _hass_with_states(arb_config, arb_states)
     await async_run_morning_charge(hass_arb, entry_id="entry-1", margin=1.0)
@@ -407,3 +470,40 @@ async def test_morning_charge_arbitrage_increases_gap() -> None:
 
     # Without arbitrage, details should NOT contain arbitrage_kwh
     assert details_no_arb.get("arbitrage_kwh", 0.0) == 0.0
+
+
+@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
+def test_resolve_arbitrage_margin_gate_for_day_window(_mock_internal):
+    """Shared helper should resolve day buy window margin details."""
+    hass = _arb_hass(sell_price="0.9", day_buy_price=0.3)
+    margin_ok, details = resolve_arbitrage_margin_gate(
+        hass,
+        entry_id="entry-1",
+        sell_price=0.9,
+        min_arbitrage_price=0.2,
+        buy_reference_unique_id_suffix="day_buy_window",
+        buy_reference_entity_name="Day buy window",
+    )
+
+    assert margin_ok is True
+    assert details["buy_reference_price"] == pytest.approx(0.3)
+    assert details["arbitrage_margin"] == pytest.approx(0.6)
+
+
+@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
+def test_afternoon_arbitrage_fails_closed_without_buy_reference(_mock_internal):
+    """Afternoon arbitrage should fail closed when the day buy window is unavailable."""
+    hass = _arb_hass(day_buy_price=None)
+    kwh, details = _calculate_arbitrage_kwh(
+        hass,
+        _afternoon_arb_config(min_price=0.2),
+        forecasts=_forecasts(start_hour=15, end_hour=22),
+        bc=_bc(),
+        sell_start_hour=18,
+        current_soc=50.0,
+        required_kwh=0.5,
+        entry_id="entry-1",
+    )
+
+    assert kwh == 0.0
+    assert details["arbitrage_reason"] == "missing_buy_reference_price"

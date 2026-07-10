@@ -27,6 +27,14 @@ class _TestSellStrategy(BaseSellStrategy):
     def sell_type(self) -> str:
         return "evening"
 
+    @property
+    def arbitrage_buy_reference_suffix(self) -> str:
+        return "night_buy_window_tomorrow"
+
+    @property
+    def arbitrage_buy_reference_name(self) -> str:
+        return "Night buy window tomorrow"
+
     def _get_prog_soc_state(self) -> tuple[str, float] | None:
         return None
 

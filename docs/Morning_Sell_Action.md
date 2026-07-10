@@ -7,8 +7,9 @@ energią powyżej poziomu niezbędnego do pokrycia zapotrzebowania w pełnym hor
 oraz (w gałęzi pomocniczej) do zachodu słońca.
 
 Akcja operuje jedną główną ścieżką nadwyżki, ale zawiera rozgałęzienie decyzyjne po relacji ceny
-porannej do wieczornej oraz bramki pojemności (`free_space_kwh` i `surplus_to_sunset_kwh`).
-Sprzedaż następuje tylko przy dodatnim `selected_surplus_kwh` i możliwości obniżenia SOC.
+porannej do wieczornej, **Arbitrage Margin**, oraz bramki pojemności (`free_space_kwh`
+i `surplus_to_sunset_kwh`). Sprzedaż następuje tylko przy dodatnim `selected_surplus_kwh`
+i możliwości obniżenia SOC.
 
 ## Wyzwalacz
 
@@ -21,7 +22,9 @@ Sprzedaż następuje tylko przy dodatnim `selected_surplus_kwh` i możliwości o
 - Polityki SOC (limity minimalne/maksymalne)
 - Docelowy SOC programu 3 (rozładowanie do sieci)
 - Cena porannego szczytu (`morning_max_price_sensor`)
-- Minimalna cena arbitrażu (`min_arbitrage_price`, PLN/MWh) — **logowana, nie blokuje** akcji
+- Minimalna cena arbitrażu (`min_arbitrage_price`, PLN/kWh) — minimalny próg **Arbitrage Margin**
+- Arbitrage Buy Reference: sensor `morning_sell_buy_reference`, liczony jako średnia cena zakupu w oknie
+  `[restore_hour, tariff_end_hour)`
 - Przewidywane zużycie energii w oknie od teraz+1h do końca taryfy dziennej:
   - Zużycie domowe (z czujników w okienkach 4-godzinnych)
   - Zużycie Pompy Ciepła (integracja zewnętrzna)
@@ -45,9 +48,11 @@ Sprzedaż następuje tylko przy dodatnim `selected_surplus_kwh` i możliwości o
 5. **Sufficiency jako diagnostyka/safety**:
   - wyznaczane są `sufficiency_hour`, `sufficiency_reached`, `required_sufficiency_kwh`, `pv_sufficiency_kwh`.
   - wartości sufficiency nie zastępują bazowego `required_kwh`/`pv_forecast_kwh` dla decyzji sell.
-6. **Gałąź free-space i ceny**:
-  - jeśli `surplus_kwh > free_space_kwh` i `morning_price > evening_price` → sprzedaż pełnego `surplus_kwh`.
-  - jeśli `surplus_kwh > free_space_kwh` i `morning_price <= evening_price` → sprzedaż overflow:
+6. **Gałąź free-space, cen i Arbitrage Margin**:
+  - jeśli `surplus_kwh > free_space_kwh`, `morning_price > evening_price` oraz
+    `morning_price - morning_sell_buy_reference_price > min_arbitrage_price`
+    → sprzedaż pełnego `surplus_kwh`.
+  - w przeciwnym razie przy `surplus_kwh > free_space_kwh` → sprzedaż overflow:
     `selected_surplus_kwh = max(surplus_kwh - free_space_kwh, 0)`.
 7. **Gałąź do zachodu (gdy `surplus_kwh <= free_space_kwh` lub `price_unavailable = true`)**:
   - liczony jest pełny `surplus_to_sunset_kwh` dla okna `now+1h -> sunset`.
@@ -123,11 +128,13 @@ bez zaniżania metryk sprzedażowych pełnego horyzontu.
   oraz `compensate=False`.
 
 **Rola ceny i progu arbitrażu:**
-- Cena poranna (`morning_max_price_sensor`) jest **wymagana** — brak → wyjście bez akcji.
-- `min_arbitrage_price` jest **logowany** do danych decyzji jako `threshold_price`.
-- Cena **nie blokuje** sprzedaży — brak rozgałęzienia `price > threshold`.
-- Brak ceny porannej nie przerywa akcji: uruchamiany jest fallback (`price_unavailable=true`) i
-  decyzja przechodzi przez gałąź pojemności/sunset.
+- Cena poranna (`morning_max_price_sensor`) jest **wymagana** dla gałęzi high-price.
+- `min_arbitrage_price` jest nadal logowany do danych decyzji jako `threshold_price`, ale
+  semantycznie oznacza minimalny **Arbitrage Margin**.
+- Gałąź high-price jest aktywna tylko, gdy
+  `morning_price - morning_sell_buy_reference_price > min_arbitrage_price`.
+- Brak ceny porannej albo brak ceny `morning_sell_buy_reference` nie blokuje całej akcji:
+  decyzja przechodzi przez gałąź overflow / sunset (fail-closed tylko dla high-price).
 - Warunki aktywacji eksportu: `selected_surplus_kwh > 0` ORAZ `target_soc < current_soc`.
 
 **Docelowy SOC:**

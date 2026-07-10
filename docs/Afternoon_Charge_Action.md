@@ -4,7 +4,7 @@
 
 Zapewnienie odpowiedniego poziomu energii w magazynie na wieczór i noc (do 22:00) poprzez planowanie ładowania z sieci uruchamianego 2 godziny przed startem taryfy dziennej.
 
-Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w szczycie cenowym. Arbitraż jest aktywowany tylko, gdy cena sprzedaży przekracza `min_arbitrage_price`.
+Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w szczycie cenowym. Arbitraż jest aktywowany tylko, gdy **Arbitrage Margin** (`sell_price - day_buy_window_price`) ściśle przekracza `min_arbitrage_price`.
 
 ## Wyzwalacz
 
@@ -22,10 +22,11 @@ Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w
   - Zużycie CWU (integracja zewnętrzna) - tymczasowo niedostępne
 - Przewidywana produkcja fotowoltaiczna (z integracją Solcast), z uwzględnieniem kompensacji prognozy na podstawie bieżącej produkcji (bez użycia współczynnika `pv_efficiency`)
 - Współczynnik kompensacji PV (sensor: PV Forecast Compensation) — uśredniany z kompensacją „dzisiejszą”
-- `min_arbitrage_price` (PLN/kWh) – próg opłacalności arbitrażu
+- `min_arbitrage_price` (PLN/kWh) – minimalny próg **Arbitrage Margin**
 - `pv_production_sensor` – rzeczywista produkcja PV do tej pory (kWh)
 - `pv_forecast_today` i `pv_forecast_remaining` – do urealnienia prognozy (na potrzeby arbitrażu)
-- `sell_window_price` – cena sprzedaży (warunek arbitrażu)
+- `sell_window_price` – cena sprzedaży
+- Arbitrage Buy Reference: cena `day_buy_window` (średnia cena 2h dziennego okna zakupu)
 - Straty dzienne falownika
 - Sprawność magazynu (domyślnie 90%):
    - przy wyznaczaniu rezerwy uwzględnia straty **tylko na rozładowaniu**
@@ -50,7 +51,8 @@ Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w
    - Jeśli **rezerwa + prognoza PV >= zapotrzebowanie**: Brak akcji, energia wystarczy
    - Jeśli **deficyt > 0**: Oblicz ile energii załadować uwzględniając sprawność magazynu i zaplanuj doładowanie
 6. **Arbitraż (po wyznaczeniu deficytu)**:
-    - Jeśli `sell_price <= min_arbitrage_price` → brak arbitrażu
+    - Jeśli `sell_price - day_buy_window_price <= min_arbitrage_price` → brak arbitrażu
+    - Jeśli brak ceny sprzedaży albo ceny `day_buy_window` → brak arbitrażu (fail-closed)
     - Urealnij prognozę PV:
        - `forecast_adjusted = pv_forecast_today * pv_production / (pv_forecast_today - pv_forecast_remaining)`
        - Jeśli mianownik <= 0 lub brak danych → brak arbitrażu
@@ -99,7 +101,8 @@ flowchart TD
 
 ### Arbitraż – wzory i ograniczenia
 
-- **Warunek aktywacji**: `sell_price > min_arbitrage_price`.
+- **Warunek aktywacji**: `sell_price - day_buy_window_price > min_arbitrage_price`.
+- Próg działa tylko jako bramka on/off i nie zmienia wzoru na `arb_kwh`.
 - **Urealniona prognoza PV**:
    - `forecast_adjusted = pv_forecast_today * pv_production / (pv_forecast_today - pv_forecast_remaining)`
 - **Bufor** (nadwyżka PV do okna sprzedaży):

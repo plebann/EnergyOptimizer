@@ -20,6 +20,8 @@ from custom_components.energy_optimizer.helpers import (
     resolve_evening_max_price_hour,
     resolve_evening_second_max_price_hour,
     resolve_morning_max_price_hour,
+    resolve_night_buy_window_duration_hours,
+    resolve_night_buy_window_start_hour,
     resolve_tariff_end_hour,
     resolve_tariff_start_hour,
 )
@@ -44,11 +46,17 @@ def create_mock_config():
     }
 
 
-def create_time_state(time_value: str, domain: str = "time"):
+def create_time_state(
+    time_value: str,
+    domain: str = "time",
+    *,
+    attributes: dict[str, object] | None = None,
+):
     """Create a mock time entity state."""
     state = MagicMock()
     state.state = time_value
     state.domain = domain
+    state.attributes = attributes or {}
     return state
 
 
@@ -480,6 +488,86 @@ def test_resolve_morning_max_price_hour_from_internal_sensor_hh_mm_range(
     result = resolve_morning_max_price_hour(hass, {}, entry_id="entry_abc", default_hour=8)
 
     assert result == 6
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_night_buy_window_start_hour_from_internal_sensor(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_night_buy_window_start_hour reads the night window start from state."""
+    mock_get_internal.return_value = "sensor.eo_night_buy_window"
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state("02:00", domain="sensor")
+
+    result = resolve_night_buy_window_start_hour(
+        hass,
+        {},
+        entry_id="entry_abc",
+        default_hour=4,
+    )
+
+    assert result == 2
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_night_buy_window_start_hour_falls_back_to_default(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_night_buy_window_start_hour falls back when the sensor is unavailable."""
+    mock_get_internal.return_value = None
+    hass = create_mock_hass()
+    hass.states.get.return_value = None
+
+    result = resolve_night_buy_window_start_hour(
+        hass,
+        {},
+        entry_id="entry_abc",
+        default_hour=4,
+    )
+
+    assert result == 4
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_night_buy_window_duration_hours_from_internal_sensor(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_night_buy_window_duration_hours reads the duration attribute."""
+    mock_get_internal.return_value = "sensor.eo_night_buy_window"
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state(
+        "02:00",
+        domain="sensor",
+        attributes={"duration_hours": 4},
+    )
+
+    result = resolve_night_buy_window_duration_hours(
+        hass,
+        {},
+        entry_id="entry_abc",
+        default_hours=2.0,
+    )
+
+    assert result == pytest.approx(4.0)
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_night_buy_window_duration_hours_falls_back_to_default(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_night_buy_window_duration_hours falls back when missing."""
+    mock_get_internal.return_value = "sensor.eo_night_buy_window"
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state("02:00", domain="sensor")
+
+    result = resolve_night_buy_window_duration_hours(
+        hass,
+        {},
+        entry_id="entry_abc",
+        default_hours=2.0,
+    )
+
+    assert result == pytest.approx(2.0)
 
 
 @patch(_INTERNAL_SENSOR_PATCH)

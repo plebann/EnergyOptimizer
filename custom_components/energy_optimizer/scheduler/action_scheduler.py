@@ -41,6 +41,7 @@ from ..helpers import (
     resolve_evening_max_price_hour,
     resolve_evening_second_max_price_hour,
     resolve_morning_max_price_hour,
+    resolve_night_buy_window_start_hour,
     resolve_tariff_start_hour,
 )
 
@@ -59,6 +60,7 @@ class ActionScheduler:
         self.hass = hass
         self.entry = entry
         self._listeners: list[Callable[[], None]] = []
+        self._morning_charge_listener: Callable[[], None] | None = None
         self._afternoon_listener: Callable[[], None] | None = None
         self._morning_sell_listener: Callable[[], None] | None = None
         self._evening_sell_listener: Callable[[], None] | None = None
@@ -72,11 +74,7 @@ class ActionScheduler:
 
     def start(self) -> None:
         """Start scheduling fixed actions."""
-        self._listeners.append(
-            async_track_time_change(
-                self.hass, self._handle_morning_charge, hour=4, minute=0, second=1
-            )
-        )
+        self._schedule_morning_charge()
         self._schedule_afternoon_charge()
         self._listeners.append(
             async_track_time_change(
@@ -150,6 +148,20 @@ class ActionScheduler:
                 )
             )
 
+        night_buy_window_entity = get_internal_sensor_entity_id(
+            self.hass,
+            entry_id=self.entry.entry_id,
+            unique_id_suffix="night_buy_window",
+        )
+        if night_buy_window_entity:
+            self._listeners.append(
+                async_track_state_change_event(
+                    self.hass,
+                    [str(night_buy_window_entity)],
+                    self._handle_night_buy_window_change,
+                )
+            )
+
         daytime_min_price_hour_entity = get_internal_sensor_entity_id(
             self.hass,
             entry_id=self.entry.entry_id,
@@ -172,6 +184,9 @@ class ActionScheduler:
         for remove_listener in self._listeners:
             remove_listener()
         self._listeners.clear()
+        if self._morning_charge_listener is not None:
+            self._morning_charge_listener()
+            self._morning_charge_listener = None
         if self._afternoon_listener is not None:
             self._afternoon_listener()
             self._afternoon_listener = None
@@ -203,7 +218,7 @@ class ActionScheduler:
         self._clear_schedule_snapshot()
 
     async def _handle_morning_charge(self, now: datetime) -> None:
-        """Run morning charge routine at 04:00."""
+        """Run morning charge routine at the resolved night buy window start."""
         _LOGGER.info("Scheduler triggering morning grid charge")
         await async_run_morning_charge(
             self.hass,
@@ -280,6 +295,10 @@ class ActionScheduler:
     async def _handle_tariff_start_change(self, event) -> None:
         """Reschedule afternoon charge when tariff start hour changes."""
         self._schedule_afternoon_charge()
+
+    async def _handle_night_buy_window_change(self, event) -> None:
+        """Reschedule morning charge when the night buy window changes."""
+        self._schedule_morning_charge()
 
     async def _handle_evening_peak_hour_change(self, event) -> None:
         """Reschedule evening peak sell when peak hour changes."""
@@ -363,6 +382,27 @@ class ActionScheduler:
         self._afternoon_listener = async_track_time_change(
             self.hass,
             self._handle_afternoon_charge,
+            hour=hour,
+            minute=0,
+            second=1,
+        )
+        self._publish_schedule_snapshot()
+
+    def _schedule_morning_charge(self) -> None:
+        """Schedule morning charge at the night buy window start hour."""
+        if self._morning_charge_listener is not None:
+            self._morning_charge_listener()
+            self._morning_charge_listener = None
+
+        hour = resolve_night_buy_window_start_hour(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+            default_hour=4,
+        )
+        self._morning_charge_listener = async_track_time_change(
+            self.hass,
+            self._handle_morning_charge,
             hour=hour,
             minute=0,
             second=1,
@@ -564,9 +604,18 @@ class ActionScheduler:
             self._build_action_entry(
                 key="morning_charge",
                 label="Morning grid charge",
-                scheduled_for=self._resolve_local_datetime(hour=4, minute=0, now=now),
-                kind="fixed",
-                source="fixed",
+                scheduled_for=self._resolve_local_datetime(
+                    hour=resolve_night_buy_window_start_hour(
+                        self.hass,
+                        self.entry.data,
+                        entry_id=self.entry.entry_id,
+                        default_hour=4,
+                    ),
+                    minute=0,
+                    now=now,
+                ),
+                kind="dynamic",
+                source="night_buy_window_sensor",
                 order=10,
             )
         )

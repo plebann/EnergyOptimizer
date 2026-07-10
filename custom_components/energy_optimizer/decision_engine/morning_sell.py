@@ -63,6 +63,16 @@ class MorningSellStrategy(BaseSellStrategy):
         """Sell type persisted for restore."""
         return "morning"
 
+    @property
+    def arbitrage_buy_reference_suffix(self) -> str:
+        """Return the morning sell Arbitrage Buy Reference sensor suffix."""
+        return "morning_sell_buy_reference"
+
+    @property
+    def arbitrage_buy_reference_name(self) -> str:
+        """Return the morning sell Arbitrage Buy Reference sensor name."""
+        return "Morning sell buy reference"
+
     def _get_target_soc_floor(self, *, surplus_kwh: float) -> float:
         """Use PV floor only when sufficiency is confirmed for morning sell."""
         if self._allow_min_soc_pv:
@@ -281,7 +291,11 @@ class MorningSellStrategy(BaseSellStrategy):
 
         price_unavailable = getattr(self, "_price_unavailable", False)
         if surplus_kwh > free_space_kwh and not price_unavailable:
-            if evening_price is not None and self.price > evening_price:
+            if (
+                self._arbitrage_margin_ok
+                and evening_price is not None
+                and self.price > evening_price
+            ):
                 selected_surplus_kwh = surplus_kwh
                 selection_reason = "morning_price_higher_than_evening"
             else:
@@ -373,7 +387,8 @@ class MorningSellStrategy(BaseSellStrategy):
         selected_surplus_kwh = max(selected_surplus_kwh, 0.0)
 
         if selected_surplus_kwh <= 0.0:
-            return build_no_action_outcome(
+            return self._apply_arbitrage_gate_details(
+                build_no_action_outcome(
                 scenario=self.scenario_name,
                 summary="No morning peak sell action",
                 reason="No eligible surplus energy available for selling",
@@ -404,10 +419,11 @@ class MorningSellStrategy(BaseSellStrategy):
                     "start_hour": start_hour,
                     "end_hour": base_end_hour,
                 },
+                )
             )
 
         def _make_outcome(target_soc: float, surplus: float, export_w: float) -> DecisionOutcome:
-            outcome = build_evening_sell_outcome(
+            outcome = self._apply_arbitrage_gate_details(build_evening_sell_outcome(
                 scenario=self.scenario_name,
                 action_type="sell",
                 price_metric_key="morning_price",
@@ -425,7 +441,7 @@ class MorningSellStrategy(BaseSellStrategy):
                 export_power_w=export_w,
                 evening_price=None if price_unavailable else self.price,
                 threshold_price=self.threshold_price,
-            )
+            ))
             outcome.details["sufficiency_hour"] = sufficiency.sufficiency_hour
             outcome.details["sufficiency_reached"] = sufficiency.sufficiency_reached
             outcome.details["evening_price"] = (
@@ -448,7 +464,7 @@ class MorningSellStrategy(BaseSellStrategy):
             return outcome
 
         def _make_no_action(current_surplus_kwh: float) -> DecisionOutcome:
-            return build_no_action_outcome(
+            return self._apply_arbitrage_gate_details(build_no_action_outcome(
                 scenario=self.scenario_name,
                 summary="No morning peak sell action",
                 reason="Calculated target SOC does not require discharge",
@@ -481,7 +497,7 @@ class MorningSellStrategy(BaseSellStrategy):
                     "start_hour": start_hour,
                     "end_hour": base_end_hour,
                 },
-            )
+            ))
 
         return SellRequest(
             surplus_kwh=selected_surplus_kwh,

@@ -394,3 +394,67 @@ def test_calculate_charge_current_rounds_up() -> None:
     )
 
     assert current == 4
+
+
+def test_calculate_charge_current_respects_target_charge_time_hours() -> None:
+    current = calculate_charge_current(
+        3.72,
+        current_soc=25.0,
+        capacity_ah=37,
+        voltage=576,
+        target_charge_time_hours=4.0,
+    )
+
+    assert current == 2
+
+
+@pytest.mark.asyncio
+async def test_morning_charge_uses_night_buy_window_duration_for_current_sizing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.energy_optimizer.const import CONF_TEST_MODE
+    from custom_components.energy_optimizer.decision_engine.common import ChargeAction
+
+    config = {
+        CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+        CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
+        CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
+        CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",
+        CONF_BATTERY_CAPACITY_AH: 100,
+        CONF_BATTERY_VOLTAGE: 50,
+        CONF_MIN_SOC: 10,
+        CONF_MAX_SOC: 100,
+        CONF_BATTERY_EFFICIENCY: 100,
+        CONF_TEST_MODE: False,
+    }
+    states = {
+        "number.prog2_soc": "50",
+        "number.charge_current": "0",
+        "sensor.battery_soc": "90",
+        "sensor.daily_load": "48",
+        "sensor.tariff_end_hour": "13",
+    }
+    hass = _setup_hass(config, states)
+    captured: dict[str, float] = {}
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_night_buy_window_duration_hours",
+        lambda *args, **kwargs: 4.0,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.charge_base.calculate_charge_action",
+        lambda bc, **kwargs: (
+            captured.update({"target_charge_time_hours": kwargs["target_charge_time_hours"]})
+            or ChargeAction(
+                gap_to_charge_kwh=1.0,
+                soc_delta=1.0,
+                target_soc=60.0,
+                charge_current=2.0,
+            )
+        ),
+    )
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    assert captured["target_charge_time_hours"] == pytest.approx(4.0)

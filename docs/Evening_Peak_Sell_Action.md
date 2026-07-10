@@ -27,7 +27,8 @@ Logika działa niezależnie od kolejności czasowej okien (`A First` albo `B Fir
 - Cena okna `A` (`evening_max_price_sensor`)
 - Cena okna `B` (`evening_second_max_price_sensor`), jeśli skonfigurowana
 - Cena jutrzejszego porannego szczytu (`tomorrow_morning_max_price_sensor`)
-- Minimalna cena arbitrażu (`min_arbitrage_price`, PLN/MWh)
+- Minimalna cena arbitrażu (`min_arbitrage_price`, PLN/kWh) — minimalny próg **Arbitrage Margin**
+- Arbitrage Buy Reference: cena `night_buy_window_tomorrow` (koszt nocnego odkupienia energii po dzisiejszej sprzedaży)
 - Przewidywane zużycie energii w oknie od teraz+1h do startu taryfy niskiej:
   - Zużycie domowe (z czujników w okienkach 4-godzinnych)
   - Zużycie Pompy Ciepła (integracja zewnętrzna)
@@ -62,8 +63,10 @@ Logika działa niezależnie od kolejności czasowej okien (`A First` albo `B Fir
      - w **drugim** oknie, jeśli sprzedaż jest aktywna → `sell_restore`.
 
 2. **Bazowe wyliczenie nadwyżki**
-   - Gdy `current_window_price > min_arbitrage_price` używana jest ścieżka `high_sell`.
-   - Gdy `current_window_price <= min_arbitrage_price` używana jest ścieżka `sell` (surplus sell).
+   - Gdy `current_window_price - night_buy_window_tomorrow_price > min_arbitrage_price`
+     używana jest ścieżka `high_sell`.
+   - Gdy margin nie przekracza progu lub brakuje ceny buy reference, używana jest ścieżka
+     `sell` (surplus sell, fail-closed dla high sell).
 
 3. **Cap jednej godziny sprzedaży**
    - `hourly_cap_kwh = max_export_power / 1000`
@@ -179,7 +182,7 @@ graph TD
 
 **Aktualny stan (implementacja):**
 - Brak ceny bieżącego okna → fallback do gałęzi `surplus sell`
-- Cena bieżącego okna poniżej progu arbitrażu:
+- Gdy Arbitrage Margin nie przekracza progu albo brakuje ceny `night_buy_window_tomorrow`:
    - nie kończy od razu,
    - uruchamia gałąź `surplus sell`
 - Cena bieżącego okna nie wyższa niż cena jutro rano:

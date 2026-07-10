@@ -25,6 +25,7 @@ from ..decision_engine.common import (
     get_entry_data,
     get_required_prog4_soc_state,
     handle_no_action_soc_update,
+    resolve_arbitrage_margin_gate,
 )
 from ..helpers import (
     get_internal_window_price,
@@ -255,10 +256,16 @@ def _calculate_arbitrage_kwh(
         details["arbitrage_reason"] = "missing_sell_price"
         return 0.0, details
 
-    details["sell_price"] = round(sell_price, 4)
-    details["min_arbitrage_price"] = round(float(min_arbitrage_price or 0.0), 4)
-    if sell_price <= float(min_arbitrage_price or 0.0):
-        details["arbitrage_reason"] = "sell_price_below_threshold"
+    margin_ok, margin_details = resolve_arbitrage_margin_gate(
+        hass,
+        entry_id=entry_id,
+        sell_price=sell_price,
+        min_arbitrage_price=min_arbitrage_price,
+        buy_reference_unique_id_suffix="day_buy_window",
+        buy_reference_entity_name="Day buy window",
+    )
+    details.update(margin_details)
+    if not margin_ok:
         return 0.0, details
 
     cap_kwh, cap_reason = get_forecast_adjusted_kwh(

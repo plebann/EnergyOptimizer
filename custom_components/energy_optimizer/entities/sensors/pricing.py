@@ -8,6 +8,7 @@ from homeassistant.util import dt as dt_util
 
 from ..base import EnergyOptimizerSensor
 from ...calculations.price_windows import (
+    build_average_buy_price_result,
     build_best_buy_window_result,
     build_midday_sell_window_result,
     build_ranked_sell_window_result,
@@ -20,6 +21,7 @@ from ...const import (
     DEFAULT_MIN_ARBITRAGE_PRICE,
     PRICE_UNIT_PLN_PER_KWH,
 )
+from ...helpers import resolve_morning_max_price_hour, resolve_tariff_end_hour
 
 
 class _PriceValueSensor(EnergyOptimizerSensor):
@@ -85,7 +87,7 @@ class MinArbitrageMarginSensor(_PriceValueSensor):
 
 
 class _BuyWindowBaseSensor(EnergyOptimizerSensor):
-    """Base sensor for two-hour buy-price windows."""
+    """Base sensor for derived buy-price windows."""
 
     _attr_icon = "mdi:clock-time-two-outline"
     _payload_key: str
@@ -139,6 +141,10 @@ class _BuyWindowBaseSensor(EnergyOptimizerSensor):
         self._attr_available = True
         self._attr_native_value = result.start_local.strftime("%H:%M")
         self._attr_extra_state_attributes = {
+            "end": result.end_local.strftime("%H:%M"),
+            "duration_hours": int(
+                (result.end_local - result.start_local).total_seconds() // 3600
+            ),
             "price": round(result.average_price, 3),
             "is_negative": result.average_price < 0,
         }
@@ -150,7 +156,7 @@ class _BuyWindowBaseSensor(EnergyOptimizerSensor):
 
     @property
     def native_value(self) -> str | None:
-        """Return the best two-hour buy window start time as HH:MM, or None."""
+        """Return the selected buy window start time as HH:MM, or None."""
         self._apply_result(self._get_result())
         return getattr(self, "_attr_native_value", None)
 
@@ -210,6 +216,56 @@ class DayBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
     _range_start_hour = 10
     _range_end_hour = 16
     _day_offset = 1
+
+
+class MorningSellBuyReferenceSensor(_BuyWindowBaseSensor):
+    """Sensor publishing the buy reference used by the morning sell margin gate."""
+
+    _attr_translation_key = "morning_sell_buy_reference"
+    _attr_unique_id = "morning_sell_buy_reference"
+    _payload_key = "prices_today"
+
+    def _get_result(self):
+        """Return the averaged buy-price window used for morning sell arbitrage."""
+        hass = getattr(self, "hass", None) or getattr(self.coordinator, "hass", None)
+        if hass is None:
+            return None
+
+        entity_id = self.config.get(CONF_BUY_PRICE_SENSOR)
+        if not entity_id or self.coordinator.data is None:
+            return None
+
+        payloads = self.coordinator.data.get("price_payloads")
+        if not isinstance(payloads, dict):
+            return None
+
+        payload = payloads.get(entity_id)
+        if not isinstance(payload, dict):
+            return None
+
+        prices = payload.get(self._payload_key)
+        if not isinstance(prices, list) or not prices:
+            return None
+
+        morning_sell_hour = resolve_morning_max_price_hour(
+            hass,
+            self.config,
+            entry_id=self.config_entry.entry_id,
+            default_hour=7,
+        )
+        restore_hour = (morning_sell_hour + 1) % 24
+        tariff_end_hour = resolve_tariff_end_hour(
+            hass,
+            self.config,
+            default_hour=13,
+        )
+        return build_average_buy_price_result(
+            prices,
+            entity_id,
+            start_hour=restore_hour,
+            end_hour=tariff_end_hour,
+            now_local=dt_util.now(),
+        )
 
 
 class _MiddaySellWindowBaseSensor(EnergyOptimizerSensor):

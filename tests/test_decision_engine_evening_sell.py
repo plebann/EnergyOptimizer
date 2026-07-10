@@ -37,12 +37,16 @@ pytestmark = pytest.mark.enable_socket
 
 SELL_BASE = "custom_components.energy_optimizer.decision_engine.sell_base"
 EVENING = "custom_components.energy_optimizer.decision_engine.evening_sell"
+HELPERS = "custom_components.energy_optimizer.helpers"
 
 
 def _state(value: str) -> MagicMock:
     state = MagicMock()
-    state.state = value
-    state.attributes = {}
+    if isinstance(value, tuple):
+        state.state, state.attributes = value
+    else:
+        state.state = value
+        state.attributes = {}
     return state
 
 
@@ -102,6 +106,7 @@ def _base_states() -> dict[str, str]:
         "number.prog5_soc": "50",
         "sensor.evening_price": "700",
         "sensor.pv_today": "8",
+        "sensor.night_buy_window_tomorrow_internal": ("01:00", {"price": 200.0}),
     }
 
 
@@ -158,6 +163,14 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, outcomes: list) -> None:
     monkeypatch.setattr(
         f"{EVENING}.resolve_tariff_end_hour",
         lambda hass, config, default_hour=13: 13,
+    )
+    monkeypatch.setattr(
+        f"{HELPERS}.get_internal_sensor_entity_id",
+        lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": (
+            "sensor.night_buy_window_tomorrow_internal"
+            if unique_id_suffix == "night_buy_window_tomorrow"
+            else None
+        ),
     )
 
 
@@ -275,6 +288,45 @@ async def test_evening_sell_high_sell_no_surplus_no_action(
     assert outcomes
     assert outcomes[-1].action_type == "no_action"
     assert "No surplus energy available" in (outcomes[-1].reason or "")
+
+
+@pytest.mark.asyncio
+async def test_evening_sell_falls_back_to_surplus_sell_when_buy_reference_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    states = _base_states()
+    del states["sensor.night_buy_window_tomorrow_internal"]
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    async def _hp(*args, **kwargs):
+        return 1.0, {}
+
+    monkeypatch.setattr(f"{EVENING}.get_heat_pump_forecast_window", _hp)
+    monkeypatch.setattr(
+        f"{EVENING}.get_pv_forecast_window",
+        lambda *args, **kwargs: (2.0, {}),
+    )
+    monkeypatch.setattr(
+        f"{EVENING}.calculate_losses",
+        lambda *args, **kwargs: (0.0, 0.0),
+    )
+    monkeypatch.setattr(
+        f"{EVENING}.calculate_battery_reserve",
+        lambda *args, **kwargs: 12.0,
+    )
+    monkeypatch.setattr(
+        f"{EVENING}.calculate_sufficiency_window",
+        lambda **kwargs: (9.0, 8.0, 1.0, 13, False),
+    )
+
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes
+    assert outcomes[-1].action_type == "sell"
+    assert outcomes[-1].details["arbitrage_reason"] == "missing_buy_reference_price"
 
 
 @pytest.mark.asyncio

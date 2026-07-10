@@ -34,6 +34,7 @@ from .entities.sensors import (
     MiddaySellWindowSensor,
     MiddaySellWindowTomorrowSensor,
     MinArbitrageMarginSensor,
+    MorningSellBuyReferenceSensor,
     MinSocSensor,
     MorningSellWindowSensor,
     MorningSellWindowTomorrowSensor,
@@ -79,6 +80,7 @@ async def async_setup_entry(
         DayBuyWindowTomorrowSensor(coordinator, config_entry, config),
         SellPriceSensor(coordinator, config_entry, config),
         MinArbitrageMarginSensor(coordinator, config_entry, config),
+        MorningSellBuyReferenceSensor(coordinator, config_entry, config),
         MorningSellWindowSensor(coordinator, config_entry, config),
         EveningSellWindowSensor(coordinator, config_entry, config),
         MorningSellWindowTomorrowSensor(coordinator, config_entry, config),
@@ -163,4 +165,3 @@ async def async_setup_entry(
         hass, _check_balancing, timedelta(minutes=5)
     )
     hass.data[DOMAIN][config_entry.entry_id]["listeners"].append(remove_listener)
-

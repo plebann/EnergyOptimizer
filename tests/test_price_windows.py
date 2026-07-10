@@ -595,9 +595,9 @@ def test_build_best_buy_window_result_breaks_night_ties_by_latest_end() -> None:
         _buy_payload_for_hours(
             {
                 0: 0.90,
-                1: 0.40,
-                2: 0.60,
-                3: 0.40,
+                1: 0.80,
+                2: 0.20,
+                3: 0.80,
                 4: 0.90,
                 5: 0.95,
             }
@@ -612,6 +612,167 @@ def test_build_best_buy_window_result_breaks_night_ties_by_latest_end() -> None:
     assert result is not None
     assert result.start_local == datetime(2026, 5, 8, 2, 0, tzinfo=TZ)
     assert result.average_price == pytest.approx(0.5)
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_night_seed_only_when_neighbors_fail_threshold() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                0: 0.90,
+                1: 0.20,
+                2: 0.10,
+                3: 0.60,
+                4: 0.80,
+                5: 0.90,
+            }
+        ),
+        ENTITY_ID,
+        range_key="night",
+        range_start_hour=0,
+        range_end_hour=6,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result == BuyWindowResult(
+        start_local=datetime(2026, 5, 8, 1, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 3, 0, tzinfo=TZ),
+        average_price=pytest.approx(0.15),
+    )
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_night_expands_left_only() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                0: 0.15,
+                1: 0.20,
+                2: 0.10,
+                3: 0.50,
+                4: 0.90,
+                5: 1.00,
+            }
+        ),
+        ENTITY_ID,
+        range_key="night",
+        range_start_hour=0,
+        range_end_hour=6,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result == BuyWindowResult(
+        start_local=datetime(2026, 5, 8, 0, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 3, 0, tzinfo=TZ),
+        average_price=pytest.approx(0.15),
+    )
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_night_expands_both_sides_in_same_iteration() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                0: 0.90,
+                1: 0.16,
+                2: 0.14,
+                3: 0.16,
+                4: 0.165,
+                5: 0.95,
+            }
+        ),
+        ENTITY_ID,
+        range_key="night",
+        range_start_hour=0,
+        range_end_hour=6,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result == BuyWindowResult(
+        start_local=datetime(2026, 5, 8, 1, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 5, 0, tzinfo=TZ),
+        average_price=pytest.approx(0.15625),
+    )
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_night_stops_at_range_boundaries() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                0: 0.10,
+                1: 0.11,
+                2: 0.115,
+                3: 0.13,
+                4: 0.50,
+                5: 0.90,
+            }
+        ),
+        ENTITY_ID,
+        range_key="night",
+        range_start_hour=0,
+        range_end_hour=6,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result == BuyWindowResult(
+        start_local=datetime(2026, 5, 8, 0, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 3, 0, tzinfo=TZ),
+        average_price=pytest.approx(0.1083333333),
+    )
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_night_can_expand_to_full_six_hours() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                0: 0.115,
+                1: 0.11,
+                2: 0.10,
+                3: 0.10,
+                4: 0.11,
+                5: 0.115,
+            }
+        ),
+        ENTITY_ID,
+        range_key="night",
+        range_start_hour=0,
+        range_end_hour=6,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result == BuyWindowResult(
+        start_local=datetime(2026, 5, 8, 0, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 6, 0, tzinfo=TZ),
+        average_price=pytest.approx(0.1083333333),
+    )
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_night_stops_on_missing_boundary_hour() -> None:
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                0: 0.90,
+                1: 0.20,
+                2: 0.10,
+                4: 0.14,
+                5: 0.90,
+            }
+        ),
+        ENTITY_ID,
+        range_key="night",
+        range_start_hour=0,
+        range_end_hour=6,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result == BuyWindowResult(
+        start_local=datetime(2026, 5, 8, 1, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 3, 0, tzinfo=TZ),
+        average_price=pytest.approx(0.15),
+    )
 
 
 @pytest.mark.unit

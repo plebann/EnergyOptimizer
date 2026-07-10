@@ -1,4 +1,4 @@
-# Zachowanie poranne (04:00) — Opis akcji
+# Zachowanie poranne (start `night_buy_window`) — Opis akcji
 
 ## Cel
 
@@ -6,7 +6,7 @@ Zapewnienie wystarczającej ilości energii w magazynie na pokrycie zapotrzebowa
 
 ## Wyzwalacz
 
-- Stała godzina harmonogramu: 04:00
+- Godzina startu wewnętrznego sensora `night_buy_window` (fallback: 04:00, gdy sensor jest niedostępny)
 - Możliwość ręcznego wywołania przez serwis `energy_optimizer.morning_grid_charge`
 
 ## Wejścia (koncepcyjne)
@@ -25,6 +25,8 @@ Zapewnienie wystarczającej ilości energii w magazynie na pokrycie zapotrzebowa
 - Sprawność magazynu (domyślnie 90%)
 - Margines bezpieczeństwa (domyślnie 1.1 = +10%)
 - Sensor godziny końca wysokiej taryfy: `high_tariff_end_hour_sensor` (używany do wyznaczenia okna obliczeń)
+- `min_arbitrage_price` (PLN/kWh) – minimalny **Arbitrage Margin**
+- Arbitrage Buy Reference: cena `night_buy_window` (średnia cena nocnego okna zakupu, wyznaczanego z ziarenka 2h i opcjonalnie rozszerzanego do pełnego zmiennego zakresu)
 - Ustawienie włączenia Pompy Ciepła (jeśli wyłączone, zużycie PC = 0)
 
 ## Przebieg decyzji (wysoki poziom)
@@ -41,6 +43,11 @@ Zapewnienie wystarczającej ilości energii w magazynie na pokrycie zapotrzebowa
 6. **Porównanie zapotrzebowanie vs dostępne źródła**:
    - Jeśli **rezerwa + prognoza PV >= zapotrzebowanie**: Brak akcji, energia wystarczy
    - Jeśli **deficyt > 0**: Oblicz ile energii załadować uwzględniając sprawność magazynu i zaplanuj doładowanie
+7. **Opcjonalny arbitraż**:
+   - liczony jest tylko, gdy `Arbitrage Margin = morning_sell_price - night_buy_window_price`
+    **ściśle przekracza** `min_arbitrage_price`
+   - brak ceny sprzedaży albo brak ceny Arbitrage Buy Reference → arbitraż jest wyłączony (fail-closed)
+   - próg działa wyłącznie jako bramka on/off; nie skaluje wolumenu `arbitrage_kwh`
 
 ## Diagram (Mermaid)
 
@@ -93,18 +100,18 @@ Algorytm:
 1. Oblicz docelowy SOC na podstawie deficytu energii
 2. Podziel ładowanie na fazy odpowiadające zakresom SOC
 3. Dla każdej fazy oblicz ile energii będzie ładowane oraz czas przy maksymalnym prądzie
-4. Sprawdź czy można załadować całość w 2h przy maksymalnych prądach:
-   - **Jeśli TAK**: oblicz wymagany średni prąd = `(deficyt × 1000) / (2h × napięcie)`
+4. Sprawdź czy można załadować całość w czasie pełnego, rozstrzygniętego okna `night_buy_window` przy maksymalnych prądach:
+   - **Jeśli TAK**: oblicz wymagany średni prąd = `(deficyt × 1000) / (czas_okna × napięcie)`
      - Wybierz mniejszą wartość z: wymagany średni prąd lub maksymalny prąd dla aktualnego zakresu SOC
-   - **Jeśli NIE**: ustaw maksymalny prąd (23A) - ładowanie zajmie więcej niż 2h
+   - **Jeśli NIE**: ustaw maksymalny prąd (23A) - ładowanie zajmie więcej niż bieżące okno
 5. Zaokrąglij do pełnego ampera w górę
 
 Ten algorytm zapewnia:
 - Bezpieczne ładowanie z poszanowaniem limitów dla różnych zakresów SOC
 - Optymalizację czasu ładowania (nie ładuje za szybko jeśli nie jest to potrzebne)
-- Możliwość ładowania w 2h oknie nocnej taryfy
+- Możliwość dopasowania prądu do rzeczywistej długości nocnego okna zakupu
 
-**Uwaga**: wynik prądu może się różnić od prostego wzoru $(kWh/2h \times 1000)/V$ ze względu na ograniczenia prądu w poszczególnych fazach SOC.
+**Uwaga**: wynik prądu może się różnić od prostego wzoru $(kWh/czas\_okna \times 1000)/V$ ze względu na ograniczenia prądu w poszczególnych fazach SOC.
 
 ## Wpływ na maszynę stanów
 

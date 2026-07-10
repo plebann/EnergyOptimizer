@@ -32,12 +32,16 @@ pytestmark = pytest.mark.enable_socket
 
 SELL_BASE = "custom_components.energy_optimizer.decision_engine.sell_base"
 MORNING = "custom_components.energy_optimizer.decision_engine.morning_sell"
+HELPERS = "custom_components.energy_optimizer.helpers"
 
 
 def _state(value: str) -> MagicMock:
     state = MagicMock()
-    state.state = value
-    state.attributes = {}
+    if isinstance(value, tuple):
+        state.state, state.attributes = value
+    else:
+        state.state = value
+        state.attributes = {}
     return state
 
 
@@ -104,6 +108,7 @@ def _base_states() -> dict[str, str]:
         "sensor.evening_price": "200",
         "sensor.pv_today": "8",
         "sensor.energy_optimizer_battery_space": "3",
+        "sensor.morning_sell_buy_reference_internal": ("08:00", {"price": 50.0}),
     }
 
 
@@ -157,6 +162,14 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, outcomes: list) -> None:
         f"{MORNING}.resolve_tariff_end_hour",
         lambda hass, config, default_hour=13: 13,
     )
+    monkeypatch.setattr(
+        f"{HELPERS}.get_internal_sensor_entity_id",
+        lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": (
+            "sensor.morning_sell_buy_reference_internal"
+            if unique_id_suffix == "morning_sell_buy_reference"
+            else None
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -207,6 +220,54 @@ async def test_morning_sell_executes_with_surplus_below_threshold(
 
     assert outcomes
     assert outcomes[-1].action_type == "sell"
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_uses_full_surplus_when_margin_gate_is_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    states = _base_states()
+    states["sensor.morning_price"] = "500"
+    states["sensor.evening_price"] = "100"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    async def _hp(*args, **kwargs):
+        return 1.0, {}
+
+    monkeypatch.setattr(f"{MORNING}.get_heat_pump_forecast_window", _hp)
+    monkeypatch.setattr(
+        f"{MORNING}.get_pv_forecast_window",
+        lambda *args, **kwargs: (2.0, {}),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_losses",
+        lambda *args, **kwargs: (0.0, 0.0),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_sufficiency_window",
+        lambda **kwargs: (3.0, 2.0, 1.0, 13, False),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_battery_reserve",
+        lambda *args, **kwargs: 10.0,
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_surplus_energy",
+        lambda reserve, required, pv: 5.0,
+    )
+    monkeypatch.setattr(
+        f"{SELL_BASE}.calculate_export_power",
+        lambda *args, **kwargs: 1200.0,
+    )
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes
+    assert outcomes[-1].details["selected_surplus_kwh"] == 5.0
+    assert outcomes[-1].details["arbitrage_reason"] == "enabled"
 
 
 @pytest.mark.asyncio
@@ -692,5 +753,3 @@ async def test_morning_sell_clamps_target_soc_to_min_soc_pv_when_sufficiency_rea
         logger=ANY,
         context=ANY,
     )
-
-

@@ -94,6 +94,10 @@ class BaseChargeStrategy(ABC):
     def _post_forecast_setup(self) -> None:
         """Optional post-forecast hook."""
 
+    def _resolve_charge_time_hours(self) -> float:
+        """Return the charging window duration used for current sizing."""
+        return 2.0
+
     async def run(self) -> None:
         """Execute common charge workflow and delegate strategy specifics."""
         self.integration_context = Context()
@@ -146,6 +150,7 @@ class BaseChargeStrategy(ABC):
             self.bc,
             gap_kwh=total_gap,
             current_soc=self.current_soc,
+            target_charge_time_hours=self._resolve_charge_time_hours(),
         )
 
         charge_current_entity = self.config.get(CONF_CHARGE_CURRENT_ENTITY)

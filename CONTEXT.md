@@ -49,3 +49,25 @@ A Market Window that cannot be resolved because the needed information is missin
 ### Unreliable Market Window
 
 A Market Window that should not be used because the available information is invalid, duplicated, or contradictory.
+
+### Arbitrage Margin
+
+The difference between a Sell Window's price and the price of its paired Arbitrage Buy Reference. EnergyOptimizer only
+treats extra grid charging or a high-price sell as profitable arbitrage when this margin exceeds the configured
+minimum threshold (`min_arbitrage_price`). The margin acts strictly as an on/off gate — it does not scale the
+arbitrage energy volume, which remains capacity-derived.
+
+### Arbitrage Buy Reference
+
+The Buy Window whose price is used as the buy side of an Arbitrage Margin calculation. Morning Charge, Morning Sell,
+and Evening Sell scenarios use the Night Buy Window as their Arbitrage Buy Reference. Afternoon Charge uses the Day
+Buy Window (best 2h window, 10:00-16:00; unchanged). If the Arbitrage Buy Reference price is unavailable, the
+Arbitrage Margin cannot be computed and the gate fails closed (no arbitrage / no high-price sell).
+
+### Night Buy Window
+
+A Buy Window within 00:00-06:00, seeded from the cheapest two consecutive hours in that range, then grown outward one
+boundary hour at a time on either side while each boundary hour's price stays within 10% of the window's current
+average price (recomputed after every accepted hour). Expansion stops permanently on a side once its next boundary
+hour exceeds the 10% threshold or falls outside 00:00-06:00; a Night Buy Window may end up spanning the full 6-hour
+range. Morning Charge starts at the Night Buy Window's start hour and charges for its full (variable) duration.

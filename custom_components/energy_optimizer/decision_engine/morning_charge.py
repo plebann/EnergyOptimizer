@@ -29,11 +29,13 @@ from ..decision_engine.common import (
     compute_sufficiency,
     get_required_prog2_soc_state,
     handle_no_action_soc_update,
+    resolve_arbitrage_margin_gate,
 )
 from ..helpers import (
     get_internal_window_price,
     is_balancing_ongoing,
     resolve_morning_max_price_hour,
+    resolve_night_buy_window_duration_hours,
     resolve_tariff_end_hour,
     set_balancing_ongoing,
 )
@@ -102,6 +104,15 @@ class MorningChargeStrategy(BaseChargeStrategy):
             ),
             current_soc=self.current_soc,
             required_kwh=self._sufficiency.required_kwh,
+        )
+
+    def _resolve_charge_time_hours(self) -> float:
+        """Use the resolved night buy window duration for charge-current sizing."""
+        return resolve_night_buy_window_duration_hours(
+            self.hass,
+            self.config,
+            entry_id=self.entry.entry_id,
+            default_hours=2.0,
         )
 
     def _evaluate_charge(self) -> tuple[float, EnergyBalance]:
@@ -247,10 +258,16 @@ def _calculate_morning_arbitrage_kwh(
         details["arbitrage_reason"] = "missing_morning_sell_price"
         return 0.0, details
 
-    details["sell_price"] = round(sell_price, 4)
-    details["min_arbitrage_price"] = round(min_arbitrage_price, 4)
-    if sell_price <= min_arbitrage_price:
-        details["arbitrage_reason"] = "sell_price_below_threshold"
+    margin_ok, margin_details = resolve_arbitrage_margin_gate(
+        hass,
+        entry_id=entry_id,
+        sell_price=sell_price,
+        min_arbitrage_price=min_arbitrage_price,
+        buy_reference_unique_id_suffix="night_buy_window",
+        buy_reference_entity_name="Night buy window",
+    )
+    details.update(margin_details)
+    if not margin_ok:
         return 0.0, details
 
     remaining_state = hass.states.get(remaining_entity) if remaining_entity else None

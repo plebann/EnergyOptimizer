@@ -258,6 +258,7 @@ def calculate_charge_current(
     current_soc: float,
     capacity_ah: float,
     voltage: float,
+    target_charge_time_hours: float = 2.0,
 ) -> int:
     """Calculate charge current for a given energy amount."""
     return calculate_expected_charge_current(
@@ -265,6 +266,7 @@ def calculate_charge_current(
         current_soc,
         capacity_ah,
         voltage,
+        target_charge_time_hours=target_charge_time_hours,
     )
 
 

@@ -10,6 +10,7 @@ Energy Optimizer is a Home Assistant custom integration focused on price-aware b
 - Overnight handling: runs nightly at 22:00 and selects a mode based on PV forecast, balancing cadence, and battery state.
 - Morning grid charge: plans a morning top-up to cover high-tariff demand when needed.
 - Afternoon grid charge: plans an afternoon top-up to cover evening demand and optional arbitrage.
+- Arbitrage gates use a minimum **margin** (`sell_price - buy_reference_price`), not a raw sell-price floor.
 - Consistent decision logging with sensors and notifications.
 
 ## Behavior Notes
@@ -22,6 +23,7 @@ Energy Optimizer is a Home Assistant custom integration focused on price-aware b
 - Platforms: Sensor, Binary Sensor.
 - Services: morning_grid_charge, afternoon_grid_charge, overnight_schedule.
 - Sensors: battery, configuration, tracking, forecast helpers, and pricing window sensors.
+- Pricing sensors include buy-window references used by arbitrage decisions, including `morning_sell_buy_reference`.
 
 ### Midday Sell Window Sensors
 

@@ -54,7 +54,7 @@ class RankedSellWindowResult:
 
 @dataclass
 class HourlyBuyPriceEntry:
-    """Normalized one-hour buy-price entry used for two-hour window selection."""
+    """Normalized one-hour buy-price entry used for buy-window selection."""
 
     start_local: datetime
     end_local: datetime
@@ -65,7 +65,16 @@ class HourlyBuyPriceEntry:
 
 @dataclass
 class BuyWindowResult:
-    """Result of selecting the best two-hour buy window for one day/range."""
+    """Result of selecting the best buy window for one day/range."""
+
+    start_local: datetime
+    end_local: datetime
+    average_price: float
+
+
+@dataclass
+class AverageBuyPriceResult:
+    """Result of averaging buy prices across a resolved hourly window."""
 
     start_local: datetime
     end_local: datetime
@@ -245,6 +254,81 @@ def _extract_buy_hourly_entries(
     return sorted(entries_by_start.values(), key=lambda entry: entry.start_local)
 
 
+def _expand_night_buy_window(
+    entries_by_start: dict[datetime, HourlyBuyPriceEntry],
+    seed_start: datetime,
+    seed_end: datetime,
+    seed_average: float,
+    *,
+    range_start_hour: int,
+    range_end_hour: int,
+    current_day: date,
+) -> BuyWindowResult:
+    """Expand a seeded night buy window while boundary hours stay near its average."""
+    window_start = seed_start
+    window_end = seed_end
+    total_price = seed_average * 2
+    hour_count = 2
+    stop_left = False
+    stop_right = False
+
+    while not (stop_left and stop_right):
+        current_average = total_price / hour_count
+        threshold = current_average * 1.10
+        add_left: HourlyBuyPriceEntry | None = None
+        add_right: HourlyBuyPriceEntry | None = None
+
+        if not stop_left:
+            left_start = window_start - HOUR_DURATION
+            left_entry = entries_by_start.get(left_start)
+            if left_entry is None or not _is_window_within_range(
+                left_entry.start_local,
+                left_entry.end_local,
+                current_day,
+                range_start_hour,
+                range_end_hour,
+            ):
+                stop_left = True
+            elif left_entry.buy_price_value <= threshold:
+                add_left = left_entry
+            else:
+                stop_left = True
+
+        if not stop_right:
+            right_entry = entries_by_start.get(window_end)
+            if right_entry is None or not _is_window_within_range(
+                right_entry.start_local,
+                right_entry.end_local,
+                current_day,
+                range_start_hour,
+                range_end_hour,
+            ):
+                stop_right = True
+            elif right_entry.buy_price_value <= threshold:
+                add_right = right_entry
+            else:
+                stop_right = True
+
+        if add_left is None and add_right is None:
+            continue
+
+        if add_left is not None:
+            window_start = add_left.start_local
+            total_price += add_left.buy_price_value
+            hour_count += 1
+
+        if add_right is not None:
+            window_end = add_right.end_local
+            total_price += add_right.buy_price_value
+            hour_count += 1
+
+    return BuyWindowResult(
+        start_local=window_start,
+        end_local=window_end,
+        average_price=total_price / hour_count,
+    )
+
+
 def build_best_buy_window_result(
     prices: list[dict[str, Any]],
     entity_id: str,
@@ -254,7 +338,7 @@ def build_best_buy_window_result(
     range_end_hour: int,
     now_local: datetime | None = None,
 ) -> BuyWindowResult | None:
-    """Build the best two-hour buy window for one day/range."""
+    """Build the best buy window for one day/range."""
     reference_now = now_local or dt_util.now()
     if reference_now.tzinfo is None:
         reference_now = reference_now.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
@@ -305,13 +389,22 @@ def build_best_buy_window_result(
             time(range_end_hour, 0),
             tzinfo=reference_now.tzinfo,
         )
-        return min(
+        seed = min(
             candidates,
             key=lambda candidate: (
                 candidate.average_price,
                 abs((range_anchor - candidate.end_local).total_seconds()),
                 -candidate.end_local.timestamp(),
             ),
+        )
+        return _expand_night_buy_window(
+            entries_by_start,
+            seed.start_local,
+            seed.end_local,
+            seed.average_price,
+            range_start_hour=range_start_hour,
+            range_end_hour=range_end_hour,
+            current_day=reference_now.date(),
         )
 
     if range_key == "day":
@@ -330,6 +423,45 @@ def build_best_buy_window_result(
         )
 
     raise ValueError(f"Unsupported buy-window range key: {range_key}")
+
+
+def build_average_buy_price_result(
+    prices: list[dict[str, Any]],
+    entity_id: str,
+    *,
+    start_hour: int,
+    end_hour: int,
+    now_local: datetime | None = None,
+) -> AverageBuyPriceResult | None:
+    """Build an average buy-price result for whole hours in the requested range."""
+    reference_now = now_local or dt_util.now()
+    if reference_now.tzinfo is None:
+        reference_now = reference_now.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+
+    entries = _extract_buy_hourly_entries(
+        prices,
+        entity_id,
+        reference_now.date(),
+        reference_now.tzinfo,
+    )
+    if not entries:
+        return None
+
+    def _hour_in_range(hour: int) -> bool:
+        if end_hour <= start_hour:
+            return hour >= start_hour or hour < end_hour
+        return start_hour <= hour < end_hour
+
+    matching_entries = [entry for entry in entries if _hour_in_range(entry.start_local.hour)]
+    if not matching_entries:
+        return None
+
+    total_price = sum(entry.buy_price_value for entry in matching_entries)
+    return AverageBuyPriceResult(
+        start_local=matching_entries[0].start_local,
+        end_local=matching_entries[-1].end_local,
+        average_price=total_price / len(matching_entries),
+    )
 
 
 def build_ranked_sell_window_result(

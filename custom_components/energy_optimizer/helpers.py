@@ -756,6 +756,61 @@ def resolve_morning_max_price_hour(
 
     return morning_peak_hour
 
+
+def resolve_night_buy_window_start_hour(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    entry_id: str,
+    default_hour: int = 4,
+) -> int:
+    """Resolve the internal night buy window start hour with fallback."""
+    entity_id = get_internal_sensor_entity_id(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix="night_buy_window",
+    )
+    resolved_time = _resolve_time_from_state_or_attribute(hass, entity_id)
+    if resolved_time is not None:
+        return resolved_time.hour
+
+    _LOGGER.warning(
+        "Internal night buy window unavailable or invalid, using default %s",
+        default_hour,
+    )
+    return default_hour
+
+
+def resolve_night_buy_window_duration_hours(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    entry_id: str,
+    default_hours: float = 2.0,
+) -> float:
+    """Resolve the internal night buy window duration in hours with fallback."""
+    entity_id = get_internal_sensor_entity_id(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix="night_buy_window",
+    )
+    state = hass.states.get(str(entity_id)) if entity_id else None
+    attributes = getattr(state, "attributes", {}) if state is not None else {}
+    if isinstance(attributes, dict):
+        raw_duration = attributes.get("duration_hours")
+        try:
+            duration_hours = float(raw_duration)
+        except (TypeError, ValueError):
+            duration_hours = None
+        if duration_hours is not None and duration_hours > 0:
+            return duration_hours
+
+    _LOGGER.warning(
+        "Internal night buy window duration unavailable or invalid, using default %s",
+        default_hours,
+    )
+    return default_hours
+
 def resolve_daytime_min_price_time(
     hass: HomeAssistant,
     config: dict[str, object],

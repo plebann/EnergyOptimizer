@@ -42,7 +42,7 @@ from ..const import (
     DEFAULT_MIN_SOC_PV,
     DOMAIN,
 )
-from ..helpers import get_required_float_state
+from ..helpers import get_internal_window_price, get_required_float_state
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.logging import DecisionOutcome, log_decision_unified
 from ..utils.time_window import build_hour_window
@@ -213,11 +213,56 @@ def compute_sufficiency(
     )
 
 
+def resolve_arbitrage_margin_gate(
+    hass: HomeAssistant,
+    *,
+    entry_id: str,
+    sell_price: float,
+    min_arbitrage_price: float,
+    buy_reference_unique_id_suffix: str,
+    buy_reference_entity_name: str,
+    fallback_buy_reference_entity_id: str | None = None,
+) -> tuple[bool, dict[str, float | str]]:
+    """Return the Arbitrage Margin gate result and diagnostic details.
+
+    The `min_arbitrage_price` config key now represents a minimum Arbitrage
+    Margin threshold instead of an absolute sell-price floor. The margin is
+    calculated as `sell_price - buy_reference_price` and acts only as a strict
+    on/off gate; it does not scale the arbitrage energy volume.
+    """
+    details: dict[str, float | str] = {
+        "sell_price": round(sell_price, 4),
+        "min_arbitrage_price": round(float(min_arbitrage_price or 0.0), 4),
+    }
+    buy_reference_price = get_internal_window_price(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix=buy_reference_unique_id_suffix,
+        entity_name=buy_reference_entity_name,
+        attribute_name="price",
+        fallback_entity_id=fallback_buy_reference_entity_id,
+    )
+    if buy_reference_price is None:
+        details["arbitrage_reason"] = "missing_buy_reference_price"
+        return False, details
+
+    arbitrage_margin = sell_price - buy_reference_price
+    details["buy_reference_price"] = round(buy_reference_price, 4)
+    details["arbitrage_margin"] = round(arbitrage_margin, 4)
+    if arbitrage_margin <= float(min_arbitrage_price or 0.0):
+        details["arbitrage_reason"] = "margin_below_threshold"
+        return False, details
+
+    details["arbitrage_reason"] = "enabled"
+    return True, details
+
+
 def calculate_charge_action(
     bc: BatteryConfig,
     *,
     gap_kwh: float,
     current_soc: float,
+    target_charge_time_hours: float = 2.0,
 ) -> ChargeAction:
     """Calculate charge parameters from energy gap."""
     gap_to_charge_kwh = apply_efficiency_compensation(gap_kwh, bc.efficiency)
@@ -232,6 +277,7 @@ def calculate_charge_action(
         current_soc=current_soc,
         capacity_ah=bc.capacity_ah,
         voltage=bc.voltage,
+        target_charge_time_hours=target_charge_time_hours,
     )
     return ChargeAction(
         gap_to_charge_kwh=gap_to_charge_kwh,
@@ -731,5 +777,3 @@ def build_surplus_sell_outcome(
             threshold_metric_key: round(threshold_price, 2),
         },
     )
-
-
