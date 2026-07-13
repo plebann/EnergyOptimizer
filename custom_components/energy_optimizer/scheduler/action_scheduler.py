@@ -766,12 +766,12 @@ class ActionScheduler:
         )
 
         solar_price_source: str | None = None
-        if self.entry.data.get(CONF_BUY_PRICE_SENSOR):
-            solar_price_source = "buy_price_sensor"
-        elif self.entry.data.get(CONF_SELL_PRICE_SENSOR):
+        if self.entry.data.get(CONF_SELL_PRICE_SENSOR):
             solar_price_source = "sell_price_sensor"
         elif self.entry.data.get(CONF_PRICE_SENSOR):
             solar_price_source = "price_sensor"
+        elif self.entry.data.get(CONF_BUY_PRICE_SENSOR):
+            solar_price_source = "buy_price_sensor"
         has_price_context = solar_price_source is not None
         has_sell_context = bool(
             self.entry.data.get(CONF_SELL_PRICE_SENSOR) or self.entry.data.get(CONF_PRICE_SENSOR)

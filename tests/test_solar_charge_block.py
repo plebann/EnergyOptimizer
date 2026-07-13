@@ -9,6 +9,7 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_CAPACITY_AH,
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
+    CONF_BUY_PRICE_SENSOR,
     CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
     CONF_DAYTIME_MIN_PRICE_SENSOR,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
@@ -401,5 +402,32 @@ async def test_uses_sell_price_label_when_sell_sensor_selected(
     get_required_float_state.assert_called_once_with(
         hass,
         _PRICE_ENTITY,
+        entity_name="Sell price sensor",
+    )
+
+
+@pytest.mark.asyncio
+async def test_prefers_sell_price_over_buy_price_for_export_decision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Solar charge blocking should price Export First decisions by sell price."""
+    hass = _setup_hass(price_sensor_key=CONF_BUY_PRICE_SENSOR)
+    entry = hass.config_entries.async_get_entry.return_value
+    entry.data[CONF_SELL_PRICE_SENSOR] = "sensor.sell_price"
+    get_required_float_state = MagicMock(return_value=800.0)
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_required_float_state",
+        get_required_float_state,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_internal_window_price",
+        MagicMock(return_value=None),
+    )
+
+    await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+
+    get_required_float_state.assert_called_once_with(
+        hass,
+        "sensor.sell_price",
         entity_name="Sell price sensor",
     )

@@ -10,12 +10,14 @@ import pytest
 from homeassistant.util import dt as dt_util
 
 from custom_components.energy_optimizer.const import (
+    CONF_BUY_PRICE_SENSOR,
     CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
     CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
     CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
+    CONF_SELL_PRICE_SENSOR,
     DOMAIN,
 )
 from custom_components.energy_optimizer.entities.sensors.tracking import ScheduledActionsSensor
@@ -224,6 +226,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
             action["key"] == "solar_charge_block"
             and action["kind"] == "event_driven"
             and action["trigger"] == "hourly_between_sunrise_and_sunset"
+            and action["source"] == "price_sensor"
             and action["time"] is None
             for action in actions
         )
@@ -236,6 +239,57 @@ def test_scheduler_publishes_structured_daily_snapshot(
         )
     finally:
         dt_util.set_default_time_zone(original_tz)
+
+
+def test_scheduler_describes_solar_charge_block_sell_price_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scheduled actions should mirror solar charge block's sell-price preference."""
+    sink = _FakeScheduledActionsSink()
+    hass = MagicMock()
+    hass.states.get.return_value = _sun_state("below_horizon")
+    hass.async_create_task.side_effect = lambda coro: coro.close()
+    hass.data = {DOMAIN: {"entry-1": {"scheduled_actions_sensor": sink}}}
+    entry = _mock_entry(
+        data={
+            CONF_BUY_PRICE_SENSOR: "sensor.buy_price",
+            CONF_SELL_PRICE_SENSOR: "sensor.sell_price",
+        }
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_night_buy_window_start_hour",
+        lambda *args, **kwargs: 2,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_morning_max_price_hour",
+        lambda *args, **kwargs: 7,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_tariff_start_hour",
+        lambda *args, **kwargs: 15,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_evening_max_price_hour",
+        lambda *args, **kwargs: 18,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_evening_second_max_price_hour",
+        lambda *args, **kwargs: 20,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_daytime_min_price_time",
+        lambda *args, **kwargs: datetime(2026, 3, 11, 12, 30).time(),
+    )
+
+    scheduler = ActionScheduler(hass, entry)
+    scheduler._publish_schedule_snapshot()
+
+    assert sink.snapshot is not None
+    assert any(
+        action["key"] == "solar_charge_block"
+        and action["source"] == "sell_price_sensor"
+        for action in sink.snapshot["actions"]
+    )
 
 
 def test_start_registers_single_evening_sell_window_listener(

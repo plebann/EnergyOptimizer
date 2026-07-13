@@ -23,9 +23,9 @@ Celem nie jest pełne wyłączenie wykorzystania PV, lecz pozostawienie miejsca 
 
 - Stan słońca `sun.sun` oraz atrybut `next_setting`
 - Aktualna cena energii:
-  - `buy_price_sensor`, albo
   - `sell_price_sensor`, albo
-  - `price_sensor` jako ostatni fallback
+  - `price_sensor` jako legacy fallback, albo
+  - `buy_price_sensor` jako ostatni fallback dla starszych konfiguracji bez ceny sprzedaży
 - Najtańsza cena dzienna dla okna południowego:
   - atrybut `price` z wewnętrznego sensora `midday_sell_window`, albo
   - fallback do `daytime_min_price_sensor`
