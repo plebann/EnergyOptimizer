@@ -1,33 +1,23 @@
 ﻿"""Tests for solar charge block decision logic."""
 from __future__ import annotations
 
-from unittest.mock import ANY, AsyncMock, MagicMock
+from contextlib import ExitStack
+from datetime import datetime, timezone
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
 from custom_components.energy_optimizer.const import (
-    CONF_BATTERY_CAPACITY_AH,
     CONF_BATTERY_SOC_SENSOR,
-    CONF_BATTERY_VOLTAGE,
-    CONF_BUY_PRICE_SENSOR,
-    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
     CONF_DAYTIME_MIN_PRICE_SENSOR,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
-    CONF_MAX_SOC,
     CONF_MIN_SOC_PV,
-    CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
-    CONF_PRICE_SENSOR,
     CONF_PROG3_SOC_ENTITY,
-    CONF_PROG3_TIME_START_ENTITY,
     CONF_PV_FORECAST_TODAY,
     CONF_SELL_PRICE_SENSOR,
     CONF_WORK_MODE_ENTITY,
-    DEFAULT_BATTERY_CAPACITY_AH,
-    DEFAULT_BATTERY_VOLTAGE,
-    DEFAULT_MAX_SOC,
-    DEFAULT_MIN_SOC_PV,
+    DEFAULT_MAX_CHARGE_CURRENT,
     DOMAIN,
-    WORK_MODE_EXPORT_FIRST,
 )
 from custom_components.energy_optimizer.decision_engine.solar_charge_block import (
     async_run_solar_charge_block,
@@ -36,43 +26,27 @@ from custom_components.energy_optimizer.decision_engine.solar_charge_block impor
 pytestmark = pytest.mark.enable_socket
 
 _ENTRY_ID = "entry-solar"
-_PRICE_ENTITY = "sensor.price"
-_MIN_PRICE_ENTITY = "sensor.min_price"
-_MIN_PRICE_HOUR_ENTITY = "sensor.min_price_hour"
-_MORNING_MAX_PRICE_HOUR_ENTITY = "sensor.morning_max_price_hour"
-_SOC_ENTITY = "sensor.soc"
+_SELL_PRICE_ENTITY = "sensor.sell_price"
+_MIDDAY_PRICE_ENTITY = "sensor.midday_price"
+_PV_FORECAST_ENTITY = "sensor.pv_forecast"
 _MAX_CHARGE_ENTITY = "number.max_charge"
 
 
 def _state(value: str, attributes: dict | None = None) -> MagicMock:
-    s = MagicMock()
-    s.state = value
-    s.attributes = attributes or {}
-    return s
-
-
-_WORK_MODE_ENTITY = "select.work_mode"
-_PROG1_SOC_ENTITY = "number.prog1_soc"
+    state = MagicMock()
+    state.state = value
+    state.attributes = attributes or {}
+    return state
 
 
 def _setup_hass(
     *,
+    now_hour: int = 9,
     sun_state: str = "above_horizon",
     sun_attrs: dict | None = None,
-    now_hour: int = 9,
-    current_price: str = "800",
-    min_price: str = "400",
-    min_price_hour: str | None = "12:00",
-    morning_max_price_hour: str | None = "07:00",
+    current_price: float | None = 500.0,
     battery_space_value: float | None = 2.0,
-    max_charge_entity: str = _MAX_CHARGE_ENTITY,
-    max_charge_current_state: str = "23",
-    soc_value: str = "80",
-    min_soc_pv: int = DEFAULT_MIN_SOC_PV,
-    price_sensor_key: str = CONF_PRICE_SENSOR,
-    work_mode_entity: str | None = None,
-    prog3_soc_entity: str | None = None,
-    prog3_time_start: str | None = None,
+    pv_forecast_available: bool = True,
 ) -> MagicMock:
     hass = MagicMock()
     entry = MagicMock()
@@ -80,64 +54,46 @@ def _setup_hass(
     entry.domain = DOMAIN
     entry.options = {}
     entry.data = {
-        price_sensor_key: _PRICE_ENTITY,
-        CONF_DAYTIME_MIN_PRICE_SENSOR: _MIN_PRICE_ENTITY,
-        CONF_BATTERY_SOC_SENSOR: _SOC_ENTITY,
-        CONF_BATTERY_CAPACITY_AH: DEFAULT_BATTERY_CAPACITY_AH,
-        CONF_BATTERY_VOLTAGE: DEFAULT_BATTERY_VOLTAGE,
-        CONF_MAX_SOC: DEFAULT_MAX_SOC,
-        CONF_MIN_SOC_PV: min_soc_pv,
-        CONF_MAX_CHARGE_CURRENT_ENTITY: max_charge_entity,
-        CONF_PV_FORECAST_TODAY: None,
-        **(
-            {CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR: _MIN_PRICE_HOUR_ENTITY}
-            if min_price_hour is not None
-            else {}
-        ),
-        **(
-            {CONF_MORNING_MAX_PRICE_HOUR_SENSOR: _MORNING_MAX_PRICE_HOUR_ENTITY}
-            if morning_max_price_hour is not None
-            else {}
-        ),
-        **({CONF_WORK_MODE_ENTITY: work_mode_entity} if work_mode_entity else {}),
-        **({CONF_PROG3_SOC_ENTITY: prog3_soc_entity} if prog3_soc_entity else {}),
-        **(
-            {CONF_PROG3_TIME_START_ENTITY: "sensor.prog3_start"}
-            if prog3_time_start is not None
-            else {}
-        ),
+        CONF_SELL_PRICE_SENSOR: _SELL_PRICE_ENTITY,
+        CONF_DAYTIME_MIN_PRICE_SENSOR: _MIDDAY_PRICE_ENTITY,
+        CONF_MAX_CHARGE_CURRENT_ENTITY: _MAX_CHARGE_ENTITY,
+        CONF_PV_FORECAST_TODAY: _PV_FORECAST_ENTITY,
+        # These values must not affect the narrowed action.
+        CONF_BATTERY_SOC_SENSOR: "sensor.soc",
+        CONF_MIN_SOC_PV: 95,
+        CONF_WORK_MODE_ENTITY: "select.work_mode",
+        CONF_PROG3_SOC_ENTITY: "number.prog3_soc",
     }
     hass.config_entries.async_entries.return_value = [entry]
     hass.config_entries.async_get_entry.return_value = entry
 
-    default_sun_attrs = {
-        "next_setting": "2026-03-05T16:00:00+00:00",
-    }
+    default_sun_attrs = {"next_setting": "2026-03-05T16:00:00+00:00"}
     if sun_attrs is not None:
         default_sun_attrs.update(sun_attrs)
 
-    states: dict[str, MagicMock] = {
+    states = {
         "sun.sun": _state(sun_state, default_sun_attrs),
-        _PRICE_ENTITY: _state(current_price),
-        _MIN_PRICE_ENTITY: _state(min_price),
-        **({_MIN_PRICE_HOUR_ENTITY: _state(min_price_hour)} if min_price_hour is not None else {}),
-        **(
-            {_MORNING_MAX_PRICE_HOUR_ENTITY: _state(morning_max_price_hour)}
-            if morning_max_price_hour is not None
-            else {}
-        ),
-        _MAX_CHARGE_ENTITY: _state(max_charge_current_state),
-        _SOC_ENTITY: _state(soc_value),
-        **({_WORK_MODE_ENTITY: _state("General Mode")} if work_mode_entity else {}),
-        **({"sensor.prog3_start": _state(prog3_time_start)} if prog3_time_start is not None else {}),
+        _MIDDAY_PRICE_ENTITY: _state("400"),
     }
-    hass.states.get.side_effect = lambda eid: states.get(eid)
+    if current_price is not None:
+        states[_SELL_PRICE_ENTITY] = _state(str(current_price))
+    if pv_forecast_available:
+        states[_PV_FORECAST_ENTITY] = _state(
+            "10",
+            {
+                "detailedHourly": [
+                    {
+                        "period_start": "2026-03-05T09:00:00+00:00",
+                        "pv_estimate": 3.0,
+                    }
+                ]
+            },
+        )
+    hass.states.get.side_effect = lambda entity_id: states.get(entity_id)
     hass.services.async_call = AsyncMock()
 
-    # Battery space sensor mock
     battery_space_sensor = MagicMock()
     battery_space_sensor.native_value = battery_space_value
-
     hass.data = {
         DOMAIN: {
             _ENTRY_ID: {
@@ -145,289 +101,266 @@ def _setup_hass(
             }
         }
     }
-
-    # Mock dt_util.now() to return a controlled hour — patch via the module
-    import datetime
-    from unittest.mock import patch
-
-    _now = datetime.datetime(2026, 3, 5, now_hour, 0, 0,
-                             tzinfo=datetime.timezone.utc)
-
-    hass._mock_patch_now = _now
+    hass._mock_now = datetime(
+        2026,
+        3,
+        5,
+        now_hour,
+        0,
+        0,
+        tzinfo=timezone.utc,
+    )
     return hass
 
 
-def _patch_now_and_pv(
+async def _run(
     hass: MagicMock,
     *,
-    pv_total_kwh: float,
-    pv_current_hour_kwh: float | None = None,
-):
-    """Return context manager patches for dt_util.now and get_pv_forecast_window."""
-    from unittest.mock import patch
+    morning_sell_hour: int = 7,
+    morning_sell_price: float | None = 800.0,
+    midday_avoidance_price: float | None = 400.0,
+    pv_total_kwh: float = 8.0,
+    pv_current_hour_kwh: float = 3.0,
+    current_hour_demand_kwh: float = 1.0,
+) -> None:
+    def _window_price(*_args, **kwargs):
+        if kwargs["unique_id_suffix"] == "morning_sell_window":
+            return morning_sell_price
+        return midday_avoidance_price
 
-    if pv_current_hour_kwh is None:
-        pv_current_hour_kwh = pv_total_kwh
-
-    return (
-        patch(
-            "custom_components.energy_optimizer.decision_engine.solar_charge_block.dt_util.now",
-            return_value=hass._mock_patch_now,
-        ),
-        patch(
-            "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_pv_forecast_window",
-            side_effect=[(pv_total_kwh, {}), (pv_current_hour_kwh, {})],
-        ),
-    )
-
-
-@pytest.mark.asyncio
-async def test_skip_when_sun_below_horizon() -> None:
-    """No action when sun is below the horizon."""
-    hass = _setup_hass(sun_state="below_horizon")
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=10.0)
-    with p_now, p_pv:
-        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_skip_when_work_mode_already_export_first() -> None:
-    """No action when blocking already reached Export First state."""
-    hass = _setup_hass(work_mode_entity=_WORK_MODE_ENTITY)
-    states_map = {
-        eid: hass.states.get(eid)
-        for eid in [
-            "sun.sun",
-            _PRICE_ENTITY,
-            _MIN_PRICE_ENTITY,
-            _MIN_PRICE_HOUR_ENTITY,
-            _MAX_CHARGE_ENTITY,
-            _SOC_ENTITY,
-        ]
-    }
-    states_map[_WORK_MODE_ENTITY] = _state(WORK_MODE_EXPORT_FIRST)
-    hass.states.get.side_effect = lambda eid: states_map.get(eid)
-
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=10.0)
-    with p_now, p_pv:
-        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_skip_when_before_morning_max_price_hour() -> None:
-    """No action when current time is earlier than morning max price hour."""
-    hass = _setup_hass(now_hour=6, morning_max_price_hour="07:00")
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=10.0)
-    with p_now, p_pv:
-        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_skip_when_past_noon() -> None:
-    """No action when current time is at or past the daytime min price time."""
-    hass = _setup_hass(now_hour=12)
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=10.0)
-    with p_now, p_pv:
-        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_skip_when_price_close_to_minimum() -> None:
-    """No action when 0.7 * current_price < min_price (price near daily min)."""
-    # 0.7 * 500 = 350 < 400 → skip
-    hass = _setup_hass(current_price="500", min_price="400")
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=10.0)
-    with p_now, p_pv:
-        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_skip_when_surplus_fits_in_battery() -> None:
-    """No action when PV surplus <= free battery space."""
-    # price gate: 0.7 * 800 = 560 >= 400 → passes
-    # surplus 3.0 <= free_space 5.0 → no block
-    hass = _setup_hass(current_price="800", min_price="400", battery_space_value=5.0)
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=3.0)
-    with p_now, p_pv:
-        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_skip_when_current_hour_pv_not_above_current_hour_demand() -> None:
-    """No action when current-hour PV forecast does not exceed current-hour demand."""
-    hass = _setup_hass(current_price="800", min_price="400", battery_space_value=2.0)
-    p_now, p_pv = _patch_now_and_pv(
-        hass,
-        pv_total_kwh=8.0,
-        pv_current_hour_kwh=0.0,
-    )
-    with p_now, p_pv:
-        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_skip_when_current_hour_pv_below_current_hour_demand() -> None:
-    """No action when current-hour PV forecast is positive but below demand."""
-    hass = _setup_hass(current_price="800", min_price="400", battery_space_value=2.0)
-    p_now, p_pv = _patch_now_and_pv(
-        hass,
-        pv_total_kwh=8.0,
-        pv_current_hour_kwh=1.1,
-    )
-    with p_now, p_pv:
-        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_blocks_at_1A_when_soc_below_min_soc() -> None:
-    """Sets max charge current to 0A when PV surplus > free space and SOC <= min_soc_pv."""
-    # price gate: 0.7 * 800 = 560 >= 400 → passes
-    # surplus 8.0 > free_space 2.0 → BLOCK branch
-    # SOC 10% <= default min_soc 15% → limit to 0A
-    hass = _setup_hass(
-        current_price="800",
-        min_price="400",
-        battery_space_value=2.0,
-        soc_value="10",
-        min_soc_pv=DEFAULT_MIN_SOC_PV,
-    )
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=3.0)
-    with p_now, p_pv:
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "custom_components.energy_optimizer.decision_engine.solar_charge_block.dt_util.now",
+                return_value=hass._mock_now,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "custom_components.energy_optimizer.decision_engine.solar_charge_block.resolve_morning_max_price_hour",
+                return_value=morning_sell_hour,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_internal_window_price",
+                side_effect=_window_price,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_pv_forecast_window",
+                side_effect=[
+                    (pv_total_kwh, {}),
+                    (pv_current_hour_kwh, {}),
+                ],
+            )
+        )
+        stack.enter_context(
+            patch(
+                "custom_components.energy_optimizer.decision_engine.solar_charge_block.build_hourly_usage_array",
+                return_value=[0.0] * 24,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_heat_pump_forecast_window",
+                new=AsyncMock(return_value=(0.0, {})),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "custom_components.energy_optimizer.decision_engine.solar_charge_block.calculate_losses",
+                return_value=({}, 0.0),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "custom_components.energy_optimizer.decision_engine.solar_charge_block.hourly_demand",
+                return_value=current_hour_demand_kwh,
+            )
+        )
         await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
 
+
+def _assert_charge_current(hass: MagicMock, value: float) -> None:
     hass.services.async_call.assert_called_once_with(
         "number",
         "set_value",
-        {"entity_id": _MAX_CHARGE_ENTITY, "value": 0},
+        {"entity_id": _MAX_CHARGE_ENTITY, "value": value},
         blocking=True,
         context=ANY,
     )
 
 
 @pytest.mark.asyncio
-async def test_export_first_when_soc_above_min_soc() -> None:
-    """Sets Export First + target SOC when PV surplus > free space and SOC > min_soc_pv."""
-    # price gate: 0.7 * 800 = 560 >= 400 → passes
-    # surplus 8.0 > free_space 2.0 → BLOCK branch
-    # SOC 80% > default min_soc 15% → Export First path
-    hass = _setup_hass(
-        current_price="800",
-        min_price="400",
-        battery_space_value=2.0,
-        soc_value="80",
-        min_soc_pv=DEFAULT_MIN_SOC_PV,
-        work_mode_entity=_WORK_MODE_ENTITY,
-        prog3_soc_entity="number.prog3_soc",
-        prog3_time_start="08:00",
-    )
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=3.0)
-    with p_now, p_pv:
-        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+async def test_before_morning_sell_window_makes_no_changes() -> None:
+    """Do not take ownership of inverter state before the morning sell window."""
+    hass = _setup_hass(now_hour=6)
 
-    calls = hass.services.async_call.call_args_list
-    assert len(calls) == 2
-    assert calls[0] == (
-        ("select", "select_option", {"entity_id": _WORK_MODE_ENTITY, "option": WORK_MODE_EXPORT_FIRST}),
-        {"blocking": True, "context": ANY},
-    )
-    assert calls[1] == (
-        ("number", "set_value", {"entity_id": "number.prog3_soc", "value": float(DEFAULT_MIN_SOC_PV)}),
-        {"blocking": True, "context": ANY},
-    )
+    await _run(hass, morning_sell_hour=7)
 
-
-@pytest.mark.asyncio
-async def test_skip_when_soc_unavailable_at_block_decision() -> None:
-    """Skip blocking when battery SOC sensor unavailable."""
-    hass = _setup_hass(current_price="800", min_price="400", battery_space_value=2.0)
-    # Remove SOC sensor from states
-    original_side_effect = hass.states.get.side_effect
-    hass.states.get.side_effect = lambda eid: None if eid == _SOC_ENTITY else original_side_effect(eid)
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=8.0, pv_current_hour_kwh=3.0)
-    with p_now, p_pv:
-        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
     hass.services.async_call.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_skip_when_min_price_sensor_not_configured() -> None:
-    """No action when daytime min price sensor is not configured."""
+async def test_sun_below_horizon_makes_no_changes() -> None:
+    """Do not act when the daylight guard is unavailable."""
+    hass = _setup_hass(sun_state="below_horizon")
+
+    await _run(hass)
+
+    hass.services.async_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("morning_price", "midday_price", "current_price"),
+    [
+        (800.0, 400.0, 480.0),
+        (100.0, 0.0, 20.0),
+        (50.0, -50.0, -30.0),
+    ],
+)
+async def test_blocks_at_or_above_dynamic_threshold(
+    morning_price: float,
+    midday_price: float,
+    current_price: float,
+) -> None:
+    """Set only maximum charge current to zero when every block guard is true."""
+    hass = _setup_hass(current_price=current_price)
+
+    await _run(
+        hass,
+        morning_sell_price=morning_price,
+        midday_avoidance_price=midday_price,
+    )
+
+    _assert_charge_current(hass, 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("morning_price", "midday_price", "current_price"),
+    [
+        (800.0, 400.0, 479.9),
+        (100.0, 0.0, 19.9),
+        (50.0, -50.0, -30.1),
+    ],
+)
+async def test_restores_below_dynamic_threshold(
+    morning_price: float,
+    midday_price: float,
+    current_price: float,
+) -> None:
+    """Restore default charging below the low-value spread threshold."""
+    hass = _setup_hass(current_price=current_price)
+
+    await _run(
+        hass,
+        morning_sell_price=morning_price,
+        midday_avoidance_price=midday_price,
+    )
+
+    _assert_charge_current(hass, DEFAULT_MAX_CHARGE_CURRENT)
+
+
+@pytest.mark.asyncio
+async def test_restores_when_forecast_surplus_fits_in_battery() -> None:
+    """Restore charging when forecast surplus no longer exceeds free space."""
+    hass = _setup_hass(battery_space_value=5.0)
+
+    await _run(hass, pv_total_kwh=5.0)
+
+    _assert_charge_current(hass, DEFAULT_MAX_CHARGE_CURRENT)
+
+
+@pytest.mark.asyncio
+async def test_restores_when_current_hour_pv_does_not_exceed_demand() -> None:
+    """Restore charging until the current hour has real PV surplus."""
     hass = _setup_hass()
-    # Remove the min price sensor from config
-    entry = hass.config_entries.async_get_entry.return_value
-    entry.data = {k: v for k, v in entry.data.items() if k != CONF_DAYTIME_MIN_PRICE_SENSOR}
 
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=10.0)
-    with p_now, p_pv:
-        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+    await _run(
+        hass,
+        pv_current_hour_kwh=1.0,
+        current_hour_demand_kwh=1.0,
+    )
+
+    _assert_charge_current(hass, DEFAULT_MAX_CHARGE_CURRENT)
+
+
+@pytest.mark.asyncio
+async def test_post_midday_price_condition_can_restore() -> None:
+    """Continue evaluating the price guard after the midday safety-net action."""
+    hass = _setup_hass(now_hour=13, current_price=450.0)
+
+    await _run(hass)
+
+    _assert_charge_current(hass, DEFAULT_MAX_CHARGE_CURRENT)
+
+
+@pytest.mark.asyncio
+async def test_missing_current_sell_price_makes_no_changes() -> None:
+    """Missing current sell-price data must not trigger a command."""
+    hass = _setup_hass(current_price=None)
+
+    await _run(hass)
+
     hass.services.async_call.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_skip_when_min_price_hour_sensor_not_configured() -> None:
-    """No action when daytime min price hour sensor is not configured."""
-    hass = _setup_hass(min_price_hour=None)
-    p_now, p_pv = _patch_now_and_pv(hass, pv_total_kwh=10.0)
-    with p_now, p_pv:
-        await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+@pytest.mark.parametrize(
+    ("morning_price", "midday_price"),
+    [(None, 400.0), (800.0, None)],
+)
+async def test_missing_window_price_makes_no_changes(
+    morning_price: float | None,
+    midday_price: float | None,
+) -> None:
+    """Missing Morning Sell or Midday Avoidance prices must not trigger a command."""
+    hass = _setup_hass()
+
+    await _run(
+        hass,
+        morning_sell_price=morning_price,
+        midday_avoidance_price=midday_price,
+    )
+
     hass.services.async_call.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_uses_sell_price_label_when_sell_sensor_selected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Current-price reads should use the matching sensor label."""
-    hass = _setup_hass(price_sensor_key=CONF_SELL_PRICE_SENSOR)
-    get_required_float_state = MagicMock(return_value=800.0)
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_required_float_state",
-        get_required_float_state,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_internal_window_price",
-        MagicMock(return_value=None),
-    )
+async def test_missing_pv_forecast_makes_no_changes() -> None:
+    """Missing PV forecast data must not be treated as a false capacity guard."""
+    hass = _setup_hass(pv_forecast_available=False)
 
-    await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+    await _run(hass)
 
-    get_required_float_state.assert_called_once_with(
-        hass,
-        _PRICE_ENTITY,
-        entity_name="Sell price sensor",
-    )
+    hass.services.async_call.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_prefers_sell_price_over_buy_price_for_export_decision(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Solar charge blocking should price Export First decisions by sell price."""
-    hass = _setup_hass(price_sensor_key=CONF_BUY_PRICE_SENSOR)
-    entry = hass.config_entries.async_get_entry.return_value
-    entry.data[CONF_SELL_PRICE_SENSOR] = "sensor.sell_price"
-    get_required_float_state = MagicMock(return_value=800.0)
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_required_float_state",
-        get_required_float_state,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_internal_window_price",
-        MagicMock(return_value=None),
-    )
+async def test_missing_battery_space_makes_no_changes() -> None:
+    """Missing battery-space data must not trigger a restore or block."""
+    hass = _setup_hass(battery_space_value=None)
 
-    await async_run_solar_charge_block(hass, entry_id=_ENTRY_ID)
+    await _run(hass)
 
-    get_required_float_state.assert_called_once_with(
-        hass,
-        "sensor.sell_price",
-        entity_name="Sell price sensor",
-    )
+    hass.services.async_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ignores_soc_work_mode_and_program_soc() -> None:
+    """Block without reading SOC or changing work mode or active program SOC."""
+    hass = _setup_hass()
+
+    await _run(hass)
+
+    _assert_charge_current(hass, 0)
+    requested_entity_ids = [
+        call.args[2]["entity_id"]
+        for call in hass.services.async_call.call_args_list
+    ]
+    assert "select.work_mode" not in requested_entity_ids
+    assert "number.prog3_soc" not in requested_entity_ids

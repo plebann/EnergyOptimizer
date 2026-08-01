@@ -96,8 +96,9 @@ morning_peak_sell:
 solar_charge_block:
   name: Solar Charge Block
   description: >-
-    Block battery charging before noon when PV surplus (now to sunset) will
-    overflow available battery space and current price is above the daytime minimum.
+    Delay PV battery charging while export remains valuable and forecast surplus
+    exceeds available battery space. This action only changes maximum charge
+    current and does not force battery discharge.
   fields:
     entry_id:
       name: Config Entry ID

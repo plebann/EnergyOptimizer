@@ -15,7 +15,6 @@ from custom_components.energy_optimizer.const import (
     CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
     CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
-    CONF_PRICE_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     CONF_SELL_PRICE_SENSOR,
     DOMAIN,
@@ -175,7 +174,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
 
     entry = _mock_entry(
         data={
-            CONF_PRICE_SENSOR: "sensor.price",
+            CONF_SELL_PRICE_SENSOR: "sensor.sell_price",
             CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start",
             CONF_MORNING_MAX_PRICE_HOUR_SENSOR: "sensor.morning_peak",
             CONF_EVENING_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak",
@@ -226,7 +225,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
             action["key"] == "solar_charge_block"
             and action["kind"] == "event_driven"
             and action["trigger"] == "hourly_between_sunrise_and_sunset"
-            and action["source"] == "price_sensor"
+            and action["source"] == "sell_price_sensor"
             and action["time"] is None
             for action in actions
         )
