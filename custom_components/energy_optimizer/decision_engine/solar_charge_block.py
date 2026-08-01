@@ -47,6 +47,12 @@ async def async_run_solar_charge_block(
     config = entry.data
 
     max_charge_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
+    if not max_charge_entity:
+        _LOGGER.warning(
+            "Solar charge block: max charge current entity not configured — skip"
+        )
+        return
+
     now = dt_util.now()
     morning_sell_hour = resolve_morning_max_price_hour(
         hass,
