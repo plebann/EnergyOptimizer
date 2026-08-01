@@ -20,8 +20,10 @@ from ..const import (
 )
 from ..controllers.inverter import set_max_charge_current
 from ..helpers import (
-    get_required_float_state,
+    get_float_state_info,
     get_internal_window_price,
+    get_required_float_state,
+    resolve_daytime_min_price_time,
     resolve_morning_max_price_hour,
 )
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
@@ -63,6 +65,40 @@ async def async_run_solar_charge_block(
         _LOGGER.debug(
             "Solar charge block: before Morning Sell Window (%02d:00) — skip",
             morning_sell_hour,
+        )
+        return
+
+    daytime_min_price_time = resolve_daytime_min_price_time(
+        hass,
+        config,
+        entry_id=entry.entry_id,
+    )
+    if now.time() >= daytime_min_price_time:
+        current_max_charge, raw_max_charge, max_charge_error = get_float_state_info(
+            hass,
+            str(max_charge_entity),
+        )
+        if max_charge_error is not None or current_max_charge != 0:
+            _LOGGER.debug(
+                "Solar charge block: after Midday Avoidance Window (%s) — skip "
+                "(max charge current %s)",
+                daytime_min_price_time.strftime("%H:%M"),
+                raw_max_charge,
+            )
+            return
+
+        _LOGGER.info(
+            "Solar charge block: RESTORING — after Midday Avoidance Window (%s) "
+            "and max charge current is 0",
+            daytime_min_price_time.strftime("%H:%M"),
+        )
+        await set_max_charge_current(
+            hass,
+            max_charge_entity,
+            DEFAULT_MAX_CHARGE_CURRENT,
+            entry=entry,
+            logger=_LOGGER,
+            context=Context(),
         )
         return
 

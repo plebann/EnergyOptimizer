@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
@@ -42,11 +42,13 @@ def _state(value: str, attributes: dict | None = None) -> MagicMock:
 def _setup_hass(
     *,
     now_hour: int = 9,
+    now_minute: int = 0,
     sun_state: str = "above_horizon",
     sun_attrs: dict | None = None,
     current_price: float | None = 500.0,
     battery_space_value: float | None = 2.0,
     pv_forecast_available: bool = True,
+    max_charge_current_value: float | str | None = DEFAULT_MAX_CHARGE_CURRENT,
 ) -> MagicMock:
     hass = MagicMock()
     entry = MagicMock()
@@ -77,6 +79,8 @@ def _setup_hass(
     }
     if current_price is not None:
         states[_SELL_PRICE_ENTITY] = _state(str(current_price))
+    if max_charge_current_value is not None:
+        states[_MAX_CHARGE_ENTITY] = _state(str(max_charge_current_value))
     if pv_forecast_available:
         states[_PV_FORECAST_ENTITY] = _state(
             "10",
@@ -106,7 +110,7 @@ def _setup_hass(
         3,
         5,
         now_hour,
-        0,
+        now_minute,
         0,
         tzinfo=timezone.utc,
     )
@@ -119,6 +123,7 @@ async def _run(
     morning_sell_hour: int = 7,
     morning_sell_price: float | None = 800.0,
     midday_avoidance_price: float | None = 400.0,
+    daytime_min_price_time: time = time(12, 0),
     pv_total_kwh: float = 8.0,
     pv_current_hour_kwh: float = 3.0,
     current_hour_demand_kwh: float = 1.0,
@@ -139,6 +144,12 @@ async def _run(
             patch(
                 "custom_components.energy_optimizer.decision_engine.solar_charge_block.resolve_morning_max_price_hour",
                 return_value=morning_sell_hour,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "custom_components.energy_optimizer.decision_engine.solar_charge_block.resolve_daytime_min_price_time",
+                return_value=daytime_min_price_time,
             )
         )
         stack.enter_context(
@@ -290,13 +301,47 @@ async def test_restores_when_current_hour_pv_does_not_exceed_demand() -> None:
 
 
 @pytest.mark.asyncio
-async def test_post_midday_price_condition_can_restore() -> None:
-    """Continue evaluating the price guard after the midday safety-net action."""
-    hass = _setup_hass(now_hour=13, current_price=450.0)
+async def test_at_daytime_min_price_restores_when_current_charge_is_zero() -> None:
+    """Restore once the midday cutoff is reached if solar charging is blocked."""
+    hass = _setup_hass(now_hour=12, current_price=500.0, max_charge_current_value=0)
 
     await _run(hass)
 
     _assert_charge_current(hass, DEFAULT_MAX_CHARGE_CURRENT)
+
+
+@pytest.mark.asyncio
+async def test_before_daytime_min_price_in_same_hour_can_still_block() -> None:
+    """Allow normal evaluation before the exact midday cutoff minute."""
+    hass = _setup_hass(now_hour=11, now_minute=0)
+
+    await _run(hass, daytime_min_price_time=time(11, 30))
+
+    _assert_charge_current(hass, 0)
+
+
+@pytest.mark.asyncio
+async def test_at_daytime_min_price_skips_when_charge_is_not_zero() -> None:
+    """Do not continue block evaluation after the midday cutoff."""
+    hass = _setup_hass(
+        now_hour=12,
+        current_price=500.0,
+        max_charge_current_value=DEFAULT_MAX_CHARGE_CURRENT,
+    )
+
+    await _run(hass)
+
+    hass.services.async_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_at_daytime_min_price_skips_when_charge_state_is_invalid() -> None:
+    """Do not issue restore if the current max charge state cannot be verified."""
+    hass = _setup_hass(now_hour=12, max_charge_current_value="unknown")
+
+    await _run(hass)
+
+    hass.services.async_call.assert_not_called()
 
 
 @pytest.mark.asyncio

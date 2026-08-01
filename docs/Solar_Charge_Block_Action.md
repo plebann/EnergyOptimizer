@@ -24,12 +24,15 @@ akcję.
 - Guardy biznesowe znajdują się w samej logice decyzji, dlatego wywołanie
   ręczne i harmonogram zachowują się tak samo.
 - Przed początkiem Morning Sell Window akcja nie wykonuje żadnej zmiany.
+- Od czasu Midday Avoidance Window włącznie akcja nie blokuje ładowania; jeśli
+  bieżący `max_charge_current_entity` ma wartość `0`, przywraca
+  `DEFAULT_MAX_CHARGE_CURRENT`.
 
 ## Dane wejściowe
 
 - bieżąca cena sprzedaży z `sell_price_sensor`;
 - cena i czas początku wewnętrznego sensora Morning Sell Window;
-- cena wewnętrznego sensora Midday Avoidance Window
+- czas i cena wewnętrznego sensora Midday Avoidance Window
   (`midday_sell_window`, z dotychczasowym fallbackiem ceny);
 - prognoza PV od bieżącej godziny do zachodu słońca;
 - prognoza PV dla bieżącej godziny;
@@ -68,7 +71,7 @@ Blokada jest aktywowana tylko wtedy, gdy oba warunki są prawdziwe:
    uwzględniające zużycie domu, pompę ciepła, straty i margines `1.1`.
 
 Jeśli którykolwiek ze znanych warunków ceny lub PV staje się fałszywy po
-rozpoczęciu Morning Sell Window, akcja przywraca
+rozpoczęciu Morning Sell Window, ale przed Midday Avoidance Window, akcja przywraca
 `DEFAULT_MAX_CHARGE_CURRENT`.
 
 ## Przebieg decyzji
@@ -77,10 +80,14 @@ rozpoczęciu Morning Sell Window, akcja przywraca
 flowchart TD
   start["Run Solar Charge Block"] --> morning{"Morning Sell Window started?"}
   morning -->|No| skip_before["Skip without changes"]
-  morning -->|Yes| data{"Required data available?"}
+  morning -->|Yes| midday{"Before Midday Avoidance Window?"}
+  midday -->|No| zero{"Max charge current is 0?"}
+  zero -->|Yes| restore["Restore default max charge current"]
+  zero -->|No| skip_after["Skip without changes"]
+  midday -->|Yes| data{"Required data available?"}
   data -->|No| skip_missing["Skip without changes"]
   data -->|Yes| price{"Current sell price >= threshold?"}
-  price -->|No| restore["Restore default max charge current"]
+  price -->|No| restore
   price -->|Yes| capacity{"PV surplus > free battery space?"}
   capacity -->|No| restore
   capacity -->|Yes| hourly{"Current-hour PV > demand?"}
@@ -91,8 +98,9 @@ flowchart TD
 ## Przywrócenie i bezpieczeństwo
 
 Solar Charge Block sam przywraca domyślny prąd ładowania, gdy znane warunki
-blokady przestają być spełnione. Istniejąca akcja Midday Avoidance Window
-restore pozostaje dodatkową ochroną na wypadek pominięcia kontroli godzinowej.
+blokady przestają być spełnione przed czasem Midday Avoidance Window. Od czasu
+Midday Avoidance Window włącznie przywraca prąd tylko wtedy, gdy może potwierdzić,
+że bieżący `max_charge_current_entity` wynosi `0`.
 
 Brak danych nie jest traktowany jako fałszywy warunek: w takim przypadku nie
 jest wykonywane ani blokowanie, ani przywrócenie.
@@ -102,6 +110,7 @@ jest wykonywane ani blokowanie, ani przywrócenie.
 Logi rozróżniają:
 
 - pominięcie przed Morning Sell Window;
+- pominięcie lub przywrócenie po Midday Avoidance Window;
 - pominięcie z powodu brakujących danych;
 - przywrócenie z powodu ceny, pojemności lub bieżącego bilansu PV;
 - blokadę wraz z cenami, progiem i wartościami guardów PV.
