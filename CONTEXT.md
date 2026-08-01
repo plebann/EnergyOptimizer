@@ -14,9 +14,14 @@ A Market Window selected because buying energy during that window is favorable.
 
 A Market Window selected because exporting energy during that window is favorable.
 
+### Morning Sell Window
+
+A Sell Window selected from the morning price peak. EnergyOptimizer uses it as the morning export opportunity and as a reference point for later PV charging decisions.
+
 ### Midday Avoidance Window
 
 A Market Window selected because exporting energy during that window is unfavorable, so EnergyOptimizer may avoid or limit export-oriented behavior.
+_Avoid_: Midday Sell Window
 
 ### High-Tariff Window
 
@@ -63,6 +68,15 @@ The Buy Window whose price is used as the buy side of an Arbitrage Margin calcul
 and Evening Sell scenarios use the Night Buy Window as their Arbitrage Buy Reference. Afternoon Charge uses the Day
 Buy Window (best 2h window, 10:00-16:00; unchanged). If the Arbitrage Buy Reference price is unavailable, the
 Arbitrage Margin cannot be computed and the gate fails closed (no arbitrage / no high-price sell).
+
+### Solar Charge Block
+
+A control action that temporarily prevents PV energy from charging the battery when exporting that PV energy is more valuable than storing it. Solar Charge Block is not a Forced Battery Discharge.
+
+### Forced Battery Discharge
+
+A deliberate control action that lowers battery state of charge by selling or otherwise using energy already stored in the battery.
+_Avoid_: Emptying the battery
 
 ### Night Buy Window
 
