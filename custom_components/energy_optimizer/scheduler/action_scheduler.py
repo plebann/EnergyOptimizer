@@ -15,7 +15,6 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from ..const import (
-    CONF_BUY_PRICE_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_SELL_PRICE_SENSOR,
@@ -765,27 +764,19 @@ class ActionScheduler:
             )
         )
 
-        solar_price_source: str | None = None
-        if self.entry.data.get(CONF_SELL_PRICE_SENSOR):
-            solar_price_source = "sell_price_sensor"
-        elif self.entry.data.get(CONF_PRICE_SENSOR):
-            solar_price_source = "price_sensor"
-        elif self.entry.data.get(CONF_BUY_PRICE_SENSOR):
-            solar_price_source = "buy_price_sensor"
-        has_price_context = solar_price_source is not None
+        has_solar_price_context = bool(self.entry.data.get(CONF_SELL_PRICE_SENSOR))
         has_sell_context = bool(
             self.entry.data.get(CONF_SELL_PRICE_SENSOR) or self.entry.data.get(CONF_PRICE_SENSOR)
         )
 
-        if has_price_context:
-            assert solar_price_source is not None
+        if has_solar_price_context:
             actions.append(
                 self._build_action_entry(
                     key="solar_charge_block",
                     label="Solar charge block check",
                     scheduled_for=None,
                     kind="event_driven",
-                    source=solar_price_source,
+                    source="sell_price_sensor",
                     order=999,
                     trigger="hourly_between_sunrise_and_sunset",
                 )
