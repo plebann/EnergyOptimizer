@@ -1,42 +1,57 @@
-"""Tests for export blocking/unblocking control based on price."""
+"""Tests for forecast-aware export blocking."""
 from __future__ import annotations
 
+from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from custom_components.energy_optimizer.const import (
+    CONF_BATTERY_SOC_SENSOR,
+    CONF_BEV_CHARGING_BINARY_SENSOR,
+    CONF_BEV_CHARGING_POWER_SENSOR,
     CONF_INVERTER_EXPORT_SURPLUS_SWITCH,
     CONF_INVERTER_OFFGRID_SWITCH,
+    CONF_LOAD_USAGE_12_16,
     CONF_PRICE_SENSOR,
+    CONF_PV_FORECAST_TODAY,
     DOMAIN,
 )
 from custom_components.energy_optimizer.decision_engine.export_block_control import (
     async_run_export_block_control,
 )
 
-pytestmark = pytest.mark.enable_socket
-
 _ENTRY_ID = "entry-export"
 _PRICE_ENTITY = "sensor.price"
+_PV_ENTITY = "sensor.pv_forecast_today"
+_LOAD_ENTITY = "sensor.load_usage_12_16"
+_SOC_ENTITY = "sensor.battery_soc"
 _EXPORT_SURPLUS_SWITCH = "switch.inverter_export_surplus"
 _OFFGRID_SWITCH = "switch.inverter_offgrid"
+_BEV_CHARGING_SENSOR = "binary_sensor.bev_charging"
+_BEV_POWER_SENSOR = "sensor.bev_charging_power"
 _SUN_ENTITY = "sun.sun"
+_NOW = datetime(2026, 8, 1, 12, 1, tzinfo=ZoneInfo("Europe/Warsaw"))
 
 
-def _state(value: str, attributes: dict | None = None) -> MagicMock:
-    state = MagicMock()
-    state.state = value
-    state.attributes = attributes or {}
-    return state
+def _state(value: str, attributes: dict | None = None) -> SimpleNamespace:
+    """Build a minimal Home Assistant state."""
+    return SimpleNamespace(state=value, attributes=attributes or {})
 
 
 def _setup_hass(
     *,
-    price: str,
-    export_surplus_switch_state: str,
-    sun_state: str = "above_horizon",
+    price: str = "-1.0",
+    pv_kwh: float = 20.0,
+    export_switch_state: str = "on",
+    offgrid_switch_state: str = "off",
+    bev_charging: str | None = None,
+    bev_power_w: float | None = None,
+    include_forecast: bool = True,
 ) -> MagicMock:
+    """Build hass with a valid current-hour energy balance at 12:00."""
     hass = MagicMock()
     entry = MagicMock()
     entry.entry_id = _ENTRY_ID
@@ -44,262 +59,205 @@ def _setup_hass(
     entry.options = {}
     entry.data = {
         CONF_PRICE_SENSOR: _PRICE_ENTITY,
+        CONF_PV_FORECAST_TODAY: _PV_ENTITY,
+        CONF_LOAD_USAGE_12_16: _LOAD_ENTITY,
+        CONF_BATTERY_SOC_SENSOR: _SOC_ENTITY,
         CONF_INVERTER_EXPORT_SURPLUS_SWITCH: _EXPORT_SURPLUS_SWITCH,
+        CONF_INVERTER_OFFGRID_SWITCH: _OFFGRID_SWITCH,
     }
+    if bev_charging is not None:
+        entry.data[CONF_BEV_CHARGING_BINARY_SENSOR] = _BEV_CHARGING_SENSOR
+    if bev_power_w is not None:
+        entry.data[CONF_BEV_CHARGING_POWER_SENSOR] = _BEV_POWER_SENSOR
+
+    forecast = (
+        [{"period_start": _NOW.isoformat(), "pv_estimate": pv_kwh}]
+        if include_forecast
+        else None
+    )
+    states = {
+        _SUN_ENTITY: _state("above_horizon"),
+        _PRICE_ENTITY: _state(price),
+        _PV_ENTITY: _state("0", {"detailedHourly": forecast}),
+        _LOAD_ENTITY: _state("1.0"),
+        _SOC_ENTITY: _state("50"),
+        _EXPORT_SURPLUS_SWITCH: _state(export_switch_state),
+        _OFFGRID_SWITCH: _state(offgrid_switch_state),
+    }
+    if bev_charging is not None:
+        states[_BEV_CHARGING_SENSOR] = _state(bev_charging)
+    if bev_power_w is not None:
+        states[_BEV_POWER_SENSOR] = _state(str(bev_power_w))
+
     hass.config_entries.async_entries.return_value = [entry]
     hass.config_entries.async_get_entry.return_value = entry
-
-    states = {
-        _PRICE_ENTITY: _state(price),
-        _EXPORT_SURPLUS_SWITCH: _state(export_surplus_switch_state),
-        _SUN_ENTITY: _state(sun_state),
-    }
-    hass.states.get.side_effect = lambda entity_id: states.get(entity_id)
+    hass.states.get.side_effect = states.get
     hass.services.async_call = AsyncMock()
-    hass.data = {DOMAIN: {_ENTRY_ID: {}}}
-    return hass
-
-
-def _setup_hass_with_offgrid(
-    *,
-    price: str,
-    offgrid_switch_state: str | None,
-    export_surplus_switch_state: str = "on",
-    include_export_surplus_switch: bool = True,
-    sun_state: str = "above_horizon",
-) -> MagicMock:
-    hass = _setup_hass(
-        price=price,
-        export_surplus_switch_state=export_surplus_switch_state,
-        sun_state=sun_state,
-    )
-    entry = hass.config_entries.async_entries.return_value[0]
-    entry.data[CONF_INVERTER_OFFGRID_SWITCH] = _OFFGRID_SWITCH
-    if not include_export_surplus_switch:
-        entry.data.pop(CONF_INVERTER_EXPORT_SURPLUS_SWITCH)
-
-    states = {
-        _PRICE_ENTITY: _state(price),
-        _SUN_ENTITY: _state(sun_state),
+    hass.data = {
+        DOMAIN: {
+            _ENTRY_ID: {
+                "export_block_offgrid_threshold": SimpleNamespace(native_value=3.5),
+            }
+        }
     }
-    if include_export_surplus_switch:
-        states[_EXPORT_SURPLUS_SWITCH] = _state(export_surplus_switch_state)
-    if offgrid_switch_state is not None:
-        states[_OFFGRID_SWITCH] = _state(offgrid_switch_state)
-    hass.states.get.side_effect = lambda entity_id: states.get(entity_id)
     return hass
 
 
-@pytest.mark.asyncio
-async def test_blocks_export_when_price_negative_and_not_blocked() -> None:
-    """Turn switch off when price is negative and export is enabled."""
-    hass = _setup_hass(price="-50", export_surplus_switch_state="on")
-
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
-
-    hass.services.async_call.assert_called_once_with(
-        "switch",
-        "turn_off",
-        {"entity_id": _EXPORT_SURPLUS_SWITCH},
-        blocking=True,
-        context=hass.services.async_call.call_args.kwargs.get("context"),
-    )
+def _service_calls(hass: MagicMock) -> list[tuple[str, str, str]]:
+    """Return simplified switch service calls."""
+    return [
+        (
+            service_call.args[0],
+            service_call.args[1],
+            service_call.args[2]["entity_id"],
+        )
+        for service_call in hass.services.async_call.call_args_list
+    ]
 
 
 @pytest.mark.asyncio
-async def test_unblocks_export_when_price_positive_and_blocked() -> None:
-    """Turn switch on when price is positive and export is blocked."""
-    hass = _setup_hass(price="50", export_surplus_switch_state="off")
-
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
-
-    hass.services.async_call.assert_called_once_with(
-        "switch",
-        "turn_on",
-        {"entity_id": _EXPORT_SURPLUS_SWITCH},
-        blocking=True,
-        context=hass.services.async_call.call_args.kwargs.get("context"),
-    )
-
-
-@pytest.mark.asyncio
-async def test_no_action_when_negative_and_already_blocked() -> None:
-    """Do nothing when price is negative and export is already blocked."""
-    hass = _setup_hass(price="-20", export_surplus_switch_state="off")
-
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
-
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_no_action_when_positive_and_already_unblocked() -> None:
-    """Do nothing when price is positive and export is already unblocked."""
-    hass = _setup_hass(price="20", export_surplus_switch_state="on")
-
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
-
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_no_action_when_sun_not_above_horizon() -> None:
-    """Do nothing when sun is below horizon."""
-    hass = _setup_hass(
-        price="-20",
-        export_surplus_switch_state="on",
-        sun_state="below_horizon",
-    )
-
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
-
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_offgrid_turns_on_when_price_zero_and_switch_off() -> None:
-    """Turn off-grid switch on when price is effectively zero."""
-    hass = _setup_hass_with_offgrid(price="0.0", offgrid_switch_state="off")
-
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
-
-    hass.services.async_call.assert_called_once_with(
-        "switch",
-        "turn_on",
-        {"entity_id": _OFFGRID_SWITCH},
-        blocking=True,
-        context=hass.services.async_call.call_args.kwargs.get("context"),
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("price", "offgrid_switch_state", "expected_service"),
-    [
-        ("0.04", "off", "turn_on"),  # rounds to 0.0 at 1dp
-        ("0.05", "on", "turn_off"),  # rounds above 0.0 at 1dp
-    ],
-)
-async def test_offgrid_zero_price_threshold_boundary(
-    price: str, offgrid_switch_state: str, expected_service: str
+async def test_high_surplus_blocks_export_then_enters_offgrid(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Validate rounding-based zero-price threshold behavior."""
-    hass = _setup_hass_with_offgrid(price=price, offgrid_switch_state=offgrid_switch_state)
+    """High predicted surplus blocks export before off-grid activation."""
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.export_block_control.dt_util.now",
+        lambda: _NOW,
+    )
+    hass = _setup_hass()
 
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
+    decision = await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
 
-    hass.services.async_call.assert_called_once_with(
-        "switch",
-        expected_service,
-        {"entity_id": _OFFGRID_SWITCH},
-        blocking=True,
-        context=hass.services.async_call.call_args.kwargs.get("context"),
+    assert _service_calls(hass) == [
+        ("switch", "turn_off", _EXPORT_SURPLUS_SWITCH),
+        ("switch", "turn_on", _OFFGRID_SWITCH),
+    ]
+    assert decision["action"] == "block_export_offgrid"
+    assert decision["forecast_export_surplus_kwh"] > 3.5
+
+
+@pytest.mark.asyncio
+async def test_low_surplus_blocks_export_but_keeps_grid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Low surplus uses only the export switch and reconnects the grid."""
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.export_block_control.dt_util.now",
+        lambda: _NOW,
+    )
+    hass = _setup_hass(
+        pv_kwh=13.0,
+        export_switch_state="on",
+        offgrid_switch_state="on",
     )
 
+    decision = await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
 
-@pytest.mark.asyncio
-async def test_offgrid_no_action_when_price_zero_and_already_on() -> None:
-    """Do nothing when price is effectively zero and off-grid is already on."""
-    hass = _setup_hass_with_offgrid(price="0.0", offgrid_switch_state="on")
-
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
-
-    hass.services.async_call.assert_not_called()
+    assert _service_calls(hass) == [
+        ("switch", "turn_off", _EXPORT_SURPLUS_SWITCH),
+        ("switch", "turn_off", _OFFGRID_SWITCH),
+    ]
+    assert decision["action"] == "block_export_with_grid"
 
 
 @pytest.mark.asyncio
-async def test_offgrid_surplus_switch_not_touched_when_offgrid_configured() -> None:
-    """Use only off-grid switch when both off-grid and surplus switches exist."""
-    hass = _setup_hass_with_offgrid(
-        price="0.0",
-        offgrid_switch_state="off",
-        export_surplus_switch_state="on",
+async def test_bev_absorbing_surplus_keeps_export_and_grid_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Active BEV charging never uses off-grid and can permit export."""
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.export_block_control.dt_util.now",
+        lambda: _NOW,
+    )
+    hass = _setup_hass(
+        bev_charging="on",
+        bev_power_w=8000.0,
+        export_switch_state="off",
+        offgrid_switch_state="on",
     )
 
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
+    decision = await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
 
-    hass.services.async_call.assert_called_once()
-    call_args = hass.services.async_call.call_args
-    assert call_args.args[:3] == (
-        "switch",
-        "turn_on",
-        {"entity_id": _OFFGRID_SWITCH},
+    assert _service_calls(hass) == [
+        ("switch", "turn_off", _OFFGRID_SWITCH),
+        ("switch", "turn_on", _EXPORT_SURPLUS_SWITCH),
+    ]
+    assert decision["reason"] == "bev_absorbs_surplus"
+    assert decision["bev_charging_kwh"] == 8.0
+
+
+@pytest.mark.asyncio
+async def test_bev_with_high_surplus_never_enters_offgrid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Active BEV charging falls back to the export switch for high surplus."""
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.export_block_control.dt_util.now",
+        lambda: _NOW,
+    )
+    hass = _setup_hass(bev_charging="on", bev_power_w=0.0)
+
+    decision = await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
+
+    assert _service_calls(hass) == [("switch", "turn_off", _EXPORT_SURPLUS_SWITCH)]
+    assert decision["action"] == "block_export_with_grid"
+    assert decision["bev_charging"] is True
+
+
+@pytest.mark.asyncio
+async def test_incomplete_balance_keeps_export_and_grid_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing forecast data restores normal operation instead of restricting it."""
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.export_block_control.dt_util.now",
+        lambda: _NOW,
+    )
+    hass = _setup_hass(
+        include_forecast=False,
+        export_switch_state="off",
+        offgrid_switch_state="on",
     )
 
+    decision = await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
+
+    assert _service_calls(hass) == [
+        ("switch", "turn_off", _OFFGRID_SWITCH),
+        ("switch", "turn_on", _EXPORT_SURPLUS_SWITCH),
+    ]
+    assert decision["reason"] == "incomplete_energy_balance"
+
 
 @pytest.mark.asyncio
-async def test_offgrid_turns_on_without_export_surplus_switch_configured() -> None:
-    """Use off-grid path when legacy surplus switch is not configured."""
-    hass = _setup_hass_with_offgrid(
-        price="0.0",
-        offgrid_switch_state="off",
-        include_export_surplus_switch=False,
+async def test_positive_price_restores_grid_before_export() -> None:
+    """A positive price restores grid operation before enabling export."""
+    hass = _setup_hass(
+        price="0.05",
+        export_switch_state="off",
+        offgrid_switch_state="on",
     )
 
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
+    decision = await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
 
-    hass.services.async_call.assert_called_once_with(
-        "switch",
-        "turn_on",
-        {"entity_id": _OFFGRID_SWITCH},
-        blocking=True,
-        context=hass.services.async_call.call_args.kwargs.get("context"),
+    assert _service_calls(hass) == [
+        ("switch", "turn_off", _OFFGRID_SWITCH),
+        ("switch", "turn_on", _EXPORT_SURPLUS_SWITCH),
+    ]
+    assert decision["reason"] == "positive_sell_price"
+
+
+@pytest.mark.asyncio
+async def test_effectively_zero_price_uses_export_control(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A price that rounds to zero remains eligible for blocking."""
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.export_block_control.dt_util.now",
+        lambda: _NOW,
     )
+    hass = _setup_hass(price="0.04")
 
+    decision = await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
 
-@pytest.mark.asyncio
-async def test_offgrid_turns_off_when_price_positive_and_switch_on() -> None:
-    """Turn off-grid switch off when price is positive."""
-    hass = _setup_hass_with_offgrid(price="50", offgrid_switch_state="on")
-
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
-
-    hass.services.async_call.assert_called_once_with(
-        "switch",
-        "turn_off",
-        {"entity_id": _OFFGRID_SWITCH},
-        blocking=True,
-        context=hass.services.async_call.call_args.kwargs.get("context"),
-    )
-
-
-@pytest.mark.asyncio
-async def test_offgrid_no_action_when_price_positive_and_already_off() -> None:
-    """Do nothing when price is positive and off-grid is already off."""
-    hass = _setup_hass_with_offgrid(price="50", offgrid_switch_state="off")
-
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
-
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_offgrid_entity_unavailable_skip() -> None:
-    """Do nothing when configured off-grid switch is unavailable."""
-    hass = _setup_hass_with_offgrid(price="0.0", offgrid_switch_state=None)
-
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
-
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_offgrid_entity_state_unavailable_skip() -> None:
-    """Do nothing when off-grid switch state is unavailable."""
-    hass = _setup_hass_with_offgrid(price="0.0", offgrid_switch_state="unavailable")
-
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
-
-    hass.services.async_call.assert_not_called()
-@pytest.mark.asyncio
-async def test_offgrid_no_action_when_sun_not_above_horizon() -> None:
-    """Do nothing when sun is below horizon and off-grid switch is configured."""
-    hass = _setup_hass_with_offgrid(
-        price="0.0",
-        offgrid_switch_state="off",
-        sun_state="below_horizon",
-    )
-
-    await async_run_export_block_control(hass, entry_id=_ENTRY_ID)
-
-    hass.services.async_call.assert_not_called()
+    assert decision["action"] == "block_export_offgrid"
+    assert hass.services.async_call.await_count == 2

@@ -13,6 +13,7 @@ from .price_windows import (
 from .battery import (
     calculate_battery_reserve,
     calculate_battery_space,
+    calculate_hourly_charge_capacity,
     calculate_total_capacity,
     calculate_usable_capacity,
     kwh_to_soc,
@@ -36,6 +37,7 @@ __all__ = [
     # Battery
     "calculate_battery_reserve",
     "calculate_battery_space",
+    "calculate_hourly_charge_capacity",
     "calculate_total_capacity",
     "calculate_usable_capacity",
     "kwh_to_soc",

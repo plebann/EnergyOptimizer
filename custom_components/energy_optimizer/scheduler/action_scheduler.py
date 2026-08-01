@@ -15,6 +15,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from ..const import (
+    CONF_BEV_CHARGING_BINARY_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_SELL_PRICE_SENSOR,
@@ -29,7 +30,10 @@ from ..decision_engine.afternoon_charge import async_run_afternoon_charge
 from ..decision_engine.morning_charge import async_run_morning_charge
 from ..decision_engine.daytime_min_price_restore import async_run_daytime_min_price_restore
 from ..decision_engine.solar_charge_block import async_run_solar_charge_block
-from ..decision_engine.export_block_control import async_run_export_block_control
+from ..decision_engine.export_block_control import (
+    async_restore_export_block_control,
+    async_run_export_block_control,
+)
 from ..service_handlers.sell_restore import (
     async_check_pending_sell_restore,
     async_handle_sell_restore,
@@ -107,6 +111,16 @@ class ActionScheduler:
         else:
             _LOGGER.debug(
                 "Price-driven actions: sun not above horizon at startup — hourly trigger inactive"
+            )
+
+        bev_charging_entity = self.entry.data.get(CONF_BEV_CHARGING_BINARY_SENSOR)
+        if bev_charging_entity:
+            self._listeners.append(
+                async_track_state_change_event(
+                    self.hass,
+                    [str(bev_charging_entity)],
+                    self._handle_bev_charging_change,
+                )
             )
 
         tariff_start_entity = self.entry.data.get(CONF_HIGH_TARIFF_START_HOUR_SENSOR)
@@ -331,9 +345,16 @@ class ActionScheduler:
         self._publish_schedule_snapshot()
 
     async def _handle_sunset(self) -> None:
-        """Deactivate hourly daytime price controls after sunset."""
-        _LOGGER.debug("Price-driven actions: sunset detected — disabling hourly trigger")
+        """Restore normal export operation and deactivate daytime controls."""
+        _LOGGER.debug(
+            "Price-driven actions: sunset detected — restoring normal operation"
+        )
         self._stop_price_hourly_listener()
+        decision = await async_restore_export_block_control(
+            self.hass,
+            entry_id=self.entry.entry_id,
+        )
+        self._store_export_block_decision(decision)
         self._publish_schedule_snapshot()
 
     async def _handle_price_hourly(self, now: datetime) -> None:
@@ -352,10 +373,20 @@ class ActionScheduler:
             entry_id=self.entry.entry_id,
         )
         await asyncio.sleep(5)
-        await async_run_export_block_control(
+        decision = await async_run_export_block_control(
             self.hass,
             entry_id=self.entry.entry_id,
         )
+        self._store_export_block_decision(decision)
+        self._publish_schedule_snapshot()
+
+    async def _handle_bev_charging_change(self, event) -> None:
+        """Re-evaluate export control immediately when BEV charging changes."""
+        decision = await async_run_export_block_control(
+            self.hass,
+            entry_id=self.entry.entry_id,
+        )
+        self._store_export_block_decision(decision)
         self._publish_schedule_snapshot()
 
     async def _handle_daily_schedule_refresh(self, now: datetime) -> None:
@@ -578,6 +609,14 @@ class ActionScheduler:
         if not isinstance(entry_data, dict):
             return None
         return entry_data.get("scheduled_actions_sensor")
+
+    def _store_export_block_decision(self, decision: dict[str, Any] | None) -> None:
+        """Store the latest export control decision for diagnostic publication."""
+        if decision is None:
+            return
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id)
+        if isinstance(entry_data, dict):
+            entry_data["last_export_block_control"] = decision
 
     def _publish_schedule_snapshot(self) -> None:
         """Publish the current daily schedule snapshot to the diagnostic sensor."""
@@ -817,6 +856,7 @@ class ActionScheduler:
             "dynamic_count": sum(1 for action in actions if action["kind"] in {"dynamic", "derived_restore"}),
             "event_driven_count": sum(1 for action in actions if action["kind"] == "event_driven"),
         }
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {})
 
         return {
             "date": now.date().isoformat(),
@@ -829,6 +869,11 @@ class ActionScheduler:
             },
             "actions": actions,
             "summary": summary,
+            "last_export_block_control": (
+                entry_data.get("last_export_block_control")
+                if isinstance(entry_data, dict)
+                else None
+            ),
         }
 
     def _build_action_entry(

@@ -4,6 +4,7 @@ import pytest
 from custom_components.energy_optimizer.calculations.battery import (
     calculate_battery_reserve,
     calculate_battery_space,
+    calculate_hourly_charge_capacity,
     calculate_target_soc_from_reserve,
     calculate_total_capacity,
     calculate_usable_capacity,
@@ -71,6 +72,21 @@ def test_calculate_battery_space():
     
     # Above maximum, space should be 0
     assert calculate_battery_space(105, 100, 200, 48) == 0.0
+
+
+def test_calculate_hourly_charge_capacity_respects_soc_profile_and_limit():
+    """Test one-hour intake follows the SOC profile and inverter current limit."""
+    # At 70% the profile limits charging to 9 A: 9 A * 48 V = 0.432 kWh/h.
+    assert calculate_hourly_charge_capacity(70, 100, 200, 48) == pytest.approx(0.432)
+
+    # A lower inverter limit further restricts that same hourly capacity.
+    assert calculate_hourly_charge_capacity(
+        70,
+        100,
+        200,
+        48,
+        max_current_a=5,
+    ) == pytest.approx(0.24)
 
 
 def test_calculate_usable_capacity():

@@ -20,6 +20,8 @@ from .const import (
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE_SENSOR,
     CONF_BATTERY_VOLTAGE,
+    CONF_BEV_CHARGING_BINARY_SENSOR,
+    CONF_BEV_CHARGING_POWER_SENSOR,
     CONF_BUY_PRICE_SENSOR,
     CONF_CHARGE_CURRENT_ENTITY,
     CONF_DAILY_LOAD_SENSOR,
@@ -285,6 +287,12 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(CONF_INVERTER_OFFGRID_SWITCH): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="switch")
+                ),
+                vol.Optional(CONF_BEV_CHARGING_BINARY_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="binary_sensor")
+                ),
+                vol.Optional(CONF_BEV_CHARGING_POWER_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="power")
                 ),
                 vol.Optional(CONF_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
@@ -670,6 +678,25 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 domain_error="not_switch_entity",
             )
 
+        bev_charging_sensor = user_input.get(CONF_BEV_CHARGING_BINARY_SENSOR)
+        if bev_charging_sensor:
+            self._validate_entity(
+                entity_id=bev_charging_sensor,
+                field=CONF_BEV_CHARGING_BINARY_SENSOR,
+                errors=errors,
+                expected_domain="binary_sensor",
+                domain_error="not_binary_sensor",
+            )
+
+        bev_power_sensor = user_input.get(CONF_BEV_CHARGING_POWER_SENSOR)
+        if bev_power_sensor:
+            self._validate_entity(
+                entity_id=bev_power_sensor,
+                field=CONF_BEV_CHARGING_POWER_SENSOR,
+                errors=errors,
+                value_type=float,
+            )
+
         return errors
 
     async def _validate_program_entities(
@@ -938,6 +965,18 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     default=self._config_entry.data.get(CONF_INVERTER_OFFGRID_SWITCH),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="switch")
+                ),
+                vol.Optional(
+                    CONF_BEV_CHARGING_BINARY_SENSOR,
+                    default=self._config_entry.data.get(CONF_BEV_CHARGING_BINARY_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="binary_sensor")
+                ),
+                vol.Optional(
+                    CONF_BEV_CHARGING_POWER_SENSOR,
+                    default=self._config_entry.data.get(CONF_BEV_CHARGING_POWER_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="power")
                 ),
                 vol.Optional(
                     CONF_CHARGE_CURRENT_ENTITY,

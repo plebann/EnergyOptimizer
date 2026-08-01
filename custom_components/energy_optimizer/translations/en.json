@@ -86,6 +86,8 @@
           "work_mode_entity": "Work Mode Control (Optional)",
           "inverter_export_surplus_switch": "Inverter Export Surplus Switch (Optional)",
           "inverter_offgrid_switch": "Inverter OffGrid Switch (Optional)",
+          "bev_charging_binary_sensor": "BEV Charging Active Sensor (Optional)",
+          "bev_charging_power_sensor": "BEV Charging Power Sensor (Optional)",
           "charge_current_entity": "Charge Current Control (Optional)",
           "discharge_current_entity": "Discharge Current Control (Optional)",
           "export_power_entity": "Export Power Control (Optional)",
@@ -96,6 +98,8 @@
           "work_mode_entity": "Entity to switch inverter work modes",
           "inverter_export_surplus_switch": "Switch used to enable/disable export surplus mode for hourly export blocking",
           "inverter_offgrid_switch": "Switch used to disconnect the inverter from the grid (on = off-grid, off = grid-connected). When configured, this switch is activated instead of the export surplus switch when sell price is effectively zero.",
+          "bev_charging_binary_sensor": "Binary sensor indicating that battery electric vehicle charging is active",
+          "bev_charging_power_sensor": "Power consumed by battery electric vehicle charging in W",
           "charge_current_entity": "Entity to control charge current limit",
           "discharge_current_entity": "Entity to control discharge current limit",
           "export_power_entity": "Entity to control export power limit during selling",
@@ -319,6 +323,11 @@
       },
       "pv_forecast_compensation": {
         "name": "PV forecast compensation"
+      }
+    },
+    "number": {
+      "export_block_offgrid_threshold": {
+        "name": "Off-grid export block threshold"
       }
     },
     "switch": {

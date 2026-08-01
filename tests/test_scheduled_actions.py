@@ -10,6 +10,7 @@ import pytest
 from homeassistant.util import dt as dt_util
 
 from custom_components.energy_optimizer.const import (
+    CONF_BEV_CHARGING_BINARY_SENSOR,
     CONF_BUY_PRICE_SENSOR,
     CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
     CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
@@ -338,6 +339,83 @@ def test_start_registers_single_evening_sell_window_listener(
     scheduler.start()
 
     assert registered_entities.count(("sensor.entry-1_evening_sell_window",)) == 1
+
+
+def test_start_registers_bev_charging_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scheduler re-evaluates export control when BEV charging changes."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    entry = _mock_entry(
+        data={CONF_BEV_CHARGING_BINARY_SENSOR: "binary_sensor.bev_charging"}
+    )
+    registered_entities: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
+        lambda *args, **kwargs: (lambda: None),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_sunrise",
+        lambda *args, **kwargs: (lambda: None),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_sunset",
+        lambda *args, **kwargs: (lambda: None),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_state_change_event",
+        lambda _hass, entities, _callback: registered_entities.append(tuple(entities))
+        or (lambda: None),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.get_internal_sensor_entity_id",
+        lambda *_args, **_kwargs: None,
+    )
+
+    scheduler = ActionScheduler(hass, entry)
+    scheduler._schedule_morning_charge = MagicMock()
+    scheduler._schedule_afternoon_charge = MagicMock()
+    scheduler._schedule_morning_sell = MagicMock()
+    scheduler._schedule_evening_sell = MagicMock()
+    scheduler._schedule_sell_restores = MagicMock()
+    scheduler._schedule_daytime_min_price_restore = MagicMock()
+    scheduler._is_sun_above_horizon = MagicMock(return_value=False)
+    scheduler._publish_schedule_snapshot = MagicMock()
+
+    scheduler.start()
+
+    assert ("binary_sensor.bev_charging",) in registered_entities
+
+
+@pytest.mark.asyncio
+async def test_sunset_restores_export_control(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sunset restores grid/export and records its diagnostic decision."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    entry = _mock_entry(data={})
+    restore = AsyncMock(
+        return_value={"reason": "sunset_restore", "action": "normal_operation"}
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_restore_export_block_control",
+        restore,
+    )
+
+    scheduler = ActionScheduler(hass, entry)
+    scheduler._stop_price_hourly_listener = MagicMock()
+    scheduler._publish_schedule_snapshot = MagicMock()
+
+    await scheduler._handle_sunset()
+
+    restore.assert_awaited_once_with(hass, entry_id="entry-1")
+    assert hass.data[DOMAIN]["entry-1"]["last_export_block_control"] == {
+        "reason": "sunset_restore",
+        "action": "normal_operation",
+    }
 
 
 def test_schedule_morning_charge_uses_night_buy_window_hour(

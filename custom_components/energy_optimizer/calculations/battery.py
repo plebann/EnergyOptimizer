@@ -85,6 +85,57 @@ def calculate_battery_space(
     return soc_to_kwh(space_soc, capacity_ah, voltage)
 
 
+def calculate_hourly_charge_capacity(
+    current_soc: float,
+    max_soc: float,
+    capacity_ah: float,
+    voltage: float,
+    *,
+    max_current_a: float | None = None,
+) -> float:
+    """Return battery energy that can be accepted over the next hour.
+
+    The calculation advances through the inverter's SOC-based charge-current
+    profile, so capacity is not overstated when charging crosses a threshold.
+    """
+    if capacity_ah <= 0 or voltage <= 0 or current_soc >= max_soc:
+        return 0.0
+
+    remaining_hours = 1.0
+    soc = max(current_soc, 0.0)
+    accepted_kwh = 0.0
+    capacity_kwh = capacity_ah * voltage / 1000.0
+    current_limit_a = (
+        max(max_current_a, 0.0) if max_current_a is not None else None
+    )
+
+    for upper_soc, profile_current_a in (
+        (50.0, 23.0),
+        (70.0, 18.0),
+        (90.0, 9.0),
+        (max_soc, 5.0),
+    ):
+        target_soc = min(upper_soc, max_soc)
+        if target_soc <= soc:
+            continue
+
+        current_a = min(profile_current_a, current_limit_a) if current_limit_a is not None else profile_current_a
+        if current_a <= 0:
+            return accepted_kwh
+
+        energy_to_target_kwh = (target_soc - soc) / 100.0 * capacity_kwh
+        energy_per_hour_kwh = current_a * voltage / 1000.0
+        hours_to_target = energy_to_target_kwh / energy_per_hour_kwh
+        if hours_to_target >= remaining_hours:
+            return accepted_kwh + energy_per_hour_kwh * remaining_hours
+
+        accepted_kwh += energy_to_target_kwh
+        remaining_hours -= hours_to_target
+        soc = target_soc
+
+    return accepted_kwh
+
+
 def calculate_usable_capacity(
     capacity_ah: float, voltage: float, min_soc: float, max_soc: float
 ) -> float:
