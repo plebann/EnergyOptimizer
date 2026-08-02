@@ -63,7 +63,7 @@
 - `end_local` must equal `start_local + 2 hours`.
 - The second hourly entry must begin exactly one hour after the first.
 - Night candidates must satisfy `00:00 <= start_local < 06:00` and `end_local <= 06:00`.
-- Day candidates must satisfy `10:00 <= start_local < 16:00` and `end_local <= 16:00`.
+- Day candidates must satisfy `09:00 <= start_local < 17:00` and `end_local <= 17:00`.
 - `average_buy_price` must equal the arithmetic mean of the two hourly prices.
 
 **Relationships**
@@ -79,12 +79,13 @@
 | `sensor_key` | `str` | Stable identifier for the sensor variant |
 | `evaluation_date_local` | `date` | Day being evaluated |
 | `range_key` | `str` | `night` or `day` |
-| `selected_candidate` | `TwoHourBuyWindowCandidate | None` | Lowest-ranked valid candidate after tie-breaking |
+| `selected_candidate` | `TwoHourBuyWindowCandidate | None` | Lowest-ranked two-hour seed after tie-breaking |
 | `is_negative` | `bool | omitted` | True when the selected candidate's average buy price is below zero |
 
 **Validation rules**
 - Night candidates are ordered by `average_buy_price` ascending, then by absolute closeness of `end_local` to `06:00`, then by later `end_local`.
 - Day candidates are ordered by `average_buy_price` ascending, then by absolute closeness of `start_local` to `13:00`, then by earlier `start_local`.
+- The selected two-hour seed expands continuously on both sides while each adjacent hourly price is at most 102% of the seed average and remains in the evaluated range.
 - A valid published selection requires one complete valid `selected_candidate`.
 - `is_negative` is true only when `selected_candidate.average_buy_price < 0`.
 
@@ -99,14 +100,16 @@
 | Field | Type | Description |
 |-------|------|-------------|
 | `sensor_key` | `str` | Stable identifier such as `night_buy_window` or `day_buy_window_tomorrow` |
-| `state` | `str | unavailable` | `HH:MM` start time of the selected candidate or `unavailable` |
-| `price` | `float | omitted` | Rounded selected average buy price in PLN/kWh |
+| `state` | `str | unavailable` | `HH:MM-HH:MM` selected window or `unavailable` |
+| `price` | `float | omitted` | Rounded average buy price of the selected expanded window in PLN/kWh |
+| `start_time` | `str | omitted` | ISO 8601 local timestamp for the selected window start |
+| `end_time` | `str | omitted` | ISO 8601 local timestamp for the selected window end |
 | `is_negative` | `bool | omitted` | Whether the selected average buy price is below zero |
 | `payload_key` | `str` | Source payload key used for this sensor |
 | `source_entity_id` | `str` | Configured buy-price source entity |
 
 **Validation rules**
-- `state` must match `HH:MM` when available.
+- `state` must match `HH:MM-HH:MM` when available.
 - `price` must be rounded to 3 decimal places when present.
 - `is_negative` is omitted when `state` is `unavailable`.
 - `price` is omitted when `state` is `unavailable`.

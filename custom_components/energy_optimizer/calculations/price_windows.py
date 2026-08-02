@@ -254,7 +254,7 @@ def _extract_buy_hourly_entries(
     return sorted(entries_by_start.values(), key=lambda entry: entry.start_local)
 
 
-def _expand_night_buy_window(
+def _expand_buy_window(
     entries_by_start: dict[datetime, HourlyBuyPriceEntry],
     seed_start: datetime,
     seed_end: datetime,
@@ -264,7 +264,7 @@ def _expand_night_buy_window(
     range_end_hour: int,
     current_day: date,
 ) -> BuyWindowResult:
-    """Expand a seeded night buy window while boundary hours stay near its average."""
+    """Expand a seeded buy window with adjacent hours near its initial average."""
     window_start = seed_start
     window_end = seed_end
     total_price = seed_average * 2
@@ -273,8 +273,7 @@ def _expand_night_buy_window(
     stop_right = False
 
     while not (stop_left and stop_right):
-        current_average = total_price / hour_count
-        threshold = current_average * 1.10
+        threshold = seed_average * 1.02
         add_left: HourlyBuyPriceEntry | None = None
         add_right: HourlyBuyPriceEntry | None = None
 
@@ -397,23 +396,13 @@ def build_best_buy_window_result(
                 -candidate.end_local.timestamp(),
             ),
         )
-        return _expand_night_buy_window(
-            entries_by_start,
-            seed.start_local,
-            seed.end_local,
-            seed.average_price,
-            range_start_hour=range_start_hour,
-            range_end_hour=range_end_hour,
-            current_day=reference_now.date(),
-        )
-
-    if range_key == "day":
+    elif range_key == "day":
         range_anchor = datetime.combine(
             reference_now.date(),
             time(13, 0),
             tzinfo=reference_now.tzinfo,
         )
-        return min(
+        seed = min(
             candidates,
             key=lambda candidate: (
                 candidate.average_price,
@@ -421,8 +410,18 @@ def build_best_buy_window_result(
                 candidate.start_local,
             ),
         )
+    else:
+        raise ValueError(f"Unsupported buy-window range key: {range_key}")
 
-    raise ValueError(f"Unsupported buy-window range key: {range_key}")
+    return _expand_buy_window(
+        entries_by_start,
+        seed.start_local,
+        seed.end_local,
+        seed.average_price,
+        range_start_hour=range_start_hour,
+        range_end_hour=range_end_hour,
+        current_day=reference_now.date(),
+    )
 
 
 def build_average_buy_price_result(

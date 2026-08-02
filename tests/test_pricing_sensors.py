@@ -823,19 +823,23 @@ def test_today_buy_window_sensors_publish_state_and_attributes(
     night_sensor = _night_buy_sensor(prices_today)
     day_sensor = _day_buy_sensor(prices_today)
 
-    assert night_sensor.native_value == "01:00"
+    assert night_sensor.native_value == "01:00-03:00"
     assert night_sensor.extra_state_attributes == {
         "end": "03:00",
         "duration_hours": 2,
         "price": 0.15,
         "is_negative": False,
+        "start_time": "2026-05-08T01:00:00+02:00",
+        "end_time": "2026-05-08T03:00:00+02:00",
     }
-    assert day_sensor.native_value == "11:00"
+    assert day_sensor.native_value == "11:00-13:00"
     assert day_sensor.extra_state_attributes == {
         "end": "13:00",
         "duration_hours": 2,
         "price": 0.25,
         "is_negative": False,
+        "start_time": "2026-05-08T11:00:00+02:00",
+        "end_time": "2026-05-08T13:00:00+02:00",
     }
 
 
@@ -868,19 +872,23 @@ def test_tomorrow_buy_window_sensors_publish_state_and_attributes(
     night_sensor = _night_buy_tomorrow_sensor(prices_tomorrow)
     day_sensor = _day_buy_tomorrow_sensor(prices_tomorrow)
 
-    assert night_sensor.native_value == "02:00"
+    assert night_sensor.native_value == "02:00-04:00"
     assert night_sensor.extra_state_attributes == {
         "end": "04:00",
         "duration_hours": 2,
         "price": 0.15,
         "is_negative": False,
+        "start_time": "2026-05-09T02:00:00+02:00",
+        "end_time": "2026-05-09T04:00:00+02:00",
     }
-    assert day_sensor.native_value == "11:00"
+    assert day_sensor.native_value == "11:00-13:00"
     assert day_sensor.extra_state_attributes == {
         "end": "13:00",
         "duration_hours": 2,
         "price": 0.2,
         "is_negative": False,
+        "start_time": "2026-05-09T11:00:00+02:00",
+        "end_time": "2026-05-09T13:00:00+02:00",
     }
 
 
@@ -903,12 +911,14 @@ def test_tomorrow_buy_window_sensors_are_unavailable_for_empty_payload_without_a
     today_sensor.hass = MagicMock()
     tomorrow_sensor.hass = MagicMock()
 
-    assert today_sensor.native_value == "01:00"
+    assert today_sensor.native_value == "01:00-03:00"
     assert today_sensor.extra_state_attributes == {
         "end": "03:00",
         "duration_hours": 2,
         "price": 0.15,
         "is_negative": False,
+        "start_time": "2026-05-08T01:00:00+02:00",
+        "end_time": "2026-05-08T03:00:00+02:00",
     }
     assert tomorrow_sensor.native_value is None
     assert tomorrow_sensor.available is False
@@ -927,12 +937,14 @@ def test_buy_window_sensor_sets_is_negative_true_only_for_negative_average(
         _buy_payload_for_hours(8, {10: 0.40, 11: -0.20, 12: -0.30, 13: 0.50})
     )
 
-    assert sensor.native_value == "11:00"
+    assert sensor.native_value == "11:00-13:00"
     assert sensor.extra_state_attributes == {
         "end": "13:00",
         "duration_hours": 2,
         "price": -0.25,
         "is_negative": True,
+        "start_time": "2026-05-08T11:00:00+02:00",
+        "end_time": "2026-05-08T13:00:00+02:00",
     }
 
 
@@ -948,12 +960,14 @@ def test_buy_window_sensor_keeps_zero_average_available_with_false_is_negative(
         _buy_payload_for_hours(8, {10: 0.20, 11: -0.20, 12: 0.30, 13: 0.40})
     )
 
-    assert sensor.native_value == "10:00"
+    assert sensor.native_value == "10:00-12:00"
     assert sensor.extra_state_attributes == {
         "end": "12:00",
         "duration_hours": 2,
         "price": 0.0,
         "is_negative": False,
+        "start_time": "2026-05-08T10:00:00+02:00",
+        "end_time": "2026-05-08T12:00:00+02:00",
     }
 
 
@@ -1069,12 +1083,14 @@ def test_day_buy_window_sensor_publishes_expected_result_for_real_may_13_prices(
         ]
     )
 
-    assert sensor.native_value == "14:00"
+    assert sensor.native_value == "15:00-17:00"
     assert sensor.extra_state_attributes == {
-        "end": "16:00",
+        "end": "17:00",
         "duration_hours": 2,
-        "price": 0.845,
+        "price": 0.714,
         "is_negative": False,
+        "start_time": "2026-05-13T15:00:00+02:00",
+        "end_time": "2026-05-13T17:00:00+02:00",
     }
 
 
@@ -1110,7 +1126,7 @@ def test_existing_sell_window_sensor_behavior_is_unchanged_when_buy_payload_chan
     buy_sensor.hass = MagicMock()
 
     assert sell_sensor.native_value == "07:00"
-    assert buy_sensor.native_value == "01:00"
+    assert buy_sensor.native_value == "01:00-03:00"
 
     coordinator.data["price_payloads"]["sensor.buy"]["prices_today"] = _buy_payload_for_hours(
         8,
@@ -1124,4 +1140,4 @@ def test_existing_sell_window_sensor_behavior_is_unchanged_when_buy_payload_chan
         "second_window_price": 0.85,
         "second_window_gap_pct": 6.6,
     }
-    assert buy_sensor.native_value == "02:00"
+    assert buy_sensor.native_value == "02:00-04:00"

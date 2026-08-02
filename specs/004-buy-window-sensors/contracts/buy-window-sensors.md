@@ -6,7 +6,8 @@ Four additional Home Assistant sensor entities published by the `energy_optimize
 
 ## Purpose
 
-Expose the best two-hour buy windows for:
+Expose the cheapest buy windows, seeded from the best two-hour period and expanded
+with adjacent qualifying hours, for:
 
 - today night,
 - today day,
@@ -40,10 +41,11 @@ The payloads are consumed from coordinator-managed shared state rather than by d
 |----------|-------------|-----------|----------------|--------------|
 | Entity domain | `sensor` | `sensor` | `sensor` | `sensor` |
 | Translation key | `night_buy_window` | `day_buy_window` | `night_buy_window_tomorrow` | `day_buy_window_tomorrow` |
-| Evaluated range | `00:00-06:00` | `10:00-16:00` | `00:00-06:00` | `10:00-16:00` |
-| State when available | `HH:MM` best start | `HH:MM` best start | `HH:MM` best start | `HH:MM` best start |
+| Evaluated range | `00:00-06:00` | `09:00-17:00` | `00:00-06:00` | `09:00-17:00` |
+| State when available | `HH:MM-HH:MM` selected window | `HH:MM-HH:MM` selected window | `HH:MM-HH:MM` selected window | `HH:MM-HH:MM` selected window |
 | `price` when available | Rounded float average price, 3 decimals | Rounded float average price, 3 decimals | Rounded float average price, 3 decimals | Rounded float average price, 3 decimals |
 | `is_negative` when available | Boolean derived from average price < 0 | Boolean derived from average price < 0 | Boolean derived from average price < 0 | Boolean derived from average price < 0 |
+| `start_time` / `end_time` when available | ISO 8601 timestamp with offset | ISO 8601 timestamp with offset | ISO 8601 timestamp with offset | ISO 8601 timestamp with offset |
 | State when insufficient data | `unavailable` | `unavailable` | `unavailable` | `unavailable` |
 | Price scope | Buy-price payload only; sell-price changes must not affect result | Buy-price payload only; sell-price changes must not affect result | Buy-price payload only; sell-price changes must not affect result | Buy-price payload only; sell-price changes must not affect result |
 
@@ -64,11 +66,12 @@ The payloads are consumed from coordinator-managed shared state rather than by d
 | `price` is non-numeric inside the evaluated slice | The affected candidate is invalid, and the corresponding sensor becomes `unavailable` if no valid candidate remains |
 | Multiple night candidates share the same minimum average price | The candidate ending closest to `06:00` wins |
 | Multiple day candidates share the same minimum average price | The candidate starting closest to `13:00` wins; if still tied, the earlier start wins |
+| After selecting the cheapest two-hour candidate | Expand continuously on either side while each adjacent hourly price is at most 102% of the initial candidate average and the window remains inside its evaluated range |
 | Selected average price equals `0` | Sensor remains available and `is_negative` is `false` |
 | Sell-price source changes only | No output change attributable to sell-price data |
 
 ## Notes
 
-- For these four new sensors, state is a single start time `HH:MM` because end time is implied by the fixed two-hour duration.
+- For these four sensors, the state is the complete selected range and `start_time` plus `end_time` retain the complete local timestamps.
 - Existing pricing sensors retain their current contracts and are not redefined by this document.
 - The contract intentionally favors deterministic outputs over partial publication when data is incomplete or unreliable.

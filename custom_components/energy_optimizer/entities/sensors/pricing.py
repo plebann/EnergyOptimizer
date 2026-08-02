@@ -95,6 +95,8 @@ class _BuyWindowBaseSensor(EnergyOptimizerSensor):
     _range_start_hour: int
     _range_end_hour: int
     _day_offset: int = 0
+    _display_window_range: bool = True
+    _include_timestamps: bool = True
 
     def __init__(self, coordinator, config_entry, config) -> None:
         """Initialize the sensor with the current coordinator snapshot."""
@@ -139,7 +141,11 @@ class _BuyWindowBaseSensor(EnergyOptimizerSensor):
             return
 
         self._attr_available = True
-        self._attr_native_value = result.start_local.strftime("%H:%M")
+        self._attr_native_value = (
+            f"{result.start_local:%H:%M}-{result.end_local:%H:%M}"
+            if self._display_window_range
+            else result.start_local.strftime("%H:%M")
+        )
         self._attr_extra_state_attributes = {
             "end": result.end_local.strftime("%H:%M"),
             "duration_hours": int(
@@ -148,6 +154,9 @@ class _BuyWindowBaseSensor(EnergyOptimizerSensor):
             "price": round(result.average_price, 3),
             "is_negative": result.average_price < 0,
         }
+        if self._include_timestamps:
+            self._attr_extra_state_attributes["start_time"] = result.start_local.isoformat()
+            self._attr_extra_state_attributes["end_time"] = result.end_local.isoformat()
 
     @property
     def available(self) -> bool:
@@ -156,7 +165,7 @@ class _BuyWindowBaseSensor(EnergyOptimizerSensor):
 
     @property
     def native_value(self) -> str | None:
-        """Return the selected buy window start time as HH:MM, or None."""
+        """Return the selected buy window as HH:MM-HH:MM, or None."""
         self._apply_result(self._get_result())
         return getattr(self, "_attr_native_value", None)
 
@@ -190,8 +199,8 @@ class DayBuyWindowSensor(_BuyWindowBaseSensor):
     _attr_unique_id = "day_buy_window"
     _payload_key = "prices_today"
     _range_key = "day"
-    _range_start_hour = 10
-    _range_end_hour = 16
+    _range_start_hour = 9
+    _range_end_hour = 17
 
 
 class NightBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
@@ -213,8 +222,8 @@ class DayBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
     _attr_unique_id = "day_buy_window_tomorrow"
     _payload_key = "prices_tomorrow"
     _range_key = "day"
-    _range_start_hour = 10
-    _range_end_hour = 16
+    _range_start_hour = 9
+    _range_end_hour = 17
     _day_offset = 1
 
 
@@ -224,6 +233,8 @@ class MorningSellBuyReferenceSensor(_BuyWindowBaseSensor):
     _attr_translation_key = "morning_sell_buy_reference"
     _attr_unique_id = "morning_sell_buy_reference"
     _payload_key = "prices_today"
+    _display_window_range = False
+    _include_timestamps = False
 
     def _get_result(self):
         """Return the averaged buy-price window used for morning sell arbitrage."""

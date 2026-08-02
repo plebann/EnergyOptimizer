@@ -642,6 +642,62 @@ def test_build_best_buy_window_result_night_seed_only_when_neighbors_fail_thresh
 
 
 @pytest.mark.unit
+def test_build_best_buy_window_result_night_expands_from_cheapest_pair_at_fixed_threshold() -> None:
+    """Expand only adjacent hours at or below 102% of the cheapest pair average."""
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                0: 0.987,
+                1: 0.950,
+                2: 0.920,
+                3: 0.919,
+                4: 0.919,
+                5: 0.957,
+            },
+            day=date(2026, 8, 3),
+        ),
+        ENTITY_ID,
+        range_key="night",
+        range_start_hour=0,
+        range_end_hour=6,
+        now_local=datetime(2026, 8, 3, 12, 0, tzinfo=TZ),
+    )
+
+    assert result == BuyWindowResult(
+        start_local=datetime(2026, 8, 3, 2, 0, tzinfo=TZ),
+        end_local=datetime(2026, 8, 3, 5, 0, tzinfo=TZ),
+        average_price=pytest.approx(0.9193333333),
+    )
+
+
+@pytest.mark.unit
+def test_build_best_buy_window_result_day_expands_within_nine_to_seventeen() -> None:
+    """Expand day windows from the cheapest pair without exceeding 17:00."""
+    result = build_best_buy_window_result(
+        _buy_payload_for_hours(
+            {
+                9: 0.90,
+                10: 0.20,
+                11: 0.20,
+                12: 0.202,
+                13: 0.90,
+            }
+        ),
+        ENTITY_ID,
+        range_key="day",
+        range_start_hour=9,
+        range_end_hour=17,
+        now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
+    )
+
+    assert result == BuyWindowResult(
+        start_local=datetime(2026, 5, 8, 10, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 13, 0, tzinfo=TZ),
+        average_price=pytest.approx(0.2006666667),
+    )
+
+
+@pytest.mark.unit
 def test_build_best_buy_window_result_night_expands_left_only() -> None:
     result = build_best_buy_window_result(
         _buy_payload_for_hours(
@@ -689,9 +745,9 @@ def test_build_best_buy_window_result_night_expands_both_sides_in_same_iteration
     )
 
     assert result == BuyWindowResult(
-        start_local=datetime(2026, 5, 8, 1, 0, tzinfo=TZ),
-        end_local=datetime(2026, 5, 8, 5, 0, tzinfo=TZ),
-        average_price=pytest.approx(0.15625),
+        start_local=datetime(2026, 5, 8, 2, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 4, 0, tzinfo=TZ),
+        average_price=pytest.approx(0.15),
     )
 
 
@@ -717,8 +773,8 @@ def test_build_best_buy_window_result_night_stops_at_range_boundaries() -> None:
 
     assert result == BuyWindowResult(
         start_local=datetime(2026, 5, 8, 0, 0, tzinfo=TZ),
-        end_local=datetime(2026, 5, 8, 3, 0, tzinfo=TZ),
-        average_price=pytest.approx(0.1083333333),
+        end_local=datetime(2026, 5, 8, 2, 0, tzinfo=TZ),
+        average_price=pytest.approx(0.105),
     )
 
 
@@ -743,9 +799,9 @@ def test_build_best_buy_window_result_night_can_expand_to_full_six_hours() -> No
     )
 
     assert result == BuyWindowResult(
-        start_local=datetime(2026, 5, 8, 0, 0, tzinfo=TZ),
-        end_local=datetime(2026, 5, 8, 6, 0, tzinfo=TZ),
-        average_price=pytest.approx(0.1083333333),
+        start_local=datetime(2026, 5, 8, 2, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 4, 0, tzinfo=TZ),
+        average_price=pytest.approx(0.1),
     )
 
 
