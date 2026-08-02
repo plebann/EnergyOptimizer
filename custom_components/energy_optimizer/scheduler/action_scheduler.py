@@ -40,6 +40,7 @@ from ..service_handlers.sell_restore import (
 )
 from ..helpers import (
     get_internal_sensor_entity_id,
+    resolve_day_buy_window_start_hour,
     resolve_daytime_min_price_time,
     resolve_evening_max_price_hour,
     resolve_evening_second_max_price_hour,
@@ -172,6 +173,20 @@ class ActionScheduler:
                     self.hass,
                     [str(night_buy_window_entity)],
                     self._handle_night_buy_window_change,
+                )
+            )
+
+        day_buy_window_entity = get_internal_sensor_entity_id(
+            self.hass,
+            entry_id=self.entry.entry_id,
+            unique_id_suffix="day_buy_window",
+        )
+        if day_buy_window_entity:
+            self._listeners.append(
+                async_track_state_change_event(
+                    self.hass,
+                    [str(day_buy_window_entity)],
+                    self._handle_day_buy_window_change,
                 )
             )
 
@@ -313,6 +328,10 @@ class ActionScheduler:
         """Reschedule morning charge when the night buy window changes."""
         self._schedule_morning_charge()
 
+    async def _handle_day_buy_window_change(self, event) -> None:
+        """Reschedule afternoon charge when the day buy window changes."""
+        self._schedule_afternoon_charge()
+
     async def _handle_evening_peak_hour_change(self, event) -> None:
         """Reschedule evening peak sell when peak hour changes."""
         self._schedule_evening_sell()
@@ -402,13 +421,19 @@ class ActionScheduler:
         )
 
     def _schedule_afternoon_charge(self) -> None:
-        """Schedule afternoon charge two hours before tariff start hour."""
+        """Schedule afternoon charge at the day buy window start hour."""
         if self._afternoon_listener is not None:
             self._afternoon_listener()
             self._afternoon_listener = None
 
         tariff_start_hour = resolve_tariff_start_hour(self.hass, self.entry.data)
-        hour = (tariff_start_hour - 2) % 24
+        fallback_hour = (tariff_start_hour - 2) % 24
+        hour = resolve_day_buy_window_start_hour(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+            default_hour=fallback_hour,
+        )
         self._afternoon_listener = async_track_time_change(
             self.hass,
             self._handle_afternoon_charge,

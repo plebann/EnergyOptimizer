@@ -30,6 +30,7 @@ from custom_components.energy_optimizer.decision_engine.common import (
     resolve_arbitrage_margin_gate,
 )
 from custom_components.energy_optimizer.decision_engine.afternoon_charge import (
+    AfternoonChargeStrategy,
     _calculate_arbitrage_kwh,
 )
 from custom_components.energy_optimizer.decision_engine.morning_charge import (
@@ -146,6 +147,21 @@ def test_compute_arbitrage_from_cap_basic():
     assert kwh == pytest.approx(1.0)
     assert metrics["arb_limit_kwh"] == pytest.approx(2.0)
     assert metrics["sell_window_start_hour"] == 10
+
+
+def test_afternoon_charge_uses_day_buy_window_duration_for_current_sizing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Day buy-window duration controls afternoon charge-current sizing."""
+    strategy = AfternoonChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
+    strategy.entry = MagicMock(entry_id="entry-1")
+    strategy.config = {}
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_day_buy_window_duration_hours",
+        lambda *args, **kwargs: 3.0,
+    )
+
+    assert strategy._resolve_charge_time_hours() == pytest.approx(3.0)
 
 
 def test_compute_arbitrage_from_cap_limited_by_arb_limit():

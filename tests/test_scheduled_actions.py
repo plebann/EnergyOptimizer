@@ -470,6 +470,66 @@ def test_schedule_morning_charge_falls_back_to_hour_four(
     assert captured_hours == [4]
 
 
+def test_schedule_afternoon_charge_uses_day_buy_window_hour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scheduler should use the internal day buy window start hour."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    entry = _mock_entry(data={})
+
+    captured_hours: list[int] = []
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_tariff_start_hour",
+        lambda hass, config: 15,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_day_buy_window_start_hour",
+        lambda hass, config, entry_id, default_hour: 11,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
+        lambda _hass, _callback, *, hour, minute, second: captured_hours.append(hour)
+        or (lambda: None),
+    )
+
+    scheduler = ActionScheduler(hass, entry)
+    scheduler._publish_schedule_snapshot = MagicMock()
+    scheduler._schedule_afternoon_charge()
+
+    assert captured_hours == [11]
+
+
+def test_schedule_afternoon_charge_falls_back_before_high_tariff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scheduler should fall back to two hours before high tariff starts."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    entry = _mock_entry(data={})
+
+    captured_hours: list[int] = []
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_tariff_start_hour",
+        lambda hass, config: 15,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_day_buy_window_start_hour",
+        lambda hass, config, entry_id, default_hour: default_hour,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
+        lambda _hass, _callback, *, hour, minute, second: captured_hours.append(hour)
+        or (lambda: None),
+    )
+
+    scheduler = ActionScheduler(hass, entry)
+    scheduler._publish_schedule_snapshot = MagicMock()
+    scheduler._schedule_afternoon_charge()
+
+    assert captured_hours == [13]
+
+
 @pytest.mark.asyncio
 async def test_price_hourly_handler_runs_export_and_solar_block_during_daylight(
     monkeypatch: pytest.MonkeyPatch,

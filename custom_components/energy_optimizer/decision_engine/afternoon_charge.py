@@ -29,6 +29,7 @@ from ..decision_engine.common import (
 )
 from ..helpers import (
     get_internal_window_price,
+    resolve_day_buy_window_duration_hours,
     resolve_evening_max_price_hour,
     resolve_tariff_start_hour,
 )
@@ -60,6 +61,15 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             resolve_tariff_start_hour(self.hass, self.config),
             22,
             {"apply_efficiency": False},
+        )
+
+    def _resolve_charge_time_hours(self) -> float:
+        """Use the resolved day buy window duration for charge-current sizing."""
+        return resolve_day_buy_window_duration_hours(
+            self.hass,
+            self.config,
+            entry_id=self.entry.entry_id,
+            default_hours=2.0,
         )
 
     def _post_forecast_setup(self) -> None:

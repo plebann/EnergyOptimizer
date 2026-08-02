@@ -16,6 +16,8 @@ from custom_components.energy_optimizer.const import (
 from custom_components.energy_optimizer.helpers import (
     _parse_time_from_state_value,
     get_active_program_entity,
+    resolve_day_buy_window_duration_hours,
+    resolve_day_buy_window_start_hour,
     resolve_daytime_min_price_time,
     resolve_evening_max_price_hour,
     resolve_evening_second_max_price_hour,
@@ -561,6 +563,67 @@ def test_resolve_night_buy_window_duration_hours_falls_back_to_default(
     hass.states.get.return_value = create_time_state("02:00", domain="sensor")
 
     result = resolve_night_buy_window_duration_hours(
+        hass,
+        {},
+        entry_id="entry_abc",
+        default_hours=2.0,
+    )
+
+    assert result == pytest.approx(2.0)
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_day_buy_window_start_hour_from_range_state(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_day_buy_window_start_hour reads the range start from state."""
+    mock_get_internal.return_value = "sensor.eo_day_buy_window"
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state("11:00-14:00", domain="sensor")
+
+    result = resolve_day_buy_window_start_hour(
+        hass,
+        {},
+        entry_id="entry_abc",
+        default_hour=13,
+    )
+
+    assert result == 11
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_day_buy_window_duration_hours_from_internal_sensor(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_day_buy_window_duration_hours reads the duration attribute."""
+    mock_get_internal.return_value = "sensor.eo_day_buy_window"
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state(
+        "11:00-14:00",
+        domain="sensor",
+        attributes={"duration_hours": 3},
+    )
+
+    result = resolve_day_buy_window_duration_hours(
+        hass,
+        {},
+        entry_id="entry_abc",
+        default_hours=2.0,
+    )
+
+    assert result == pytest.approx(3.0)
+
+
+@patch(_INTERNAL_SENSOR_PATCH)
+def test_resolve_day_buy_window_duration_hours_falls_back_to_default(
+    mock_get_internal: MagicMock,
+) -> None:
+    """resolve_day_buy_window_duration_hours falls back when missing."""
+    mock_get_internal.return_value = "sensor.eo_day_buy_window"
+    hass = create_mock_hass()
+    hass.states.get.return_value = create_time_state("11:00-14:00", domain="sensor")
+
+    result = resolve_day_buy_window_duration_hours(
         hass,
         {},
         entry_id="entry_abc",
