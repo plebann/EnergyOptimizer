@@ -14,6 +14,7 @@ from custom_components.energy_optimizer.calculations.price_windows import (
     build_midday_sell_window_result,
     build_ranked_sell_window_result,
     expand_hourly_sell_prices,
+    find_first_arbitrage_buy_hour,
     format_sell_window,
     select_midday_window,
 )
@@ -81,6 +82,42 @@ def test_expand_hourly_sell_prices_creates_four_quarters_per_hour() -> None:
     assert len(points) == 4
     assert [point.start_local.minute for point in points] == [0, 15, 30, 45]
     assert all(point.sell_price_value == pytest.approx(0.42) for point in points)
+
+
+@pytest.mark.unit
+def test_find_first_arbitrage_buy_hour_uses_first_hour_below_strict_margin() -> None:
+    result = find_first_arbitrage_buy_hour(
+        [
+            _hourly_entry(8, 0.8),
+            _hourly_entry(9, 0.7),
+            _hourly_entry(10, 0.69),
+        ],
+        ENTITY_ID,
+        start_local=datetime(2026, 5, 8, 8, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 11, 0, tzinfo=TZ),
+        sell_price=1.0,
+        min_arbitrage_margin=0.3,
+    )
+
+    assert result.reason == "enabled"
+    assert result.start_local == datetime(2026, 5, 8, 10, 0, tzinfo=TZ)
+    assert result.average_price == pytest.approx(0.69)
+    assert result.arbitrage_margin == pytest.approx(0.31)
+
+
+@pytest.mark.unit
+def test_find_first_arbitrage_buy_hour_fails_closed_when_a_hour_is_missing() -> None:
+    result = find_first_arbitrage_buy_hour(
+        [_hourly_entry(8, 0.8), _hourly_entry(10, 0.6)],
+        ENTITY_ID,
+        start_local=datetime(2026, 5, 8, 8, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 11, 0, tzinfo=TZ),
+        sell_price=1.0,
+        min_arbitrage_margin=0.3,
+    )
+
+    assert result.reason == "missing_buy_price"
+    assert result.start_local is None
 
 
 @pytest.mark.unit

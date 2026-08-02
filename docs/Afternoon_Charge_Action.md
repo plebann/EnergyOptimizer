@@ -4,6 +4,13 @@
 
 Zapewnienie odpowiedniego poziomu energii w magazynie na wieczór i noc (do 22:00) poprzez planowanie ładowania z sieci uruchamianego 2 godziny przed startem taryfy dziennej.
 
+## Aktualna granica horyzontu zapotrzebowania
+
+Bilans jest liczony od końca `day_buy_window` do początku
+`night_buy_window_tomorrow`. Samowystarczalność PV nie skraca tego horyzontu.
+Przy niedostępnych sensorach okien zachowany jest fallback od początku wysokiej
+taryfy do 22:00.
+
 Arbitraż polega na dodatkowym doładowaniu magazynu w celu sprzedaży energii w szczycie cenowym. Arbitraż jest aktywowany tylko, gdy **Arbitrage Margin** (`sell_price - day_buy_window_price`) ściśle przekracza `min_arbitrage_price`.
 
 ## Wyzwalacz

@@ -11,6 +11,15 @@ porannej do wieczornej, **Arbitrage Margin**, oraz bramki pojemności (`free_spa
 i `surplus_to_sunset_kwh`). Sprzedaż następuje tylko przy dodatnim `selected_surplus_kwh`
 i możliwości obniżenia SOC.
 
+## Aktualna granica horyzontu zapotrzebowania
+
+Godzina arbitrage to pierwsza godzina po sprzedaży, w której średnia cena
+zakupu jest ściśle niższa od ceny sprzedaży pomniejszonej o
+`min_arbitrage_margin`. Koniec bilansu to wcześniejsza z niej i godziny
+samowystarczalności PV. Bez obu granic bilans kończy się na `day_buy_window`,
+gdy marża jest osiągalna; w przeciwnym razie jest liczony do zachodu słońca
+(fallback 19:00) i pozwala sprzedać wyłącznie nadwyżkę przepełnienia.
+
 ## Wyzwalacz
 
 - Godzina z sensora porannego szczytu cenowego: `morning_max_price_hour_sensor` (domyślnie 07:00)

@@ -29,8 +29,10 @@ from ..decision_engine.common import (
 )
 from ..helpers import (
     get_internal_window_price,
+    resolve_day_buy_window_end_hour,
     resolve_day_buy_window_duration_hours,
     resolve_evening_max_price_hour,
+    resolve_night_buy_window_tomorrow_start_hour,
     resolve_tariff_start_hour,
 )
 from ..utils.pv_forecast import get_forecast_adjusted_kwh
@@ -57,9 +59,20 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
 
     def _resolve_forecast_params(self) -> tuple[int, int, dict[str, object]]:
         """Resolve afternoon forecast time window and kwargs."""
+        tariff_start_hour = resolve_tariff_start_hour(self.hass, self.config)
         return (
-            resolve_tariff_start_hour(self.hass, self.config),
-            22,
+            resolve_day_buy_window_end_hour(
+                self.hass,
+                self.config,
+                entry_id=self.entry.entry_id,
+                default_hour=tariff_start_hour,
+            ),
+            resolve_night_buy_window_tomorrow_start_hour(
+                self.hass,
+                self.config,
+                entry_id=self.entry.entry_id,
+                default_hour=22,
+            ),
             {"apply_efficiency": False},
         )
 

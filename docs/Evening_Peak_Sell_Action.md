@@ -7,6 +7,15 @@ Zarządzanie sprzedażą energii z magazynu wieczorem z użyciem dwóch okien sp
 - **okno `A`** — wyższa cena wieczorna,
 - **okno `B`** — niższa cena wieczorna.
 
+## Aktualna granica horyzontu zapotrzebowania
+
+Dla każdego aktywnego okna A/B arbitrage jest możliwy tylko do pierwszej
+późniejszej godziny przed `night_buy_window_tomorrow`, w której średnia cena
+zakupu jest ściśle niższa od ceny tego okna sprzedaży pomniejszonej o
+`min_arbitrage_margin`. Bez takiej godziny energia jest zachowywana do
+jutrzejszej samowystarczalności PV; gdy jej nie ma, sprzedaż nie jest
+uruchamiana.
+
 Logika działa niezależnie od kolejności czasowej okien (`A First` albo `B First`) i dla każdego wywołania rozstrzyga:
 
 - czy bieżące okno jest korzystniejsze niż cena jutrzejszego poranka,

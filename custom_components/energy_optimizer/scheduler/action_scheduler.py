@@ -684,7 +684,12 @@ class ActionScheduler:
         )
 
         tariff_start_hour = resolve_tariff_start_hour(self.hass, self.entry.data)
-        afternoon_charge_hour = (tariff_start_hour - 2) % 24
+        afternoon_charge_hour = resolve_day_buy_window_start_hour(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+            default_hour=(tariff_start_hour - 2) % 24,
+        )
         actions.append(
             self._build_action_entry(
                 key="afternoon_charge",
@@ -695,7 +700,7 @@ class ActionScheduler:
                     now=now,
                 ),
                 kind="dynamic",
-                source="high_tariff_start_hour_sensor_minus_2h",
+                source="day_buy_window_sensor",
                 order=100,
             )
         )

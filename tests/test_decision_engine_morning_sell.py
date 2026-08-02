@@ -1,7 +1,7 @@
 """Tests for morning sell decision engine logic."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock
 
@@ -12,6 +12,7 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_EFFICIENCY,
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
+    CONF_BUY_PRICE_SENSOR,
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_EXPORT_POWER_ENTITY,
     CONF_MIN_ARBITRAGE_PRICE,
@@ -27,6 +28,7 @@ from custom_components.energy_optimizer.const import (
 from custom_components.energy_optimizer.decision_engine.morning_sell import (
     async_run_morning_sell,
 )
+from custom_components.energy_optimizer.calculations.price_windows import ArbitrageBuyHourResult
 
 pytestmark = pytest.mark.enable_socket
 
@@ -271,7 +273,53 @@ async def test_morning_sell_uses_full_surplus_when_margin_gate_is_enabled(
 
 
 @pytest.mark.asyncio
-async def test_morning_sell_surplus_above_free_space_but_morning_not_higher_sells_overflow(
+async def test_morning_sell_uses_first_qualifying_buy_hour_as_demand_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
+    states = _base_states()
+    states["sensor.morning_price"] = "500"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    local_now = datetime(2026, 2, 24, 7, tzinfo=timezone.utc)
+    monkeypatch.setattr(f"{MORNING}.dt_util.as_local", lambda _dt: local_now)
+    monkeypatch.setattr(f"{MORNING}.get_buy_price_payload", lambda *args, **kwargs: [{}])
+    bounds: dict[str, datetime] = {}
+
+    def _find(_prices, _entity_id, **kwargs):
+        bounds["start"] = kwargs["start_local"]
+        bounds["end"] = kwargs["end_local"]
+        return ArbitrageBuyHourResult(
+            datetime(2026, 2, 24, 10, tzinfo=timezone.utc),
+            50.0,
+            450.0,
+            "enabled",
+        )
+
+    monkeypatch.setattr(f"{MORNING}.find_first_arbitrage_buy_hour", _find)
+    monkeypatch.setattr(f"{MORNING}.get_heat_pump_forecast_window", AsyncMock(return_value=(1.0, {})))
+    monkeypatch.setattr(f"{MORNING}.get_pv_forecast_window", lambda *args, **kwargs: (2.0, {}))
+    monkeypatch.setattr(f"{MORNING}.calculate_losses", lambda *args, **kwargs: (0.0, 0.0))
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_sufficiency_window",
+        lambda **kwargs: (3.0, 2.0, 1.0, 12, True),
+    )
+    monkeypatch.setattr(f"{MORNING}.calculate_battery_reserve", lambda *args, **kwargs: 10.0)
+    monkeypatch.setattr(f"{MORNING}.calculate_surplus_energy", lambda *args, **kwargs: 5.0)
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert bounds["start"].hour == 8
+    assert bounds["end"].hour == 13
+    assert outcomes[-1].details["sell_horizon_mode"] == "arbitrage"
+    assert outcomes[-1].details["selected_end_hour"] == 10
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_without_sufficiency_or_margin_sells_sunset_overflow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _base_config()
@@ -315,7 +363,7 @@ async def test_morning_sell_surplus_above_free_space_but_morning_not_higher_sell
 
     assert outcomes
     assert outcomes[-1].action_type == "sell"
-    assert outcomes[-1].details["surplus_selection_reason"] == "overflow_above_free_space"
+    assert outcomes[-1].details["surplus_selection_reason"] == "surplus_to_sunset_above_free_space"
     assert outcomes[-1].details["selected_surplus_kwh"] == 2.0
 
 
@@ -462,7 +510,7 @@ async def test_morning_sell_no_surplus_no_action(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.asyncio
-async def test_morning_sell_keeps_full_window_surplus_when_sufficiency_reached(
+async def test_morning_sell_uses_pv_sufficiency_as_demand_window_end(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _base_config()
@@ -513,10 +561,11 @@ async def test_morning_sell_keeps_full_window_surplus_when_sufficiency_reached(
 
     assert outcomes
     assert outcomes[-1].action_type == "sell"
-    assert outcomes[-1].details["end_hour"] == 13
+    assert outcomes[-1].details["end_hour"] == 10
+    assert outcomes[-1].details["sell_horizon_mode"] == "pv_sufficiency"
     assert outcomes[-1].details["sufficiency_hour"] == 10
-    assert captured_surplus_inputs == [(10.0, 5.0, 5.0)]
-    assert outcomes[-1].details["base_required_kwh_full"] == 5.0
+    assert captured_surplus_inputs == [(10.0, 1.0, 5.0)]
+    assert outcomes[-1].details["base_required_kwh_full"] == 1.0
     assert outcomes[-1].details["base_pv_forecast_kwh_full"] == 5.0
     assert outcomes[-1].details["required_sufficiency_kwh"] == 2.0
     assert outcomes[-1].details["pv_sufficiency_kwh"] == 1.0

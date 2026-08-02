@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, time, timedelta
 from typing import TYPE_CHECKING
+
+from homeassistant.util import dt as dt_util
 
 from ..calculations.battery import calculate_battery_reserve
 from ..calculations.energy import (
@@ -11,7 +14,9 @@ from ..calculations.energy import (
     calculate_surplus_energy,
 )
 from ..calculations.utils import build_hourly_usage_array
+from ..calculations.price_windows import find_first_arbitrage_buy_hour
 from ..const import (
+    CONF_BUY_PRICE_SENSOR,
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
     CONF_MAX_EXPORT_POWER,
@@ -29,9 +34,11 @@ from ..decision_engine.common import (
     get_required_prog5_soc_state,
 )
 from ..helpers import (
+    get_buy_price_payload,
     get_internal_window_price,
     resolve_evening_max_price_hour,
     resolve_evening_second_max_price_hour,
+    resolve_night_buy_window_tomorrow_start_hour,
     resolve_tariff_end_hour,
     resolve_tariff_start_hour,
 )
@@ -72,6 +79,7 @@ class EveningSellStrategy(BaseSellStrategy):
         self._current_window_label = "A"
         self._other_window_label: str | None = None
         self._tomorrow_morning_price: float | None = None
+        self._sell_horizon_details: dict[str, object] = {}
 
     @property
     def scenario_name(self) -> str:
@@ -190,9 +198,95 @@ class EveningSellStrategy(BaseSellStrategy):
 
     async def _compute_base_evaluation(self) -> DecisionOutcome | SellRequest:
         """Compute sellable energy for the current window before A/B allocation."""
-        if getattr(self, "_price_unavailable", False) or not self._arbitrage_margin_ok:
+        if getattr(self, "_price_unavailable", False):
+            self._sell_horizon_details = {
+                "sell_horizon_mode": "normal",
+                "sell_horizon_reason": "sell_price_unavailable",
+                "arbitrage_hour": None,
+            }
             return await self._surplus_sell()
-        return await self._high_price_sell()
+
+        if not self.config.get(CONF_BUY_PRICE_SENSOR):
+            self._sell_horizon_details = {
+                "sell_horizon_mode": "static_fallback",
+                "sell_horizon_reason": (
+                    "static_margin_gate"
+                    if self._arbitrage_margin_ok
+                    else "static_margin_not_achieved"
+                ),
+                "arbitrage_hour": None,
+            }
+            if self._arbitrage_margin_ok:
+                return await self._high_price_sell()
+            return await self._surplus_sell()
+
+        prices = get_buy_price_payload(
+            self.hass,
+            self.config,
+            entry_id=self.entry.entry_id,
+        )
+        if not prices:
+            self._sell_horizon_details = {
+                "sell_horizon_mode": "normal",
+                "sell_horizon_reason": "missing_buy_price_payload",
+                "arbitrage_hour": None,
+            }
+            return await self._surplus_sell(require_sufficiency=True)
+
+        night_buy_start_hour = resolve_night_buy_window_tomorrow_start_hour(
+            self.hass,
+            self.config,
+            entry_id=self.entry.entry_id,
+            default_hour=4,
+        )
+        local_now = dt_util.as_local(dt_util.utcnow())
+        search_start = datetime.combine(
+            local_now.date(),
+            time((self._current_window_hour + 1) % 24),
+            tzinfo=local_now.tzinfo,
+        )
+        search_end = datetime.combine(
+            local_now.date() + timedelta(days=1),
+            time(night_buy_start_hour),
+            tzinfo=local_now.tzinfo,
+        )
+        arbitrage = find_first_arbitrage_buy_hour(
+            prices,
+            str(self.config[CONF_BUY_PRICE_SENSOR]),
+            start_local=search_start,
+            end_local=search_end,
+            sell_price=self.price,
+            min_arbitrage_margin=self.threshold_price,
+        )
+        if arbitrage.start_local is not None:
+            arbitrage_hour = arbitrage.start_local.hour
+            self._sell_horizon_details = {
+                "sell_horizon_mode": "arbitrage",
+                "sell_horizon_reason": "qualifying_buy_price",
+                "arbitrage_reason": arbitrage.reason,
+                "arbitrage_hour": arbitrage_hour,
+                "arbitrage_datetime": arbitrage.start_local.isoformat(),
+                "arbitrage_buy_price": arbitrage.average_price,
+                "arbitrage_margin": arbitrage.arbitrage_margin,
+                "selected_end_hour": arbitrage_hour,
+            }
+            return await self._high_price_sell(
+                start_hour=(self._current_window_hour + 1) % 24,
+                end_hour=arbitrage_hour,
+            )
+
+        self._sell_horizon_details = {
+            "sell_horizon_mode": "normal",
+            "sell_horizon_reason": "no_qualifying_buy_price",
+            "arbitrage_reason": arbitrage.reason,
+            "arbitrage_hour": None,
+        }
+        return await self._surplus_sell(require_sufficiency=True)
+
+    def _apply_sell_horizon_details(self, outcome: DecisionOutcome) -> DecisionOutcome:
+        """Attach the selected sell-demand horizon to diagnostics."""
+        outcome.details.update(self._sell_horizon_details)
+        return outcome
 
     def _allocate_window_surplus(self, base_surplus_kwh: float) -> float:
         """Allocate the sellable surplus for the current A/B window."""
@@ -225,6 +319,8 @@ class EveningSellStrategy(BaseSellStrategy):
 
         if getattr(self, "_price_unavailable", False):
             # Price unknown - skip tomorrow comparison and proceed to surplus sell.
+            return None
+        if self.config.get(CONF_BUY_PRICE_SENSOR):
             return None
         self._tomorrow_morning_price = get_internal_window_price(
             self.hass,
@@ -300,6 +396,7 @@ class EveningSellStrategy(BaseSellStrategy):
     ) -> DecisionOutcome | SellRequest:
         if start_hour is None:
             start_hour = (self._now_hour + 1) % 24
+        self._sell_horizon_details.setdefault("selected_end_hour", end_hour)
 
         hours_window = build_hour_window(start_hour, end_hour)
         hours = max(len(hours_window), 1)
@@ -383,7 +480,7 @@ class EveningSellStrategy(BaseSellStrategy):
             surplus_kwh,
         )
         if surplus_kwh <= 0.0:
-            return self._apply_arbitrage_gate_details(build_no_action_outcome(
+            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_no_action_outcome(
                 scenario=self.scenario_name,
                 summary="No evening peak sell action",
                 reason="No surplus energy available for selling",
@@ -395,10 +492,10 @@ class EveningSellStrategy(BaseSellStrategy):
                     "evening_price": round(self.price, 2),
                     "threshold_price": round(self.threshold_price, 2),
                 },
-            ))
+            )))
 
         def _make_outcome(target_soc: float, surplus: float, export_w: float) -> DecisionOutcome:
-            return self._apply_arbitrage_gate_details(build_evening_sell_outcome(
+            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_evening_sell_outcome(
                 target_soc=target_soc,
                 current_soc=self.current_soc,
                 surplus_kwh=surplus,
@@ -412,10 +509,10 @@ class EveningSellStrategy(BaseSellStrategy):
                 export_power_w=export_w,
                 evening_price=self.price,
                 threshold_price=self.threshold_price,
-            ))
+            )))
 
         def _make_no_action(_surplus: float) -> DecisionOutcome:
-            return self._apply_arbitrage_gate_details(build_no_action_outcome(
+            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_no_action_outcome(
                 scenario=self.scenario_name,
                 summary="No evening peak sell action",
                 reason="Calculated target SOC does not require discharge",
@@ -427,7 +524,7 @@ class EveningSellStrategy(BaseSellStrategy):
                     "evening_price": round(self.price, 2),
                     "threshold_price": round(self.threshold_price, 2),
                 },
-            ))
+            )))
 
         return SellRequest(
             surplus_kwh=surplus_kwh,
@@ -436,7 +533,11 @@ class EveningSellStrategy(BaseSellStrategy):
             skip_restore=skip_restore,
         )
 
-    async def _surplus_sell(self) -> DecisionOutcome | SellRequest:
+    async def _surplus_sell(
+        self,
+        *,
+        require_sufficiency: bool = False,
+    ) -> DecisionOutcome | SellRequest:
         hourly_usage = build_hourly_usage_array(
             self.config,
             self.hass.states.get,
@@ -491,6 +592,26 @@ class EveningSellStrategy(BaseSellStrategy):
             tomorrow_forecasts,
             calculator=calculate_sufficiency_window,
         )
+        self._sell_horizon_details.setdefault(
+            "selected_end_hour",
+            tomorrow_sufficiency.sufficiency_hour
+            if tomorrow_sufficiency.sufficiency_reached
+            else None,
+        )
+        if require_sufficiency and not tomorrow_sufficiency.sufficiency_reached:
+            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(
+                build_no_action_outcome(
+                    scenario=self.scenario_name,
+                    summary="No evening peak sell action",
+                    reason="Next-day PV sufficiency was not reached",
+                    current_soc=self.current_soc,
+                    reserve_kwh=reserve_kwh,
+                    required_kwh=tomorrow_sufficiency.required_kwh,
+                    pv_forecast_kwh=tomorrow_pv_kwh,
+                    sufficiency_hour=tomorrow_sufficiency.sufficiency_hour,
+                    sufficiency_reached=False,
+                )
+            ))
 
         today_start = (self._now_hour + 1) % 24
         today_end = 24
@@ -625,7 +746,7 @@ class EveningSellStrategy(BaseSellStrategy):
         )
 
         if surplus_kwh <= 0.0:
-            return self._apply_arbitrage_gate_details(build_no_action_outcome(
+            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_no_action_outcome(
                 scenario=self.scenario_name,
                 summary="No surplus sell action",
                 reason="No surplus energy available for surplus sell",
@@ -641,7 +762,7 @@ class EveningSellStrategy(BaseSellStrategy):
                     "surplus_kwh": round(surplus_kwh, 2),
                     "total_needed_kwh": round(total_needed_kwh, 2),
                 },
-            ))
+            )))
 
         def _make_outcome(target_soc: float, surplus: float, export_w: float) -> DecisionOutcome:
             outcome = build_surplus_sell_outcome(
@@ -662,10 +783,10 @@ class EveningSellStrategy(BaseSellStrategy):
                 evening_price=self.price,
                 threshold_price=self.threshold_price,
             )
-            return self._apply_arbitrage_gate_details(outcome)
+            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(outcome))
 
         def _make_no_action(current_surplus_kwh: float) -> DecisionOutcome:
-            return self._apply_arbitrage_gate_details(build_no_action_outcome(
+            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_no_action_outcome(
                 scenario=self.scenario_name,
                 summary="No surplus sell action",
                 reason="Calculated target SOC does not require discharge",
@@ -681,7 +802,7 @@ class EveningSellStrategy(BaseSellStrategy):
                     "surplus_kwh": round(current_surplus_kwh, 2),
                     "total_needed_kwh": round(total_needed_kwh, 2),
                 },
-            ))
+            )))
 
         return SellRequest(
             surplus_kwh=surplus_kwh,
@@ -706,3 +827,4 @@ async def async_run_evening_sell(
         is_first=is_first,
     )
     await strategy.run()
+    resolve_night_buy_window_tomorrow_start_hour,

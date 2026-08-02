@@ -4,6 +4,14 @@
 
 Zapewnienie wystarczającej ilości energii w magazynie na pokrycie zapotrzebowania gospodarstwa domowego w godzinach wysokiej taryfy energii elektrycznej poprzez ładowanie z sieci w tańszej taryfie nocnej.
 
+## Aktualna granica horyzontu zapotrzebowania
+
+Bilans jest liczony od końca `night_buy_window` do wcześniejszej z pierwszej
+godziny samowystarczalności PV oraz początku `day_buy_window`. Gdy
+samowystarczalność nie wystąpi, koniec stanowi początek `day_buy_window`.
+Przy niedostępnych sensorach okien zachowany jest fallback `06:00` do końca
+wysokiej taryfy.
+
 ## Wyzwalacz
 
 - Godzina startu wewnętrznego sensora `night_buy_window` (fallback: 04:00, gdy sensor jest niedostępny)

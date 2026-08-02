@@ -211,7 +211,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
         assert any(
             action["key"] == "afternoon_charge"
             and action["time_local"] == "13:00"
-            and action["source"] == "high_tariff_start_hour_sensor_minus_2h"
+            and action["source"] == "day_buy_window_sensor"
             for action in actions
         )
         assert any(action["key"] == "daytime_min_price_restore" and action["time_local"] == "12:30" for action in actions)

@@ -387,6 +387,41 @@ def get_internal_window_price(
     )
 
 
+def get_buy_price_payload(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    entry_id: str,
+) -> list[dict[str, object]] | None:
+    """Return the coordinator's immutable snapshot of future buy-price points."""
+    from .const import CONF_BUY_PRICE_SENSOR, DOMAIN
+
+    buy_price_entity = config.get(CONF_BUY_PRICE_SENSOR)
+    if not buy_price_entity:
+        return None
+
+    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
+    if not isinstance(entry_data, dict):
+        return None
+    coordinator = entry_data.get("coordinator")
+    coordinator_data = getattr(coordinator, "data", None)
+    if not isinstance(coordinator_data, dict):
+        return None
+    payloads = coordinator_data.get("price_payloads")
+    if not isinstance(payloads, dict):
+        return None
+    payload = payloads.get(str(buy_price_entity))
+    if not isinstance(payload, dict):
+        return None
+
+    prices: list[dict[str, object]] = []
+    for key in ("prices_today", "prices_tomorrow"):
+        values = payload.get(key)
+        if isinstance(values, list):
+            prices.extend(value for value in values if isinstance(value, dict))
+    return prices or None
+
+
 def get_float_value(
     hass: HomeAssistant,
     entity_id: str | None,
@@ -781,6 +816,31 @@ def resolve_night_buy_window_start_hour(
     return default_hour
 
 
+def resolve_night_buy_window_tomorrow_start_hour(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    entry_id: str,
+    default_hour: int = 4,
+) -> int:
+    """Resolve the next day's internal night buy window start hour with fallback."""
+    del config
+    entity_id = get_internal_sensor_entity_id(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix="night_buy_window_tomorrow",
+    )
+    resolved_time = _resolve_time_from_state_or_attribute(hass, entity_id)
+    if resolved_time is not None:
+        return resolved_time.hour
+
+    _LOGGER.warning(
+        "Internal tomorrow night buy window unavailable or invalid, using default %s",
+        default_hour,
+    )
+    return default_hour
+
+
 def resolve_night_buy_window_duration_hours(
     hass: HomeAssistant,
     config: dict[str, object],
@@ -812,6 +872,52 @@ def resolve_night_buy_window_duration_hours(
     return default_hours
 
 
+def _resolve_buy_window_end_hour(
+    hass: HomeAssistant,
+    *,
+    entry_id: str,
+    unique_id_suffix: str,
+    default_hour: int,
+) -> int:
+    """Resolve a buy-window end hour from its internal sensor."""
+    entity_id = get_internal_sensor_entity_id(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix=unique_id_suffix,
+    )
+    resolved_time = _resolve_time_from_state_or_attribute(
+        hass,
+        entity_id,
+        attribute_name="end",
+    )
+    if resolved_time is not None:
+        return resolved_time.hour
+
+    _LOGGER.warning(
+        "Internal %s end unavailable or invalid, using default %s",
+        unique_id_suffix,
+        default_hour,
+    )
+    return default_hour
+
+
+def resolve_night_buy_window_end_hour(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    entry_id: str,
+    default_hour: int = 6,
+) -> int:
+    """Resolve the internal night buy window end hour with fallback."""
+    del config
+    return _resolve_buy_window_end_hour(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix="night_buy_window",
+        default_hour=default_hour,
+    )
+
+
 def resolve_day_buy_window_start_hour(
     hass: HomeAssistant,
     config: dict[str, object],
@@ -834,6 +940,23 @@ def resolve_day_buy_window_start_hour(
         default_hour,
     )
     return default_hour
+
+
+def resolve_day_buy_window_end_hour(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    entry_id: str,
+    default_hour: int,
+) -> int:
+    """Resolve the internal day buy window end hour with fallback."""
+    del config
+    return _resolve_buy_window_end_hour(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix="day_buy_window",
+        default_hour=default_hour,
+    )
 
 
 def resolve_day_buy_window_duration_hours(

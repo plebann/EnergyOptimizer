@@ -34,7 +34,9 @@ from ..decision_engine.common import (
 from ..helpers import (
     get_internal_window_price,
     is_balancing_ongoing,
+    resolve_day_buy_window_start_hour,
     resolve_morning_max_price_hour,
+    resolve_night_buy_window_end_hour,
     resolve_night_buy_window_duration_hours,
     resolve_tariff_end_hour,
     set_balancing_ongoing,
@@ -61,7 +63,22 @@ class MorningChargeStrategy(BaseChargeStrategy):
 
     def _resolve_forecast_params(self) -> tuple[int, int, dict[str, object]]:
         """Resolve morning forecast time window and kwargs."""
-        return 6, resolve_tariff_end_hour(self.hass, self.config), {}
+        tariff_end_hour = resolve_tariff_end_hour(self.hass, self.config)
+        return (
+            resolve_night_buy_window_end_hour(
+                self.hass,
+                self.config,
+                entry_id=self.entry.entry_id,
+                default_hour=6,
+            ),
+            resolve_day_buy_window_start_hour(
+                self.hass,
+                self.config,
+                entry_id=self.entry.entry_id,
+                default_hour=tariff_end_hour,
+            ),
+            {},
+        )
 
     async def _check_early_exit(self) -> bool:
         """Stop run when balancing is in progress."""

@@ -81,6 +81,16 @@ class AverageBuyPriceResult:
     average_price: float
 
 
+@dataclass(frozen=True, slots=True)
+class ArbitrageBuyHourResult:
+    """First future buy hour that satisfies a sell-margin threshold."""
+
+    start_local: datetime | None
+    average_price: float | None
+    arbitrage_margin: float | None
+    reason: str
+
+
 @dataclass
 class HourlySellPriceCandidate:
     """Normalized one-hour candidate used by ranked sell-window selection."""
@@ -108,6 +118,86 @@ def _parse_entry_time(raw_time: Any, local_tz: tzinfo) -> datetime | None:
         return parsed.replace(tzinfo=local_tz)
 
     return parsed.astimezone(local_tz)
+
+
+def find_first_arbitrage_buy_hour(
+    prices: list[dict[str, Any]],
+    entity_id: str,
+    *,
+    start_local: datetime,
+    end_local: datetime,
+    sell_price: float,
+    min_arbitrage_margin: float,
+) -> ArbitrageBuyHourResult:
+    """Find the first complete buy-price hour meeting a strict margin threshold.
+
+    Source integrations may publish either one hourly point or four
+    quarter-hour points. Quarter-hour samples are averaged only when all four
+    expected slots are present. Any missing or malformed hour in the searched
+    interval invalidates the lookup so callers can fail closed for arbitrage.
+    """
+    if start_local.tzinfo is None or end_local.tzinfo is None:
+        raise ValueError("Arbitrage price bounds must be timezone-aware")
+    if end_local <= start_local:
+        return ArbitrageBuyHourResult(None, None, None, "empty_search_window")
+
+    local_tz = start_local.tzinfo
+    prices_by_hour: dict[datetime, list[tuple[int, float]]] = {}
+    for entry in prices:
+        if not isinstance(entry, dict):
+            continue
+        raw_time = entry.get("time")
+        raw_price = entry.get("price")
+        if raw_time is None or raw_price is None:
+            continue
+
+        point_local = _parse_entry_time(raw_time, local_tz)
+        if point_local is None or not start_local <= point_local < end_local:
+            continue
+        if point_local.minute not in (0, 15, 30, 45):
+            continue
+        try:
+            price = float(raw_price)
+        except (TypeError, ValueError):
+            continue
+
+        hour_start = point_local.replace(minute=0, second=0, microsecond=0)
+        prices_by_hour.setdefault(hour_start, []).append((point_local.minute, price))
+
+    hour_start = start_local.replace(minute=0, second=0, microsecond=0)
+    if hour_start < start_local:
+        hour_start += HOUR_DURATION
+    threshold = sell_price - min_arbitrage_margin
+    while hour_start < end_local:
+        samples = prices_by_hour.get(hour_start)
+        if not samples:
+            return ArbitrageBuyHourResult(None, None, None, "missing_buy_price")
+
+        minutes = [minute for minute, _price in samples]
+        if len(samples) == 1 and minutes == [0]:
+            average_price = samples[0][1]
+        elif len(samples) == 4 and sorted(minutes) == [0, 15, 30, 45]:
+            average_price = sum(price for _minute, price in samples) / 4
+        else:
+            _LOGGER.debug(
+                "Invalid buy-price samples for %s at %s: %s",
+                entity_id,
+                hour_start,
+                samples,
+            )
+            return ArbitrageBuyHourResult(None, None, None, "incomplete_buy_price")
+
+        arbitrage_margin = sell_price - average_price
+        if average_price < threshold:
+            return ArbitrageBuyHourResult(
+                hour_start,
+                average_price,
+                arbitrage_margin,
+                "enabled",
+            )
+        hour_start += HOUR_DURATION
+
+    return ArbitrageBuyHourResult(None, None, None, "margin_not_reached")
 
 
 def _is_window_within_range(
