@@ -132,6 +132,10 @@ class MorningChargeStrategy(BaseChargeStrategy):
             default_hours=2.0,
         )
 
+    def _history_window_kinds(self) -> tuple[str, str]:
+        """Return source codes for the morning charge forecast horizon."""
+        return "nb_e", "db_s"
+
     def _evaluate_charge(self) -> tuple[float, EnergyBalance]:
         """Evaluate morning gaps and store derived metrics for outcomes."""
         (
@@ -220,6 +224,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
                 **(self._arbitrage_details or {}),
             },
         )
+        outcome.history_windows = self._history_windows()
         await handle_no_action_soc_update(
             self.hass,
             self.entry,

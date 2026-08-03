@@ -316,6 +316,7 @@ async def test_morning_sell_uses_first_qualifying_buy_hour_as_demand_end(
     assert bounds["end"].hour == 13
     assert outcomes[-1].details["sell_horizon_mode"] == "arbitrage"
     assert outcomes[-1].details["selected_end_hour"] == 10
+    assert outcomes[-1].history_windows == [["sr", 8, "next_h", 10, "arb_b", False]]
 
 
 @pytest.mark.asyncio

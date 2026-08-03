@@ -33,6 +33,9 @@ class DecisionOutcome:
     # Entity changes (for custom events)
     entities_changed: list[dict[str, Any]] = field(default_factory=list)
 
+    # Compact history-only decision horizon.
+    history_windows: list[list[str | int | bool]] = field(default_factory=list)
+
 
 def format_sufficiency_hour(
     sufficiency_hour: int, *, sufficiency_reached: bool
@@ -123,7 +126,13 @@ async def log_decision_unified(
         history_entry = {**outcome.details}
         if outcome.reason:
             history_entry["reason"] = outcome.reason
-        hist_sensor.add_entry(outcome.scenario, history_entry)
+        hist_sensor.add_entry(
+            outcome.scenario,
+            history_entry,
+            action_type=outcome.action_type,
+            reason=outcome.reason,
+            windows=outcome.history_windows,
+        )
 
     if context:
         event_data = {

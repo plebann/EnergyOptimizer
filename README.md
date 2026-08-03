@@ -63,6 +63,31 @@ Base sensor class with coordinator integration:
 - Heat pump estimation sensor
 - Optimization tracking sensors (last balancing, history)
 
+### Optimization History Format
+
+`sensor.<device>_optimization_history` retains compact decision records for up to
+14 days. The sensor also enforces a 14 KiB attribute budget, removing the oldest
+records when necessary. Full diagnostics for the most recent decision remain in
+the Last Optimization sensor.
+
+Each history record uses these compact keys:
+
+| Key | Meaning |
+| --- | --- |
+| `t` | Decision timestamp in local ISO 8601 format |
+| `s` | Scenario: `mc` morning charge, `ac` afternoon charge, `ms` morning sell, `es` evening sell |
+| `a` | Action: `c` charge, `s` sell, `n` no action, `r` sell restore |
+| `r` | Compact decision reason (`arb` arbitrage, `pv` PV sufficiency, `db` day-buy boundary, `sf` static fallback, `sun` sunset, `n` normal) |
+| `v` | Applied values: `s` target SOC, `c` charge current, `e` export power |
+| `m` | Metrics: `g` charge gap, `x` sell surplus, `q` required energy, `p` sell price, `b` arbitrage buy price, `m` arbitrage margin |
+| `w` | Final decision horizons, each as `[purpose, start_hour, start_kind, end_hour, end_kind, ends_tomorrow]` |
+
+The current purpose codes are `cr` (charge reserve) and `sr` (sell reserve).
+Boundary codes are `nb_e` (night buy end), `db_s` (day buy start), `db_e`
+(day buy end), `nb_t_s` (tomorrow night buy start), `next_h` (next full hour),
+`pv_s` (PV sufficiency), `arb_b` (arbitrage buy hour), `tariff_e` (tariff end),
+`sw_e` (sell window end), and `sunset` (sunset).
+
 ## Prerequisites
 
 ### Recommended Integrations

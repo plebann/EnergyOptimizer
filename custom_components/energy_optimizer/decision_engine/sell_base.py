@@ -159,6 +159,26 @@ class BaseSellStrategy(ABC):
             outcome.details.update(details)
         return outcome
 
+    @staticmethod
+    def _apply_history_window(
+        outcome: DecisionOutcome,
+        *,
+        start_hour: int,
+        end_hour: int,
+        end_kind: str,
+        purpose: str = "sr",
+    ) -> DecisionOutcome:
+        """Attach the final compact energy horizon to a sell outcome."""
+        outcome.history_windows = [[
+            purpose,
+            start_hour,
+            "next_h",
+            end_hour % 24,
+            end_kind,
+            end_hour <= start_hour,
+        ]]
+        return outcome
+
     def _get_battery_config(self) -> BatteryConfig:
         """Return strategy battery configuration."""
         return get_battery_config(self.config)

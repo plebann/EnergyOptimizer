@@ -269,6 +269,7 @@ class EveningSellStrategy(BaseSellStrategy):
                 "arbitrage_buy_price": arbitrage.average_price,
                 "arbitrage_margin": arbitrage.arbitrage_margin,
                 "selected_end_hour": arbitrage_hour,
+                "history_end_kind": "arb_b",
             }
             return await self._high_price_sell(
                 start_hour=(self._current_window_hour + 1) % 24,
@@ -397,6 +398,9 @@ class EveningSellStrategy(BaseSellStrategy):
         if start_hour is None:
             start_hour = (self._now_hour + 1) % 24
         self._sell_horizon_details.setdefault("selected_end_hour", end_hour)
+        history_end_kind = str(
+            self._sell_horizon_details.get("history_end_kind", "sw_e")
+        )
 
         hours_window = build_hour_window(start_hour, end_hour)
         hours = max(len(hours_window), 1)
@@ -480,7 +484,7 @@ class EveningSellStrategy(BaseSellStrategy):
             surplus_kwh,
         )
         if surplus_kwh <= 0.0:
-            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_no_action_outcome(
+            outcome = self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_no_action_outcome(
                 scenario=self.scenario_name,
                 summary="No evening peak sell action",
                 reason="No surplus energy available for selling",
@@ -493,9 +497,15 @@ class EveningSellStrategy(BaseSellStrategy):
                     "threshold_price": round(self.threshold_price, 2),
                 },
             )))
+            return self._apply_history_window(
+                outcome,
+                start_hour=start_hour,
+                end_hour=end_hour,
+                end_kind=history_end_kind,
+            )
 
         def _make_outcome(target_soc: float, surplus: float, export_w: float) -> DecisionOutcome:
-            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_evening_sell_outcome(
+            outcome = self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_evening_sell_outcome(
                 target_soc=target_soc,
                 current_soc=self.current_soc,
                 surplus_kwh=surplus,
@@ -510,9 +520,15 @@ class EveningSellStrategy(BaseSellStrategy):
                 evening_price=self.price,
                 threshold_price=self.threshold_price,
             )))
+            return self._apply_history_window(
+                outcome,
+                start_hour=start_hour,
+                end_hour=end_hour,
+                end_kind=history_end_kind,
+            )
 
         def _make_no_action(_surplus: float) -> DecisionOutcome:
-            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_no_action_outcome(
+            outcome = self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_no_action_outcome(
                 scenario=self.scenario_name,
                 summary="No evening peak sell action",
                 reason="Calculated target SOC does not require discharge",
@@ -525,6 +541,12 @@ class EveningSellStrategy(BaseSellStrategy):
                     "threshold_price": round(self.threshold_price, 2),
                 },
             )))
+            return self._apply_history_window(
+                outcome,
+                start_hour=start_hour,
+                end_hour=end_hour,
+                end_kind=history_end_kind,
+            )
 
         return SellRequest(
             surplus_kwh=surplus_kwh,
@@ -598,8 +620,17 @@ class EveningSellStrategy(BaseSellStrategy):
             if tomorrow_sufficiency.sufficiency_reached
             else None,
         )
+        today_start = (self._now_hour + 1) % 24
+        history_end_hour = (
+            tomorrow_sufficiency.sufficiency_hour
+            if tomorrow_sufficiency.sufficiency_reached
+            else tomorrow_end
+        )
+        history_end_kind = (
+            "pv_s" if tomorrow_sufficiency.sufficiency_reached else "tariff_e"
+        )
         if require_sufficiency and not tomorrow_sufficiency.sufficiency_reached:
-            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(
+            outcome = self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(
                 build_no_action_outcome(
                     scenario=self.scenario_name,
                     summary="No evening peak sell action",
@@ -612,8 +643,13 @@ class EveningSellStrategy(BaseSellStrategy):
                     sufficiency_reached=False,
                 )
             ))
+            return self._apply_history_window(
+                outcome,
+                start_hour=today_start,
+                end_hour=history_end_hour,
+                end_kind=history_end_kind,
+            )
 
-        today_start = (self._now_hour + 1) % 24
         today_end = 24
         today_window = build_hour_window(today_start, today_end)
         today_hours = max(len(today_window), 1)
@@ -746,7 +782,7 @@ class EveningSellStrategy(BaseSellStrategy):
         )
 
         if surplus_kwh <= 0.0:
-            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_no_action_outcome(
+            outcome = self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_no_action_outcome(
                 scenario=self.scenario_name,
                 summary="No surplus sell action",
                 reason="No surplus energy available for surplus sell",
@@ -763,6 +799,12 @@ class EveningSellStrategy(BaseSellStrategy):
                     "total_needed_kwh": round(total_needed_kwh, 2),
                 },
             )))
+            return self._apply_history_window(
+                outcome,
+                start_hour=today_start,
+                end_hour=history_end_hour,
+                end_kind=history_end_kind,
+            )
 
         def _make_outcome(target_soc: float, surplus: float, export_w: float) -> DecisionOutcome:
             outcome = build_surplus_sell_outcome(
@@ -783,10 +825,15 @@ class EveningSellStrategy(BaseSellStrategy):
                 evening_price=self.price,
                 threshold_price=self.threshold_price,
             )
-            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(outcome))
+            return self._apply_history_window(
+                self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(outcome)),
+                start_hour=today_start,
+                end_hour=history_end_hour,
+                end_kind=history_end_kind,
+            )
 
         def _make_no_action(current_surplus_kwh: float) -> DecisionOutcome:
-            return self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_no_action_outcome(
+            outcome = self._apply_sell_horizon_details(self._apply_arbitrage_gate_details(build_no_action_outcome(
                 scenario=self.scenario_name,
                 summary="No surplus sell action",
                 reason="Calculated target SOC does not require discharge",
@@ -803,6 +850,12 @@ class EveningSellStrategy(BaseSellStrategy):
                     "total_needed_kwh": round(total_needed_kwh, 2),
                 },
             )))
+            return self._apply_history_window(
+                outcome,
+                start_hour=today_start,
+                end_hour=history_end_hour,
+                end_kind=history_end_kind,
+            )
 
         return SellRequest(
             surplus_kwh=surplus_kwh,

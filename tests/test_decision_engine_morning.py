@@ -367,6 +367,10 @@ async def test_morning_charge_logs_last_optimization_attributes() -> None:
     assert scenario == "Morning Grid Charge"
     assert details["target_soc"] == pytest.approx(66.0)
     assert details["charge_current_a"] == pytest.approx(8)
+    history_sensor = hass.data[DOMAIN]["entry-1"]["optimization_history_sensor"]
+    assert history_sensor.add_entry.call_args.kwargs["windows"] == [
+        ["cr", 6, "nb_e", 13, "db_s", False]
+    ]
 
 
 def test_calculate_soc_delta() -> None:

@@ -302,6 +302,7 @@ async def test_evening_sell_uses_next_day_qualifying_buy_hour(
     assert forecast_windows == [(18, 1)]
     assert outcomes[-1].details["sell_horizon_mode"] == "arbitrage"
     assert outcomes[-1].details["arbitrage_hour"] == 1
+    assert outcomes[-1].history_windows == [["sr", 18, "next_h", 1, "arb_b", True]]
 
 
 @pytest.mark.asyncio

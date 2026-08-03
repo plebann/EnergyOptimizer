@@ -98,6 +98,22 @@ class BaseChargeStrategy(ABC):
         """Return the charging window duration used for current sizing."""
         return 2.0
 
+    def _history_window_kinds(self) -> tuple[str, str]:
+        """Return compact source codes for the forecast window boundaries."""
+        return "fc_s", "fc_e"
+
+    def _history_windows(self) -> list[list[str | int | bool]]:
+        """Return the final energy horizon used for the charge decision."""
+        start_kind, end_kind = self._history_window_kinds()
+        return [[
+            "cr",
+            self.forecasts.start_hour,
+            start_kind,
+            self.forecasts.end_hour % 24,
+            end_kind,
+            self.forecasts.end_hour <= self.forecasts.start_hour,
+        ]]
+
     async def run(self) -> None:
         """Execute common charge workflow and delegate strategy specifics."""
         self.integration_context = Context()
@@ -173,6 +189,7 @@ class BaseChargeStrategy(ABC):
         )
 
         outcome = self._build_charge_outcome(action, balance)
+        outcome.history_windows = self._history_windows()
         outcome.entities_changed = [
             {"entity_id": self.prog_soc_entity, "value": action.target_soc},
             {"entity_id": charge_current_entity, "value": action.charge_current},

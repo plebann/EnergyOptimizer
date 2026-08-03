@@ -85,6 +85,10 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             default_hours=2.0,
         )
 
+    def _history_window_kinds(self) -> tuple[str, str]:
+        """Return source codes for the afternoon charge forecast horizon."""
+        return "db_e", "nb_t_s"
+
     def _post_forecast_setup(self) -> None:
         """Prepare afternoon required energy, arbitrage and assist sensor."""
         entry_data = get_entry_data(self.hass, self.entry.entry_id)
@@ -193,6 +197,7 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
                 **(self._arbitrage_details or {}),
             },
         )
+        outcome.history_windows = self._history_windows()
         await handle_no_action_soc_update(
             self.hass,
             self.entry,

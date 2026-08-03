@@ -1,7 +1,8 @@
 """Tracking and diagnostic sensors for Energy Optimizer."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
 import logging
 from typing import Any
 
@@ -17,6 +18,30 @@ from homeassistant.util import dt as dt_util
 from ..base import EnergyOptimizerSensor
 
 _LOGGER = logging.getLogger(__name__)
+
+_HISTORY_RETENTION = timedelta(days=14)
+_HISTORY_MAX_BYTES = 14 * 1024
+_SCENARIO_CODES = {
+    "Morning Grid Charge": "mc",
+    "Afternoon Grid Charge": "ac",
+    "Morning Peak Sell": "ms",
+    "Evening Peak Sell": "es",
+}
+_ACTION_CODES = {
+    "charge_scheduled": "c",
+    "sell": "s",
+    "high_sell": "s",
+    "no_action": "n",
+    "sell_restore": "r",
+}
+_HORIZON_REASON_CODES = {
+    "arbitrage": "arb",
+    "day_buy_window": "db",
+    "normal": "n",
+    "pv_sufficiency": "pv",
+    "static_fallback": "sf",
+    "sunset_overflow": "sun",
+}
 
 
 class LastBalancingTimestampSensor(EnergyOptimizerSensor, RestoreSensor):
@@ -119,7 +144,7 @@ class HistoryExtraStoredData(ExtraStoredData):
         history = data.get("history", [])
         if not isinstance(history, list):
             history = []
-        history = history[:20] if len(history) > 20 else history
+        history = [entry for entry in history if isinstance(entry, dict)]
         return cls(
             native_value=data.get("native_value", "No optimizations yet"),
             history=history,
@@ -374,6 +399,7 @@ class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
     _attr_unique_id = "optimization_history"
     _attr_icon = "mdi:history"
     _attr_native_value: str = "No optimizations yet"
+    _unrecorded_attributes = frozenset({"history"})
 
     def __init__(
         self,
@@ -398,7 +424,7 @@ class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
 
             if restored_data is not None:
                 self._attr_native_value = restored_data.native_value
-                self._history = restored_data.history[:20]
+                self._history = self._trim_history(restored_data.history)
                 _LOGGER.info(
                     "Restored OptimizationHistorySensor: %d entries",
                     len(self._history),
@@ -415,7 +441,7 @@ class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the optimization history."""
         return {
-            "history": self._history[:20],
+            "history": self._history,
         }
 
     @property
@@ -423,17 +449,117 @@ class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
         """Return extra data to persist."""
         return HistoryExtraStoredData(
             native_value=self._attr_native_value,
-            history=self._history[:20],
+            history=self._history,
         )
 
-    def add_entry(self, scenario: str, details: dict[str, Any]) -> None:
-        """Add an optimization entry to the history."""
+    def add_entry(
+        self,
+        scenario: str,
+        details: dict[str, Any],
+        *,
+        action_type: str | None = None,
+        reason: str | None = None,
+        windows: list[list[str | int | bool]] | None = None,
+    ) -> None:
+        """Add a compact optimization entry to the history."""
         entry = {
-            "timestamp": dt_util.now().isoformat(),
-            "scenario": scenario,
-            **details,
+            "t": dt_util.now().isoformat(),
+            "s": _SCENARIO_CODES.get(scenario, "ot"),
+            "a": _ACTION_CODES.get(action_type or "", "o"),
+            "r": self._reason_code(reason, details),
+            "w": windows or [],
         }
+        if values := self._build_values(details):
+            entry["v"] = values
+        if metrics := self._build_metrics(details):
+            entry["m"] = metrics
+
         self._history.insert(0, entry)
-        self._history = self._history[:20]
+        self._history = self._trim_history(self._history)
         self._attr_native_value = f"{scenario} - {details.get('result', 'completed')}"
         self.async_write_ha_state()
+
+    @staticmethod
+    def _build_values(details: dict[str, Any]) -> dict[str, float]:
+        """Return compact inverter setpoints from an outcome."""
+        source_keys = {
+            "s": "target_soc",
+            "c": "charge_current_a",
+            "e": "export_power_w",
+        }
+        return {
+            compact_key: float(details[source_key])
+            for compact_key, source_key in source_keys.items()
+            if isinstance(details.get(source_key), (int, float))
+        }
+
+    @staticmethod
+    def _build_metrics(details: dict[str, Any]) -> dict[str, float]:
+        """Return compact decision metrics from an outcome."""
+        metric_sources = {
+            "g": ("to_charge_kwh", "gap_kwh"),
+            "x": ("surplus_kwh", "selected_surplus_kwh"),
+            "q": ("required_kwh",),
+            "p": ("evening_price", "morning_price"),
+            "b": ("arbitrage_buy_price", "buy_reference_price"),
+            "m": ("arbitrage_margin",),
+        }
+        metrics: dict[str, float] = {}
+        for compact_key, source_keys in metric_sources.items():
+            for source_key in source_keys:
+                value = details.get(source_key)
+                if isinstance(value, (int, float)):
+                    metrics[compact_key] = float(value)
+                    break
+        return metrics
+
+    @staticmethod
+    def _reason_code(reason: str | None, details: dict[str, Any]) -> str:
+        """Return the compact reason code for an outcome."""
+        if isinstance(details.get("sell_horizon_mode"), str):
+            return _HORIZON_REASON_CODES.get(
+                str(details["sell_horizon_mode"]),
+                "other",
+            )
+        if reason is None:
+            return "completed"
+        if "balancing" in reason.lower():
+            return "balancing"
+        if "surplus" in reason.lower():
+            return "no_surplus"
+        if "sufficiency" in reason.lower():
+            return "no_sufficiency"
+        return "other"
+
+    @classmethod
+    def _trim_history(cls, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Retain recent entries while keeping the attribute payload bounded."""
+        cutoff = dt_util.now() - _HISTORY_RETENTION
+        retained = [
+            entry
+            for entry in history
+            if cls._entry_timestamp(entry) is None
+            or cls._entry_timestamp(entry) >= cutoff
+        ]
+        while retained and cls._history_size(retained) > _HISTORY_MAX_BYTES:
+            retained.pop()
+        return retained
+
+    @staticmethod
+    def _entry_timestamp(entry: dict[str, Any]) -> datetime | None:
+        """Return a compact or legacy entry timestamp."""
+        timestamp = entry.get("t", entry.get("timestamp"))
+        if not isinstance(timestamp, str):
+            return None
+        return dt_util.parse_datetime(timestamp)
+
+    @staticmethod
+    def _history_size(history: list[dict[str, Any]]) -> int:
+        """Return the serialized byte size of the history attribute."""
+        return len(
+            json.dumps(
+                {"history": history},
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode()
+        )
