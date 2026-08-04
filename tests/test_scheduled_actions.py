@@ -17,6 +17,7 @@ from custom_components.energy_optimizer.const import (
     CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
+    CONF_PROG4_TIME_START_ENTITY,
     CONF_SELL_PRICE_SENSOR,
     DOMAIN,
 )
@@ -166,6 +167,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
         "sensor.evening_peak": _state("18:00"),
         "sensor.evening_peak_2": _state("20:00"),
         "sensor.daytime_min": _state("2026-03-11T12:30:00+01:00"),
+        "time.program4_start": _state("09:30"),
     }
 
     hass = MagicMock()
@@ -181,6 +183,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
             CONF_EVENING_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak",
             CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak_2",
             CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR: "sensor.daytime_min",
+            CONF_PROG4_TIME_START_ENTITY: "time.program4_start",
         }
     )
 
@@ -191,9 +194,9 @@ def test_scheduler_publishes_structured_daily_snapshot(
         assert sink.snapshot is not None
         assert sink.snapshot["date"] == "2026-03-11"
         assert sink.snapshot["timezone"] == "Europe/Warsaw"
-        assert sink.snapshot["summary"]["count"] == 11
+        assert sink.snapshot["summary"]["count"] == 12
         assert sink.snapshot["summary"]["fixed_count"] == 1
-        assert sink.snapshot["summary"]["dynamic_count"] == 8
+        assert sink.snapshot["summary"]["dynamic_count"] == 9
         assert sink.snapshot["summary"]["event_driven_count"] == 2
         assert sink.snapshot["next_action"] == {
             "key": "morning_charge",
@@ -212,6 +215,12 @@ def test_scheduler_publishes_structured_daily_snapshot(
             action["key"] == "afternoon_charge"
             and action["time_local"] == "13:00"
             and action["source"] == "day_buy_window_sensor"
+            for action in actions
+        )
+        assert any(
+            action["key"] == "program4_solar_reset"
+            and action["time_local"] == "09:30"
+            and action["source"] == "prog4_time_start_entity"
             for action in actions
         )
         assert any(action["key"] == "daytime_min_price_restore" and action["time_local"] == "12:30" for action in actions)

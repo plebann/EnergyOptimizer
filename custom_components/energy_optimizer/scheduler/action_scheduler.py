@@ -18,6 +18,7 @@ from ..const import (
     CONF_BEV_CHARGING_BINARY_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     CONF_PRICE_SENSOR,
+    CONF_PROG4_TIME_START_ENTITY,
     CONF_SELL_PRICE_SENSOR,
     DOMAIN,
     SUN_ABOVE_HORIZON,
@@ -28,6 +29,7 @@ from ..decision_engine.morning_sell import async_run_morning_sell
 from ..decision_engine.evening_behavior import async_run_evening_behavior
 from ..decision_engine.afternoon_charge import async_run_afternoon_charge
 from ..decision_engine.morning_charge import async_run_morning_charge
+from ..decision_engine.program4_solar_reset import async_run_program4_solar_reset
 from ..decision_engine.daytime_min_price_restore import async_run_daytime_min_price_restore
 from ..decision_engine.solar_charge_block import async_run_solar_charge_block
 from ..decision_engine.export_block_control import (
@@ -46,6 +48,7 @@ from ..helpers import (
     resolve_evening_second_max_price_hour,
     resolve_morning_max_price_hour,
     resolve_night_buy_window_start_hour,
+    resolve_prog4_start_time,
     resolve_tariff_start_hour,
 )
 
@@ -66,6 +69,7 @@ class ActionScheduler:
         self._listeners: list[Callable[[], None]] = []
         self._morning_charge_listener: Callable[[], None] | None = None
         self._afternoon_listener: Callable[[], None] | None = None
+        self._program4_solar_reset_listener: Callable[[], None] | None = None
         self._morning_sell_listener: Callable[[], None] | None = None
         self._evening_sell_listener: Callable[[], None] | None = None
         self._evening_sell_second_listener: Callable[[], None] | None = None
@@ -80,6 +84,7 @@ class ActionScheduler:
         """Start scheduling fixed actions."""
         self._schedule_morning_charge()
         self._schedule_afternoon_charge()
+        self._schedule_program4_solar_reset()
         self._listeners.append(
             async_track_time_change(
                 self.hass, self._handle_evening_behavior, hour=22, minute=0, second=1
@@ -190,6 +195,16 @@ class ActionScheduler:
                 )
             )
 
+        program4_start_entity = self.entry.data.get(CONF_PROG4_TIME_START_ENTITY)
+        if program4_start_entity:
+            self._listeners.append(
+                async_track_state_change_event(
+                    self.hass,
+                    [str(program4_start_entity)],
+                    self._handle_program4_start_time_change,
+                )
+            )
+
         daytime_min_price_hour_entity = get_internal_sensor_entity_id(
             self.hass,
             entry_id=self.entry.entry_id,
@@ -218,6 +233,9 @@ class ActionScheduler:
         if self._afternoon_listener is not None:
             self._afternoon_listener()
             self._afternoon_listener = None
+        if self._program4_solar_reset_listener is not None:
+            self._program4_solar_reset_listener()
+            self._program4_solar_reset_listener = None
         if self._morning_sell_listener is not None:
             self._morning_sell_listener()
             self._morning_sell_listener = None
@@ -267,6 +285,15 @@ class ActionScheduler:
         """Run afternoon charge routine at tariff end hour."""
         _LOGGER.info("Scheduler triggering afternoon charge")
         await async_run_afternoon_charge(
+            self.hass,
+            entry_id=self.entry.entry_id,
+        )
+        self._publish_schedule_snapshot()
+
+    async def _handle_program4_solar_reset(self, now: datetime) -> None:
+        """Run Program 4 solar-surplus reset at its configured start time."""
+        _LOGGER.info("Scheduler triggering Program 4 solar reset")
+        await async_run_program4_solar_reset(
             self.hass,
             entry_id=self.entry.entry_id,
         )
@@ -323,6 +350,7 @@ class ActionScheduler:
     async def _handle_tariff_start_change(self, event) -> None:
         """Reschedule afternoon charge when tariff start hour changes."""
         self._schedule_afternoon_charge()
+        self._schedule_program4_solar_reset()
 
     async def _handle_night_buy_window_change(self, event) -> None:
         """Reschedule morning charge when the night buy window changes."""
@@ -331,6 +359,11 @@ class ActionScheduler:
     async def _handle_day_buy_window_change(self, event) -> None:
         """Reschedule afternoon charge when the day buy window changes."""
         self._schedule_afternoon_charge()
+        self._schedule_program4_solar_reset()
+
+    async def _handle_program4_start_time_change(self, event) -> None:
+        """Reschedule Program 4 solar reset when its start time changes."""
+        self._schedule_program4_solar_reset()
 
     async def _handle_evening_peak_hour_change(self, event) -> None:
         """Reschedule evening peak sell when peak hour changes."""
@@ -439,6 +472,42 @@ class ActionScheduler:
             self._handle_afternoon_charge,
             hour=hour,
             minute=0,
+            second=1,
+        )
+        self._publish_schedule_snapshot()
+
+    def _schedule_program4_solar_reset(self) -> None:
+        """Schedule Program 4 solar reset at its configured start time."""
+        if self._program4_solar_reset_listener is not None:
+            self._program4_solar_reset_listener()
+            self._program4_solar_reset_listener = None
+
+        start_time = resolve_prog4_start_time(self.hass, self.entry.data)
+        if start_time is None:
+            self._publish_schedule_snapshot()
+            return
+
+        tariff_start_hour = resolve_tariff_start_hour(self.hass, self.entry.data)
+        afternoon_charge_hour = resolve_day_buy_window_start_hour(
+            self.hass,
+            self.entry.data,
+            entry_id=self.entry.entry_id,
+            default_hour=(tariff_start_hour - 2) % 24,
+        )
+        if start_time.hour >= afternoon_charge_hour:
+            _LOGGER.debug(
+                "Program 4 solar reset disabled: start hour %02d is not before afternoon charge hour %02d",
+                start_time.hour,
+                afternoon_charge_hour,
+            )
+            self._publish_schedule_snapshot()
+            return
+
+        self._program4_solar_reset_listener = async_track_time_change(
+            self.hass,
+            self._handle_program4_solar_reset,
+            hour=start_time.hour,
+            minute=start_time.minute,
             second=1,
         )
         self._publish_schedule_snapshot()
@@ -704,6 +773,26 @@ class ActionScheduler:
                 order=100,
             )
         )
+
+        program4_start_time = resolve_prog4_start_time(self.hass, self.entry.data)
+        if (
+            program4_start_time is not None
+            and program4_start_time.hour < afternoon_charge_hour
+        ):
+            actions.append(
+                self._build_action_entry(
+                    key="program4_solar_reset",
+                    label="Program 4 solar reset",
+                    scheduled_for=self._resolve_local_datetime(
+                        hour=program4_start_time.hour,
+                        minute=program4_start_time.minute,
+                        now=now,
+                    ),
+                    kind="dynamic",
+                    source="prog4_time_start_entity",
+                    order=90,
+                )
+            )
 
         morning_sell_hour = resolve_morning_max_price_hour(
             self.hass,

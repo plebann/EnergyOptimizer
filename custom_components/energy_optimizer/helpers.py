@@ -500,6 +500,23 @@ def _resolve_time_from_state_or_attribute(
     return _parse_time_from_state_value(state.state)
 
 
+def resolve_prog4_start_time(
+    hass: HomeAssistant,
+    config: dict[str, object],
+) -> time | None:
+    """Resolve the configured Program 4 start time without a fallback."""
+    from .const import CONF_PROG4_TIME_START_ENTITY
+
+    entity_id = config.get(CONF_PROG4_TIME_START_ENTITY)
+    resolved_time = _resolve_time_from_state_or_attribute(
+        hass,
+        str(entity_id) if entity_id else None,
+    )
+    if resolved_time is None:
+        _LOGGER.warning("Program 4 start time is unavailable or invalid")
+    return resolved_time
+
+
 def resolve_tariff_end_hour(
     hass: HomeAssistant,
     config: dict[str, object],
