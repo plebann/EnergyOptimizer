@@ -382,6 +382,7 @@ class EveningSellStrategy(BaseSellStrategy):
 
         return SellRequest(
             surplus_kwh=allocated_surplus_kwh,
+            required_kwh=evaluation.required_kwh,
             build_outcome_fn=evaluation.build_outcome_fn,
             build_no_action_fn=evaluation.build_no_action_fn,
             skip_restore=False,
@@ -550,6 +551,7 @@ class EveningSellStrategy(BaseSellStrategy):
 
         return SellRequest(
             surplus_kwh=surplus_kwh,
+            required_kwh=required_kwh,
             build_outcome_fn=_make_outcome,
             build_no_action_fn=_make_no_action,
             skip_restore=skip_restore,
@@ -859,6 +861,7 @@ class EveningSellStrategy(BaseSellStrategy):
 
         return SellRequest(
             surplus_kwh=surplus_kwh,
+            required_kwh=required_kwh,
             build_outcome_fn=_make_outcome,
             build_no_action_fn=_make_no_action,
         )

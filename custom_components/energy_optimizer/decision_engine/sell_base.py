@@ -47,6 +47,7 @@ class SellRequest:
     """Deferred sell execution request produced by strategy evaluation."""
 
     surplus_kwh: float
+    required_kwh: float
     build_outcome_fn: Callable[[float, float, float], DecisionOutcome]
     build_no_action_fn: Callable[[float], DecisionOutcome]
     skip_restore: bool = False
@@ -311,18 +312,34 @@ class BaseSellStrategy(ABC):
                 )
 
         target_soc_floor = self._get_target_soc_floor(surplus_kwh=surplus_kwh)
-        target_soc = max(
-            self.current_soc
-            - kwh_to_soc(
-                surplus_kwh,
+        raw_target_soc = self.current_soc - kwh_to_soc(
+            surplus_kwh,
+            self.battery_config.capacity_ah,
+            self.battery_config.voltage,
+        )
+        required_reserve_soc = 0.0
+        required_reserve_applied = raw_target_soc <= target_soc_floor
+        if required_reserve_applied:
+            required_reserve_kwh = request.required_kwh / (
+                self.battery_config.efficiency / 100.0
+            )
+            required_reserve_soc = kwh_to_soc(
+                required_reserve_kwh,
                 self.battery_config.capacity_ah,
                 self.battery_config.voltage,
             )
-            - 5,
-            target_soc_floor,
-        )
+            target_soc = target_soc_floor + required_reserve_soc
+        else:
+            target_soc = raw_target_soc
+
+        target_diagnostics = {
+            "rt": round(raw_target_soc, 1),
+            "rg": round(required_reserve_soc, 1),
+            "ra": required_reserve_applied,
+        }
         if target_soc >= self.current_soc:
             outcome = request.build_no_action_fn(surplus_kwh)
+            outcome.details.update(target_diagnostics)
             await self._log_outcome(outcome)
             return
 
@@ -391,6 +408,7 @@ class BaseSellStrategy(ABC):
             )
 
         outcome = request.build_outcome_fn(target_soc, surplus_kwh, export_power_w)
+        outcome.details.update(target_diagnostics)
         outcome.details["test_sell_mode"] = sell_test_mode
 
         if not sell_test_mode:

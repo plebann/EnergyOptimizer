@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import ANY, AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -616,7 +616,7 @@ async def test_morning_sell_uses_min_soc_pv_for_reserve(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_morning_sell_clamps_target_soc_to_min_soc_when_sufficiency_not_reached(
+async def test_morning_sell_skips_when_required_reserve_exceeds_current_soc(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _base_config()
@@ -700,18 +700,13 @@ async def test_morning_sell_clamps_target_soc_to_min_soc_when_sufficiency_not_re
     await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
 
     assert outcomes
-    set_program_soc.assert_any_await(
-        hass,
-        "number.prog3_soc",
-        20.0,
-        entry=hass.config_entries.async_get_entry.return_value,
-        logger=ANY,
-        context=ANY,
-    )
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].details["ra"] is True
+    set_program_soc.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_morning_sell_clamps_target_soc_to_min_soc_pv_when_sufficiency_reached(
+async def test_morning_sell_skips_when_pv_floor_required_reserve_exceeds_current_soc(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _base_config()
@@ -795,11 +790,6 @@ async def test_morning_sell_clamps_target_soc_to_min_soc_pv_when_sufficiency_rea
     await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
 
     assert outcomes
-    set_program_soc.assert_any_await(
-        hass,
-        "number.prog3_soc",
-        12.0,
-        entry=hass.config_entries.async_get_entry.return_value,
-        logger=ANY,
-        context=ANY,
-    )
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].details["ra"] is True
+    set_program_soc.assert_not_awaited()

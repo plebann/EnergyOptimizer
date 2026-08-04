@@ -88,6 +88,11 @@ Boundary codes are `nb_e` (night buy end), `db_s` (day buy start), `db_e`
 `day_e` (end of the current day), `pv_s` (PV sufficiency), `arb_b` (arbitrage buy hour), `tariff_e` (tariff end),
 `sw_e` (sell window end), and `sunset` (sunset).
 
+Last Optimization includes sell-target diagnostics when a sell decision is made:
+`rt` is the target SOC before the minimum-SOC safeguard, `rg` is the additional
+SOC reserved for required energy after discharge-efficiency compensation, and
+`ra` indicates whether that reserve was applied.
+
 ## Prerequisites
 
 ### Recommended Integrations

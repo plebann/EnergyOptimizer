@@ -73,6 +73,62 @@ class _FakeStore:
 
 
 @pytest.mark.asyncio
+async def test_execute_sell_reserves_required_energy_at_min_soc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Required energy raises a target that would otherwise reach minimum SOC."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    strategy = _TestSellStrategy(hass, entry_id="entry-1", margin=1.0)
+    strategy.entry = entry
+    strategy.config = {}
+    strategy.battery_config = SimpleNamespace(
+        min_soc=20.0,
+        capacity_ah=37.0,
+        voltage=600.0,
+        efficiency=90.0,
+    )
+    strategy.current_soc = 40.0
+    strategy.integration_context = SimpleNamespace()
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
+        lambda _hass, _entry: True,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.calculate_export_power",
+        lambda _surplus: 1200.0,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.kwh_to_soc",
+        lambda kwh, _capacity, _voltage: 25.0 if kwh == 5.0 else 3.0,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
+        AsyncMock(),
+    )
+
+    outcome = SimpleNamespace(details={}, entities_changed=[])
+    captured: dict[str, float] = {}
+
+    await strategy._execute_sell(
+        SellRequest(
+            surplus_kwh=5.0,
+            required_kwh=2.7,
+            build_outcome_fn=lambda target, _surplus, _export: (
+                captured.update(target=target) or outcome
+            ),
+            build_no_action_fn=lambda _surplus: outcome,
+        )
+    )
+
+    assert captured["target"] == pytest.approx(23.0)
+    assert outcome.details == {"rt": 15.0, "rg": 3.0, "ra": True, "test_sell_mode": True}
+
+
+@pytest.mark.asyncio
 async def test_execute_sell_saves_restore_data(monkeypatch: pytest.MonkeyPatch) -> None:
     """Save restore payload after successful sell writes."""
     hass = MagicMock()
@@ -135,6 +191,7 @@ async def test_execute_sell_saves_restore_data(monkeypatch: pytest.MonkeyPatch) 
     await strategy._execute_sell(
         SellRequest(
             surplus_kwh=3.0,
+            required_kwh=0.0,
             build_outcome_fn=lambda _target, _surplus, _export: outcome,
             build_no_action_fn=lambda _surplus: outcome,
         )
@@ -224,6 +281,7 @@ async def test_execute_sell_preserves_existing_restore_baseline_in_memory(
     await strategy._execute_sell(
         SellRequest(
             surplus_kwh=3.0,
+            required_kwh=0.0,
             build_outcome_fn=lambda _target, _surplus, _export: outcome,
             build_no_action_fn=lambda _surplus: outcome,
         )
@@ -307,6 +365,7 @@ async def test_execute_sell_preserves_existing_restore_baseline_from_store(
     await strategy._execute_sell(
         SellRequest(
             surplus_kwh=3.0,
+            required_kwh=0.0,
             build_outcome_fn=lambda _target, _surplus, _export: outcome,
             build_no_action_fn=lambda _surplus: outcome,
         )

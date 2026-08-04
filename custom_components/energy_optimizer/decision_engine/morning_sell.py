@@ -647,6 +647,7 @@ class MorningSellStrategy(BaseSellStrategy):
 
         return SellRequest(
             surplus_kwh=selected_surplus_kwh,
+            required_kwh=required_kwh,
             build_outcome_fn=_make_outcome,
             build_no_action_fn=_make_no_action,
         )

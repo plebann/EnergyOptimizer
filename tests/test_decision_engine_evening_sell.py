@@ -193,6 +193,7 @@ class _CountingStoreStub:
 def _sell_request(surplus_kwh: float) -> SellRequest:
     return SellRequest(
         surplus_kwh=surplus_kwh,
+        required_kwh=0.0,
         build_outcome_fn=lambda target, surplus, export: DecisionOutcome(
             scenario="Evening Peak Sell",
             action_type="sell",
