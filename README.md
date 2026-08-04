@@ -85,7 +85,7 @@ Each history record uses these compact keys:
 The current purpose codes are `cr` (charge reserve) and `sr` (sell reserve).
 Boundary codes are `nb_e` (night buy end), `db_s` (day buy start), `db_e`
 (day buy end), `nb_t_s` (tomorrow night buy start), `next_h` (next full hour),
-`pv_s` (PV sufficiency), `arb_b` (arbitrage buy hour), `tariff_e` (tariff end),
+`day_e` (end of the current day), `pv_s` (PV sufficiency), `arb_b` (arbitrage buy hour), `tariff_e` (tariff end),
 `sw_e` (sell window end), and `sunset` (sunset).
 
 ## Prerequisites

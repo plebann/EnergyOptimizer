@@ -111,7 +111,8 @@ class BaseChargeStrategy(ABC):
             start_kind,
             self.forecasts.end_hour % 24,
             end_kind,
-            self.forecasts.end_hour <= self.forecasts.start_hour,
+            self.forecasts.end_hour >= 24
+            or self.forecasts.end_hour <= self.forecasts.start_hour,
         ]]
 
     async def run(self) -> None:

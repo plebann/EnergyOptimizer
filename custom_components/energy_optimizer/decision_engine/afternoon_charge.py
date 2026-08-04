@@ -60,21 +60,24 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
     def _resolve_forecast_params(self) -> tuple[int, int, dict[str, object]]:
         """Resolve afternoon forecast time window and kwargs."""
         tariff_start_hour = resolve_tariff_start_hour(self.hass, self.config)
-        return (
-            resolve_day_buy_window_end_hour(
-                self.hass,
-                self.config,
-                entry_id=self.entry.entry_id,
-                default_hour=tariff_start_hour,
-            ),
-            resolve_night_buy_window_tomorrow_start_hour(
-                self.hass,
-                self.config,
-                entry_id=self.entry.entry_id,
-                default_hour=22,
-            ),
-            {"apply_efficiency": False},
+        start_hour = resolve_day_buy_window_end_hour(
+            self.hass,
+            self.config,
+            entry_id=self.entry.entry_id,
+            default_hour=tariff_start_hour,
         )
+        tomorrow_night_start = resolve_night_buy_window_tomorrow_start_hour(
+            self.hass,
+            self.config,
+            entry_id=self.entry.entry_id,
+            default_hour=None,
+        )
+        if tomorrow_night_start is None:
+            self._forecast_end_kind = "day_e"
+            return start_hour, 24, {"apply_efficiency": False}
+
+        self._forecast_end_kind = "nb_t_s"
+        return start_hour, tomorrow_night_start, {"apply_efficiency": False}
 
     def _resolve_charge_time_hours(self) -> float:
         """Use the resolved day buy window duration for charge-current sizing."""
@@ -87,7 +90,7 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
 
     def _history_window_kinds(self) -> tuple[str, str]:
         """Return source codes for the afternoon charge forecast horizon."""
-        return "db_e", "nb_t_s"
+        return "db_e", self._forecast_end_kind
 
     def _post_forecast_setup(self) -> None:
         """Prepare afternoon required energy, arbitrage and assist sensor."""

@@ -821,8 +821,8 @@ def resolve_night_buy_window_tomorrow_start_hour(
     config: dict[str, object],
     *,
     entry_id: str,
-    default_hour: int = 4,
-) -> int:
+    default_hour: int | None = 4,
+) -> int | None:
     """Resolve the next day's internal night buy window start hour with fallback."""
     del config
     entity_id = get_internal_sensor_entity_id(
@@ -834,10 +834,13 @@ def resolve_night_buy_window_tomorrow_start_hour(
     if resolved_time is not None:
         return resolved_time.hour
 
-    _LOGGER.warning(
-        "Internal tomorrow night buy window unavailable or invalid, using default %s",
-        default_hour,
-    )
+    if default_hour is None:
+        _LOGGER.info("Internal tomorrow night buy window unavailable or invalid")
+    else:
+        _LOGGER.warning(
+            "Internal tomorrow night buy window unavailable or invalid, using default %s",
+            default_hour,
+        )
     return default_hour
 
 

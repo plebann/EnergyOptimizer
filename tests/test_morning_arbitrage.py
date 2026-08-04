@@ -164,6 +164,71 @@ def test_afternoon_charge_uses_day_buy_window_duration_for_current_sizing(
     assert strategy._resolve_charge_time_hours() == pytest.approx(3.0)
 
 
+def test_afternoon_charge_ends_at_midnight_without_tomorrow_night_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Afternoon forecast ends today when tomorrow night prices are unavailable."""
+    strategy = AfternoonChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
+    strategy.entry = MagicMock(entry_id="entry-1")
+    strategy.config = {}
+    captured: dict[str, int | None] = {}
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_tariff_start_hour",
+        lambda *args, **kwargs: 14,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_day_buy_window_end_hour",
+        lambda *args, **kwargs: 14,
+    )
+
+    def _resolve_tomorrow_night(
+        *_args,
+        default_hour: int | None,
+        **_kwargs,
+    ) -> int | None:
+        captured["default_hour"] = default_hour
+        return default_hour
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_night_buy_window_tomorrow_start_hour",
+        _resolve_tomorrow_night,
+    )
+
+    start_hour, end_hour, _ = strategy._resolve_forecast_params()
+
+    assert captured["default_hour"] is None
+    assert (start_hour, end_hour) == (14, 24)
+    assert strategy._history_window_kinds() == ("db_e", "day_e")
+
+
+def test_afternoon_charge_uses_available_tomorrow_night_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Afternoon forecast continues to the resolved tomorrow night window."""
+    strategy = AfternoonChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
+    strategy.entry = MagicMock(entry_id="entry-1")
+    strategy.config = {}
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_tariff_start_hour",
+        lambda *args, **kwargs: 14,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_day_buy_window_end_hour",
+        lambda *args, **kwargs: 14,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_night_buy_window_tomorrow_start_hour",
+        lambda *args, **kwargs: 4,
+    )
+
+    start_hour, end_hour, _ = strategy._resolve_forecast_params()
+
+    assert (start_hour, end_hour) == (14, 4)
+    assert strategy._history_window_kinds() == ("db_e", "nb_t_s")
+
+
 def test_compute_arbitrage_from_cap_limited_by_arb_limit():
     """arbitrage_kwh is capped to arb_limit when cap_kwh > arb_limit."""
     bc = _bc(capacity_ah=100, voltage=50)  # 5 kWh
