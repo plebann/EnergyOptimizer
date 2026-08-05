@@ -373,7 +373,7 @@ async def async_run_export_block_control(
         return _decision(
             "positive_sell_price",
             action="normal_operation",
-            sell_price=round(price, 4),
+            sell_price=round(price, 2),
         )
 
     now = dt_util.now()
@@ -391,14 +391,14 @@ async def async_run_export_block_control(
         return _decision(
             "incomplete_energy_balance",
             action="normal_operation",
-            sell_price=round(price, 4),
+            sell_price=round(price, 2),
         )
 
     bev_charging, bev_kwh = bev_data
     surplus_kwh = max(0.0, pv_kwh - hourly_load_kwh - battery_capacity_kwh - bev_kwh)
     threshold_kwh = _get_offgrid_threshold(hass, entry.entry_id)
     details = {
-        "sell_price": round(price, 4),
+        "sell_price": round(price, 2),
         "pv_forecast_kwh": round(pv_kwh, 3),
         "load_forecast_kwh": round(hourly_load_kwh, 3),
         "battery_hourly_capacity_kwh": round(battery_capacity_kwh, 3),

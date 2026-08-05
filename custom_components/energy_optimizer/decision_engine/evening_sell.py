@@ -279,10 +279,10 @@ class EveningSellStrategy(BaseSellStrategy):
                 "arbitrage_reason": arbitrage.reason,
                 "arbitrage_hour": arbitrage_hour,
                 "arbitrage_datetime": arbitrage.start_local.isoformat(),
-                "arbitrage_buy_price": arbitrage.average_price,
-                "arbitrage_margin": arbitrage.arbitrage_margin,
-                "buy_window_reference_price": buy_window_reference_price,
-                "buy_window_price_limit": buy_window_price_limit,
+                "arbitrage_buy_price": round(arbitrage.average_price, 2),
+                "arbitrage_margin": round(arbitrage.arbitrage_margin, 2),
+                "buy_window_reference_price": round(buy_window_reference_price, 2),
+                "buy_window_price_limit": round(buy_window_price_limit, 2),
                 "selected_end_hour": arbitrage_hour,
                 "history_end_kind": "arb_b",
             }
@@ -296,8 +296,8 @@ class EveningSellStrategy(BaseSellStrategy):
             "sell_horizon_reason": "no_qualifying_buy_price",
             "arbitrage_reason": arbitrage.reason,
             "arbitrage_hour": None,
-            "buy_window_reference_price": buy_window_reference_price,
-            "buy_window_price_limit": buy_window_price_limit,
+            "buy_window_reference_price": round(buy_window_reference_price, 2),
+            "buy_window_price_limit": round(buy_window_price_limit, 2),
         }
         return await self._surplus_sell(require_sufficiency=True)
 

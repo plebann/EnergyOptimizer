@@ -231,8 +231,8 @@ def resolve_arbitrage_margin_gate(
     on/off gate; it does not scale the arbitrage energy volume.
     """
     details: dict[str, float | str] = {
-        "sell_price": round(sell_price, 4),
-        "min_arbitrage_price": round(float(min_arbitrage_price or 0.0), 4),
+        "sell_price": round(sell_price, 2),
+        "min_arbitrage_price": round(float(min_arbitrage_price or 0.0), 2),
     }
     buy_reference_price = get_internal_window_price(
         hass,
@@ -247,8 +247,8 @@ def resolve_arbitrage_margin_gate(
         return False, details
 
     arbitrage_margin = sell_price - buy_reference_price
-    details["buy_reference_price"] = round(buy_reference_price, 4)
-    details["arbitrage_margin"] = round(arbitrage_margin, 4)
+    details["buy_reference_price"] = round(buy_reference_price, 2)
+    details["arbitrage_margin"] = round(arbitrage_margin, 2)
     if arbitrage_margin <= float(min_arbitrage_price or 0.0):
         details["arbitrage_reason"] = "margin_below_threshold"
         return False, details
@@ -533,7 +533,7 @@ def build_charge_outcome_base(
         "heat_pump_kwh": round(forecasts.heat_pump_kwh, 2),
         "charge_current_a": round(action.charge_current, 1),
         "efficiency": round(efficiency, 1),
-        "margin": forecasts.margin,
+        "margin": round(forecasts.margin, 2),
         "usage_kwh": round(forecasts.usage_kwh, 2),
         "window_start_hour": forecasts.start_hour,
         "window_end_hour": forecasts.end_hour,

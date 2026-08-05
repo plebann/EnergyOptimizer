@@ -572,6 +572,25 @@ def test_resolve_arbitrage_margin_gate_for_day_window(_mock_internal):
 
 
 @patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
+def test_resolve_arbitrage_margin_gate_rounds_price_details(_mock_internal):
+    """Shared helper should round price diagnostics to two decimal places."""
+    hass = _arb_hass(day_buy_price=0.465)
+    margin_ok, details = resolve_arbitrage_margin_gate(
+        hass,
+        entry_id="entry-1",
+        sell_price=1.2,
+        min_arbitrage_price=0.1,
+        buy_reference_unique_id_suffix="day_buy_window",
+        buy_reference_entity_name="Day buy window",
+    )
+
+    assert margin_ok is True
+    assert details["sell_price"] == 1.2
+    assert details["buy_reference_price"] == 0.47
+    assert details["arbitrage_margin"] == 0.73
+
+
+@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
 def test_afternoon_arbitrage_fails_closed_without_buy_reference(_mock_internal):
     """Afternoon arbitrage should fail closed when the day buy window is unavailable."""
     hass = _arb_hass(day_buy_price=None)

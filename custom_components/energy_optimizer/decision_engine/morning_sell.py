@@ -266,8 +266,11 @@ class MorningSellStrategy(BaseSellStrategy):
                 buy_window_price_limit = (
                     buy_window_reference_price * ARBITRAGE_BUY_WINDOW_PRICE_MULTIPLIER
                 )
-                horizon_details["buy_window_reference_price"] = buy_window_reference_price
-                horizon_details["buy_window_price_limit"] = buy_window_price_limit
+                horizon_details["buy_window_reference_price"] = round(
+                    buy_window_reference_price,
+                    2,
+                )
+                horizon_details["buy_window_price_limit"] = round(buy_window_price_limit, 2)
                 local_now = dt_util.as_local(dt_util.utcnow())
                 search_start = datetime.combine(
                     local_now.date(),
@@ -293,8 +296,14 @@ class MorningSellStrategy(BaseSellStrategy):
                     arbitrage_hour = arbitrage.start_local.hour
                     margin_achievable = True
                     horizon_details["arbitrage_hour"] = arbitrage_hour
-                    horizon_details["arbitrage_buy_price"] = arbitrage.average_price
-                    horizon_details["arbitrage_margin"] = arbitrage.arbitrage_margin
+                    horizon_details["arbitrage_buy_price"] = round(
+                        arbitrage.average_price,
+                        2,
+                    )
+                    horizon_details["arbitrage_margin"] = round(
+                        arbitrage.arbitrage_margin,
+                        2,
+                    )
         elif has_dynamic_buy_prices:
             horizon_details["arbitrage_reason"] = "missing_buy_price_payload"
         else:
