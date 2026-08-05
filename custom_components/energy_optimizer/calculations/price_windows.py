@@ -128,8 +128,9 @@ def find_first_arbitrage_buy_hour(
     end_local: datetime,
     sell_price: float,
     min_arbitrage_margin: float,
+    max_buy_price: float | None = None,
 ) -> ArbitrageBuyHourResult:
-    """Find the first complete buy-price hour meeting a strict margin threshold.
+    """Find the first complete buy-price hour meeting arbitrage constraints.
 
     Source integrations may publish either one hourly point or four
     quarter-hour points. Quarter-hour samples are averaged only when all four
@@ -168,6 +169,7 @@ def find_first_arbitrage_buy_hour(
     if hour_start < start_local:
         hour_start += HOUR_DURATION
     threshold = sell_price - min_arbitrage_margin
+    rejected_by_max_buy_price = False
     while hour_start < end_local:
         samples = prices_by_hour.get(hour_start)
         if not samples:
@@ -189,6 +191,10 @@ def find_first_arbitrage_buy_hour(
 
         arbitrage_margin = sell_price - average_price
         if average_price < threshold:
+            if max_buy_price is not None and average_price > max_buy_price:
+                rejected_by_max_buy_price = True
+                hour_start += HOUR_DURATION
+                continue
             return ArbitrageBuyHourResult(
                 hour_start,
                 average_price,
@@ -197,6 +203,13 @@ def find_first_arbitrage_buy_hour(
             )
         hour_start += HOUR_DURATION
 
+    if rejected_by_max_buy_price:
+        return ArbitrageBuyHourResult(
+            None,
+            None,
+            None,
+            "buy_price_above_reference_limit",
+        )
     return ArbitrageBuyHourResult(None, None, None, "margin_not_reached")
 
 

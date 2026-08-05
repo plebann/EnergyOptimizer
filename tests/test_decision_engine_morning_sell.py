@@ -287,11 +287,13 @@ async def test_morning_sell_uses_first_qualifying_buy_hour_as_demand_end(
     local_now = datetime(2026, 2, 24, 7, tzinfo=timezone.utc)
     monkeypatch.setattr(f"{MORNING}.dt_util.as_local", lambda _dt: local_now)
     monkeypatch.setattr(f"{MORNING}.get_buy_price_payload", lambda *args, **kwargs: [{}])
-    bounds: dict[str, datetime] = {}
+    monkeypatch.setattr(f"{MORNING}.get_internal_window_price", lambda *args, **kwargs: 50.0)
+    bounds: dict[str, object] = {}
 
     def _find(_prices, _entity_id, **kwargs):
         bounds["start"] = kwargs["start_local"]
         bounds["end"] = kwargs["end_local"]
+        bounds["max_buy_price"] = kwargs["max_buy_price"]
         return ArbitrageBuyHourResult(
             datetime(2026, 2, 24, 10, tzinfo=timezone.utc),
             50.0,
@@ -314,9 +316,57 @@ async def test_morning_sell_uses_first_qualifying_buy_hour_as_demand_end(
 
     assert bounds["start"].hour == 8
     assert bounds["end"].hour == 13
+    assert bounds["max_buy_price"] == 60.0
     assert outcomes[-1].details["sell_horizon_mode"] == "arbitrage"
     assert outcomes[-1].details["selected_end_hour"] == 10
+    assert outcomes[-1].details["buy_window_reference_price"] == 50.0
+    assert outcomes[-1].details["buy_window_price_limit"] == 60.0
     assert outcomes[-1].history_windows == [["sr", 8, "next_h", 10, "arb_b", False]]
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_uses_pv_sufficiency_when_day_buy_reference_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
+    hass = _setup_hass(config, _base_states())
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    monkeypatch.setattr(f"{MORNING}.get_buy_price_payload", lambda *args, **kwargs: [{}])
+    monkeypatch.setattr(
+        f"{MORNING}.get_internal_window_price",
+        lambda *args, **kwargs: (
+            None if kwargs["unique_id_suffix"] == "day_buy_window" else 250.0
+        ),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.find_first_arbitrage_buy_hour",
+        lambda *args, **kwargs: pytest.fail("Arbitrage lookup must not run without reference"),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.get_heat_pump_forecast_window",
+        AsyncMock(return_value=(1.0, {})),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.get_pv_forecast_window",
+        lambda *args, **kwargs: (2.0, {}),
+    )
+    monkeypatch.setattr(f"{MORNING}.calculate_losses", lambda *args, **kwargs: (0.0, 0.0))
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_sufficiency_window",
+        lambda **kwargs: (3.0, 2.0, 1.0, 10, True),
+    )
+    monkeypatch.setattr(f"{MORNING}.calculate_battery_reserve", lambda *args, **kwargs: 10.0)
+    monkeypatch.setattr(f"{MORNING}.calculate_surplus_energy", lambda *args, **kwargs: 5.0)
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes[-1].details["sell_horizon_mode"] == "pv_sufficiency"
+    assert outcomes[-1].details["arbitrage_reason"] == "missing_buy_window_reference"
+    assert outcomes[-1].details["buy_window_reference_price"] is None
+    assert outcomes[-1].details["buy_window_price_limit"] is None
 
 
 @pytest.mark.asyncio

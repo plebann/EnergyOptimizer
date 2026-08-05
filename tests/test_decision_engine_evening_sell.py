@@ -270,11 +270,12 @@ async def test_evening_sell_uses_next_day_qualifying_buy_hour(
         f"{EVENING}.resolve_night_buy_window_tomorrow_start_hour",
         lambda *args, **kwargs: 4,
     )
-    bounds: dict[str, datetime] = {}
+    bounds: dict[str, object] = {}
 
     def _find(_prices, _entity_id, **kwargs):
         bounds["start"] = kwargs["start_local"]
         bounds["end"] = kwargs["end_local"]
+        bounds["max_buy_price"] = kwargs["max_buy_price"]
         return ArbitrageBuyHourResult(
             datetime(2026, 2, 25, 1, tzinfo=timezone.utc),
             200.0,
@@ -300,9 +301,12 @@ async def test_evening_sell_uses_next_day_qualifying_buy_hour(
     assert bounds["start"].hour == 18
     assert bounds["end"].date() == datetime(2026, 2, 25).date()
     assert bounds["end"].hour == 4
+    assert bounds["max_buy_price"] == 240.0
     assert forecast_windows == [(18, 1)]
     assert outcomes[-1].details["sell_horizon_mode"] == "arbitrage"
     assert outcomes[-1].details["arbitrage_hour"] == 1
+    assert outcomes[-1].details["buy_window_reference_price"] == 200.0
+    assert outcomes[-1].details["buy_window_price_limit"] == 240.0
     assert outcomes[-1].history_windows == [["sr", 18, "next_h", 1, "arb_b", True]]
 
 
@@ -313,6 +317,7 @@ async def test_evening_sell_without_qualifying_buy_price_requires_pv_sufficiency
     config = _base_config()
     config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
     states = _base_states()
+    states.pop("sensor.night_buy_window_tomorrow_internal")
     hass = _setup_hass(config, states)
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
@@ -320,12 +325,14 @@ async def test_evening_sell_without_qualifying_buy_price_requires_pv_sufficiency
     local_now = datetime(2026, 2, 24, 17, tzinfo=timezone.utc)
     monkeypatch.setattr(f"{EVENING}.dt_util.as_local", lambda _dt: local_now)
     monkeypatch.setattr(f"{EVENING}.get_buy_price_payload", lambda *args, **kwargs: [{}])
-    monkeypatch.setattr(
-        f"{EVENING}.find_first_arbitrage_buy_hour",
-        lambda *args, **kwargs: ArbitrageBuyHourResult(
-            None, None, None, "margin_not_reached"
-        ),
-    )
+    captured_max_buy_price: float | None = 0.0
+
+    def _find(*args, **kwargs):
+        nonlocal captured_max_buy_price
+        captured_max_buy_price = kwargs["max_buy_price"]
+        return ArbitrageBuyHourResult(None, None, None, "margin_not_reached")
+
+    monkeypatch.setattr(f"{EVENING}.find_first_arbitrage_buy_hour", _find)
     monkeypatch.setattr(f"{EVENING}.get_heat_pump_forecast_window", AsyncMock(return_value=(1.0, {})))
     monkeypatch.setattr(f"{EVENING}.get_pv_forecast_window", lambda *args, **kwargs: (2.0, {}))
     monkeypatch.setattr(f"{EVENING}.calculate_losses", lambda *args, **kwargs: (0.0, 0.0))
@@ -340,6 +347,9 @@ async def test_evening_sell_without_qualifying_buy_price_requires_pv_sufficiency
     assert outcomes[-1].action_type == "no_action"
     assert outcomes[-1].details["sell_horizon_mode"] == "normal"
     assert outcomes[-1].details["arbitrage_reason"] == "margin_not_reached"
+    assert captured_max_buy_price is None
+    assert outcomes[-1].details["buy_window_reference_price"] is None
+    assert outcomes[-1].details["buy_window_price_limit"] is None
 
 
 @pytest.mark.asyncio

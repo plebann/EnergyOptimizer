@@ -16,6 +16,7 @@ from ..calculations.energy import (
 from ..calculations.utils import build_hourly_usage_array
 from ..calculations.price_windows import find_first_arbitrage_buy_hour
 from ..const import (
+    ARBITRAGE_BUY_WINDOW_PRICE_MULTIPLIER,
     CONF_BUY_PRICE_SENSOR,
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
@@ -239,6 +240,17 @@ class EveningSellStrategy(BaseSellStrategy):
             entry_id=self.entry.entry_id,
             default_hour=4,
         )
+        buy_window_reference_price = get_internal_window_price(
+            self.hass,
+            entry_id=self.entry.entry_id,
+            unique_id_suffix="night_buy_window_tomorrow",
+            entity_name="Tomorrow night buy window sensor",
+        )
+        buy_window_price_limit = (
+            buy_window_reference_price * ARBITRAGE_BUY_WINDOW_PRICE_MULTIPLIER
+            if buy_window_reference_price is not None
+            else None
+        )
         local_now = dt_util.as_local(dt_util.utcnow())
         search_start = datetime.combine(
             local_now.date(),
@@ -257,6 +269,7 @@ class EveningSellStrategy(BaseSellStrategy):
             end_local=search_end,
             sell_price=self.price,
             min_arbitrage_margin=self.threshold_price,
+            max_buy_price=buy_window_price_limit,
         )
         if arbitrage.start_local is not None:
             arbitrage_hour = arbitrage.start_local.hour
@@ -268,6 +281,8 @@ class EveningSellStrategy(BaseSellStrategy):
                 "arbitrage_datetime": arbitrage.start_local.isoformat(),
                 "arbitrage_buy_price": arbitrage.average_price,
                 "arbitrage_margin": arbitrage.arbitrage_margin,
+                "buy_window_reference_price": buy_window_reference_price,
+                "buy_window_price_limit": buy_window_price_limit,
                 "selected_end_hour": arbitrage_hour,
                 "history_end_kind": "arb_b",
             }
@@ -281,6 +296,8 @@ class EveningSellStrategy(BaseSellStrategy):
             "sell_horizon_reason": "no_qualifying_buy_price",
             "arbitrage_reason": arbitrage.reason,
             "arbitrage_hour": None,
+            "buy_window_reference_price": buy_window_reference_price,
+            "buy_window_price_limit": buy_window_price_limit,
         }
         return await self._surplus_sell(require_sufficiency=True)
 

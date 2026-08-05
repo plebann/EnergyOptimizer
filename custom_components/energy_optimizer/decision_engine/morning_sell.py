@@ -16,6 +16,7 @@ from ..calculations.energy import (
 from ..calculations.utils import build_hourly_usage_array
 from ..calculations.price_windows import find_first_arbitrage_buy_hour
 from ..const import (
+    ARBITRAGE_BUY_WINDOW_PRICE_MULTIPLIER,
     CONF_BUY_PRICE_SENSOR,
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_MORNING_MAX_PRICE_SENSOR,
@@ -139,6 +140,8 @@ class MorningSellStrategy(BaseSellStrategy):
             "sell_horizon_reason": "pv_sufficiency_or_day_buy_window",
             "selected_end_hour": base_end_hour,
             "arbitrage_hour": None,
+            "buy_window_reference_price": None,
+            "buy_window_price_limit": None,
         }
 
         hourly_usage = build_hourly_usage_array(
@@ -251,32 +254,47 @@ class MorningSellStrategy(BaseSellStrategy):
         arbitrage_hour: int | None = None
         margin_achievable = False
         if has_dynamic_buy_prices and prices:
-            local_now = dt_util.as_local(dt_util.utcnow())
-            search_start = datetime.combine(
-                local_now.date(),
-                time(sell_window_end_hour),
-                tzinfo=local_now.tzinfo,
+            buy_window_reference_price = get_internal_window_price(
+                self.hass,
+                entry_id=self.entry.entry_id,
+                unique_id_suffix="day_buy_window",
+                entity_name="Day buy window sensor",
             )
-            search_end = datetime.combine(
-                local_now.date(),
-                time(base_end_hour),
-                tzinfo=local_now.tzinfo,
-            )
-            arbitrage = find_first_arbitrage_buy_hour(
-                prices,
-                str(self.config[CONF_BUY_PRICE_SENSOR]),
-                start_local=search_start,
-                end_local=search_end,
-                sell_price=self.price,
-                min_arbitrage_margin=self.threshold_price,
-            )
-            horizon_details["arbitrage_reason"] = arbitrage.reason
-            if arbitrage.start_local is not None:
-                arbitrage_hour = arbitrage.start_local.hour
-                margin_achievable = True
-                horizon_details["arbitrage_hour"] = arbitrage_hour
-                horizon_details["arbitrage_buy_price"] = arbitrage.average_price
-                horizon_details["arbitrage_margin"] = arbitrage.arbitrage_margin
+            if buy_window_reference_price is None:
+                horizon_details["arbitrage_reason"] = "missing_buy_window_reference"
+            else:
+                buy_window_price_limit = (
+                    buy_window_reference_price * ARBITRAGE_BUY_WINDOW_PRICE_MULTIPLIER
+                )
+                horizon_details["buy_window_reference_price"] = buy_window_reference_price
+                horizon_details["buy_window_price_limit"] = buy_window_price_limit
+                local_now = dt_util.as_local(dt_util.utcnow())
+                search_start = datetime.combine(
+                    local_now.date(),
+                    time(sell_window_end_hour),
+                    tzinfo=local_now.tzinfo,
+                )
+                search_end = datetime.combine(
+                    local_now.date(),
+                    time(base_end_hour),
+                    tzinfo=local_now.tzinfo,
+                )
+                arbitrage = find_first_arbitrage_buy_hour(
+                    prices,
+                    str(self.config[CONF_BUY_PRICE_SENSOR]),
+                    start_local=search_start,
+                    end_local=search_end,
+                    sell_price=self.price,
+                    min_arbitrage_margin=self.threshold_price,
+                    max_buy_price=buy_window_price_limit,
+                )
+                horizon_details["arbitrage_reason"] = arbitrage.reason
+                if arbitrage.start_local is not None:
+                    arbitrage_hour = arbitrage.start_local.hour
+                    margin_achievable = True
+                    horizon_details["arbitrage_hour"] = arbitrage_hour
+                    horizon_details["arbitrage_buy_price"] = arbitrage.average_price
+                    horizon_details["arbitrage_margin"] = arbitrage.arbitrage_margin
         elif has_dynamic_buy_prices:
             horizon_details["arbitrage_reason"] = "missing_buy_price_payload"
         else:

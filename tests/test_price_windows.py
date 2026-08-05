@@ -106,6 +106,43 @@ def test_find_first_arbitrage_buy_hour_uses_first_hour_below_strict_margin() -> 
 
 
 @pytest.mark.unit
+def test_find_first_arbitrage_buy_hour_skips_hours_above_reference_limit() -> None:
+    result = find_first_arbitrage_buy_hour(
+        [
+            _hourly_entry(8, 0.60),
+            _hourly_entry(9, 0.55),
+            _hourly_entry(10, 0.40),
+        ],
+        ENTITY_ID,
+        start_local=datetime(2026, 5, 8, 8, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 11, 0, tzinfo=TZ),
+        sell_price=1.0,
+        min_arbitrage_margin=0.3,
+        max_buy_price=0.55,
+    )
+
+    assert result.reason == "enabled"
+    assert result.start_local == datetime(2026, 5, 8, 9, 0, tzinfo=TZ)
+    assert result.average_price == pytest.approx(0.55)
+
+
+@pytest.mark.unit
+def test_find_first_arbitrage_buy_hour_reports_reference_limit_rejection() -> None:
+    result = find_first_arbitrage_buy_hour(
+        [_hourly_entry(8, 0.60), _hourly_entry(9, 0.65)],
+        ENTITY_ID,
+        start_local=datetime(2026, 5, 8, 8, 0, tzinfo=TZ),
+        end_local=datetime(2026, 5, 8, 10, 0, tzinfo=TZ),
+        sell_price=1.0,
+        min_arbitrage_margin=0.3,
+        max_buy_price=0.55,
+    )
+
+    assert result.reason == "buy_price_above_reference_limit"
+    assert result.start_local is None
+
+
+@pytest.mark.unit
 def test_find_first_arbitrage_buy_hour_fails_closed_when_a_hour_is_missing() -> None:
     result = find_first_arbitrage_buy_hour(
         [_hourly_entry(8, 0.8), _hourly_entry(10, 0.6)],

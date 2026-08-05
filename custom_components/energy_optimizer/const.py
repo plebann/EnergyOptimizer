@@ -8,6 +8,7 @@ CONF_TOMORROW_PRICE_SENSOR = "tomorrow_price_sensor"
 CONF_BUY_PRICE_SENSOR = "buy_price_sensor"
 CONF_SELL_PRICE_SENSOR = "sell_price_sensor"
 CONF_MIN_ARBITRAGE_PRICE = "min_arbitrage_price"
+ARBITRAGE_BUY_WINDOW_PRICE_MULTIPLIER = 1.2
 CONF_EVENING_MAX_PRICE_SENSOR = "evening_max_price_sensor"
 CONF_EVENING_MAX_PRICE_HOUR_SENSOR = "evening_max_price_hour_sensor"
 CONF_EVENING_SECOND_MAX_PRICE_SENSOR = "evening_second_max_price_sensor"
