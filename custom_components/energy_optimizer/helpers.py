@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, Any, Literal
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
+from .utils.decision_dump import record_input
+
+
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.config_entries import ConfigEntry
@@ -267,20 +270,46 @@ def get_float_state_info(
     - error: one of "missing", "unavailable", "invalid" or None when ok
     """
     if not entity_id:
+        record_input(
+            "float_state:unconfigured",
+            source=None,
+            value=None,
+            status="missing",
+        )
         return None, None, "missing"
 
     state = hass.states.get(entity_id)
     if not state:
+        record_input(
+            f"float_state:{entity_id}",
+            source=entity_id,
+            value=None,
+            status="missing",
+        )
         return None, None, "missing"
 
     raw = state.state
     if raw in _UNAVAILABLE_STATE_VALUES:
         raw_str = None if raw is None else str(raw)
+        record_input(
+            f"float_state:{entity_id}",
+            source=entity_id,
+            value=None,
+            status="unavailable",
+        )
         return None, raw_str, "unavailable"
 
     try:
-        return float(raw), str(raw), None
+        value = float(raw)
+        record_input(f"float_state:{entity_id}", source=entity_id, value=value)
+        return value, str(raw), None
     except (ValueError, TypeError):
+        record_input(
+            f"float_state:{entity_id}",
+            source=entity_id,
+            value=None,
+            status="invalid",
+        )
         return None, str(raw), "invalid"
 
 

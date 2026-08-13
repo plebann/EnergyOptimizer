@@ -30,6 +30,7 @@ from ..decision_engine.common import (
     get_required_prog2_soc_state,
     handle_no_action_soc_update,
     resolve_arbitrage_margin_gate,
+    resolve_entry,
 )
 from ..helpers import (
     get_internal_window_price,
@@ -43,6 +44,7 @@ from ..helpers import (
 )
 from .charge_base import BaseChargeStrategy
 from ..utils.logging import DecisionOutcome, log_decision_unified
+from ..utils.decision_dump import active_decision_audit
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -240,10 +242,15 @@ async def async_run_morning_charge(
     *,
     entry_id: str | None = None,
     margin: float | None = None,
+    trigger: str = "manual:morning_charge",
 ) -> None:
     """Run morning grid charge routine."""
+    entry = resolve_entry(hass, entry_id)
+    if entry is None:
+        return
     strategy = MorningChargeStrategy(hass, entry_id=entry_id, margin=margin)
-    await strategy.run()
+    async with active_decision_audit(hass, entry, trigger=trigger):
+        await strategy.run()
 
 
 def _calculate_morning_arbitrage_kwh(

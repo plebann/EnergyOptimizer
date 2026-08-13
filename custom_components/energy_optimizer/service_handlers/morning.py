@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from homeassistant.core import ServiceCall
 
+from ..const import DOMAIN, SERVICE_MORNING_GRID_CHARGE
 from ..decision_engine.morning_charge import async_run_morning_charge
 
 if TYPE_CHECKING:
@@ -19,4 +20,5 @@ async def async_handle_morning_grid_charge(
         hass,
         entry_id=call.data.get("entry_id"),
         margin=call.data.get("margin"),
+        trigger=f"service:{DOMAIN}.{SERVICE_MORNING_GRID_CHARGE}",
     )

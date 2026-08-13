@@ -26,6 +26,7 @@ from ..helpers import (
     resolve_daytime_min_price_time,
     resolve_morning_max_price_hour,
 )
+from ..utils.decision_dump import active_decision_audit, emit_decision_dump
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from .common import get_entry_data, resolve_entry
 
@@ -37,7 +38,7 @@ _LOGGER = logging.getLogger(__name__)
 _PRICE_BLOCK_FACTOR = 0.2
 
 
-async def async_run_solar_charge_block(
+async def _async_run_solar_charge_block(
     hass: HomeAssistant,
     *,
     entry_id: str | None = None,
@@ -101,7 +102,6 @@ async def async_run_solar_charge_block(
             context=Context(),
         )
         return
-
     # Guard: only run while sun is above horizon
     sun_state = hass.states.get(SUN_ENTITY)
     if sun_state is None or sun_state.state != SUN_ABOVE_HORIZON:
@@ -306,3 +306,30 @@ async def async_run_solar_charge_block(
         logger=_LOGGER,
         context=Context(),
     )
+
+
+async def async_run_solar_charge_block(
+    hass: HomeAssistant,
+    *,
+    entry_id: str | None = None,
+    trigger: str = "manual:solar_charge_block",
+) -> None:
+    """Run solar-charge control and dump a completed inverter decision."""
+    entry = resolve_entry(hass, entry_id)
+    if entry is None:
+        return
+    async with active_decision_audit(hass, entry, trigger=trigger) as audit:
+        await _async_run_solar_charge_block(hass, entry_id=entry_id)
+        if not audit.actions:
+            return
+        emit_decision_dump(
+            _LOGGER,
+            audit,
+            {
+                "scenario": "Solar charge block",
+                "action_type": "charge_current_updated",
+                "summary": "Updated maximum charge current",
+                "reason": "solar_charge_block_evaluation",
+                "details": {},
+            },
+        )

@@ -63,6 +63,7 @@ async def test_morning_peak_sell_handler_dispatches_to_decision_engine(
         hass,
         entry_id="entry-1",
         margin=1.2,
+        trigger="service:energy_optimizer.morning_peak_sell",
     )
 
 

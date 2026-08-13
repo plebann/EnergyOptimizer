@@ -25,6 +25,7 @@ from ..const import (
 )
 from ..controllers.inverter import turn_off_switch, turn_on_switch
 from ..helpers import get_float_state_info, get_required_float_state
+from ..utils.decision_dump import active_decision_audit, emit_decision_dump, record_step
 from ..utils.forecast import get_pv_forecast_window
 from .common import get_battery_config, resolve_entry
 
@@ -311,13 +312,27 @@ async def async_restore_export_block_control(
     hass: HomeAssistant,
     *,
     entry_id: str | None = None,
+    trigger: str = "manual:export_block_restore",
 ) -> dict[str, Any] | None:
     """Restore grid and export after the daylight export-control window ends."""
     entry = resolve_entry(hass, entry_id)
     if entry is None:
         return None
-    await _restore_normal_operation(hass, entry)
-    return _decision("sunset_restore", action="normal_operation")
+    async with active_decision_audit(hass, entry, trigger=trigger) as audit:
+        await _restore_normal_operation(hass, entry)
+        decision = _decision("sunset_restore", action="normal_operation")
+        emit_decision_dump(
+            _LOGGER,
+            audit,
+            {
+                "scenario": "Export block control",
+                "action_type": "normal_operation",
+                "summary": "Restored normal export operation",
+                "reason": decision["reason"],
+                "details": decision,
+            },
+        )
+        return decision
 
 
 def _can_enter_offgrid(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -339,15 +354,49 @@ async def async_run_export_block_control(
     hass: HomeAssistant,
     *,
     entry_id: str | None = None,
+    trigger: str = "manual:export_block_control",
 ) -> dict[str, Any] | None:
     """Control export safely from sell price and the current-hour energy balance."""
     entry = resolve_entry(hass, entry_id)
     if entry is None:
         return None
+    async with active_decision_audit(hass, entry, trigger=trigger) as audit:
+        decision = await _async_run_export_block_control(hass, entry)
+        if decision is not None:
+            emit_decision_dump(
+                _LOGGER,
+                audit,
+                {
+                    "scenario": "Export block control",
+                    "action_type": str(decision.get("action", "no_action")),
+                    "summary": str(decision["reason"]),
+                    "reason": str(decision["reason"]),
+                    "details": decision,
+                },
+            )
+        return decision
 
+
+async def _async_run_export_block_control(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> dict[str, Any] | None:
+    """Evaluate export control using a pre-resolved entry and active audit."""
     sun_state = hass.states.get(SUN_ENTITY)
     if sun_state is None or sun_state.state != SUN_ABOVE_HORIZON:
+        record_step(
+            "sun_above_horizon",
+            kind="gate",
+            inputs={"sun_state": None if sun_state is None else sun_state.state},
+            result=False,
+        )
         return _decision("sun_not_above_horizon")
+    record_step(
+        "sun_above_horizon",
+        kind="gate",
+        inputs={"sun_state": sun_state.state},
+        result=True,
+    )
 
     config = entry.data
     price_entity = config.get(CONF_SELL_PRICE_SENSOR) or config.get(CONF_PRICE_SENSOR)
@@ -369,12 +418,24 @@ async def async_run_export_block_control(
         return _decision("missing_sell_price", action="normal_operation")
 
     if round(price, 1) > 0:
+        record_step(
+            "sell_price_zero_or_lower",
+            kind="gate",
+            inputs={"sell_price": round(price, 2)},
+            result=False,
+        )
         await _restore_normal_operation(hass, entry)
         return _decision(
             "positive_sell_price",
             action="normal_operation",
             sell_price=round(price, 2),
         )
+    record_step(
+        "sell_price_zero_or_lower",
+        kind="gate",
+        inputs={"sell_price": round(price, 2)},
+        result=True,
+    )
 
     now = dt_util.now()
     hourly_load_kwh = _get_hourly_load_kwh(hass, config, now.hour)
@@ -409,6 +470,16 @@ async def async_run_export_block_control(
     }
 
     if bev_charging and surplus_kwh <= threshold_kwh:
+        record_step(
+            "offgrid_eligibility",
+            kind="gate",
+            inputs={
+                "bev_charging": bev_charging,
+                "surplus_kwh": round(surplus_kwh, 3),
+                "threshold_kwh": round(threshold_kwh, 3),
+            },
+            result=False,
+        )
         await _restore_normal_operation(hass, entry)
         return _decision(
             "bev_absorbs_surplus",
@@ -417,6 +488,16 @@ async def async_run_export_block_control(
         )
 
     if not bev_charging and surplus_kwh > threshold_kwh and _can_enter_offgrid(hass, entry):
+        record_step(
+            "offgrid_eligibility",
+            kind="gate",
+            inputs={
+                "bev_charging": bev_charging,
+                "surplus_kwh": round(surplus_kwh, 3),
+                "threshold_kwh": round(threshold_kwh, 3),
+            },
+            result=True,
+        )
         await _block_export_offgrid(hass, entry)
         return _decision(
             "surplus_above_offgrid_threshold",

@@ -29,6 +29,7 @@ from ..decision_engine.common import (
     build_no_action_outcome,
     compute_sufficiency,
     get_required_prog3_soc_state,
+    resolve_entry,
 )
 from ..helpers import (
     get_float_state_info,
@@ -40,6 +41,7 @@ from ..helpers import (
 )
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.logging import DecisionOutcome
+from ..utils.decision_dump import active_decision_audit
 from ..utils.time_window import build_hour_window
 from .sell_base import BaseSellStrategy, SellRequest
 
@@ -685,7 +687,12 @@ async def async_run_morning_sell(
     *,
     entry_id: str | None = None,
     margin: float | None = None,
+    trigger: str = "manual:morning_sell",
 ) -> None:
     """Run morning peak sell routine."""
+    entry = resolve_entry(hass, entry_id)
+    if entry is None:
+        return
     strategy = MorningSellStrategy(hass, entry_id=entry_id, margin=margin)
-    await strategy.run()
+    async with active_decision_audit(hass, entry, trigger=trigger):
+        await strategy.run()

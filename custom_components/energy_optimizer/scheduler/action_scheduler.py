@@ -269,6 +269,7 @@ class ActionScheduler:
         await async_run_morning_charge(
             self.hass,
             entry_id=self.entry.entry_id,
+            trigger="scheduler:morning_charge",
         )
         self._publish_schedule_snapshot()
 
@@ -278,6 +279,7 @@ class ActionScheduler:
         await async_run_evening_behavior(
             self.hass,
             entry_id=self.entry.entry_id,
+            trigger="scheduler:evening_behavior",
         )
         self._publish_schedule_snapshot()
 
@@ -287,6 +289,7 @@ class ActionScheduler:
         await async_run_afternoon_charge(
             self.hass,
             entry_id=self.entry.entry_id,
+            trigger="scheduler:afternoon_charge",
         )
         self._publish_schedule_snapshot()
 
@@ -296,6 +299,7 @@ class ActionScheduler:
         await async_run_program4_solar_reset(
             self.hass,
             entry_id=self.entry.entry_id,
+            trigger="scheduler:program4_solar_reset",
         )
         self._publish_schedule_snapshot()
 
@@ -324,6 +328,7 @@ class ActionScheduler:
             entry_id=self.entry.entry_id,
             is_primary=True,
             is_first=self._primary_evening_window_is_first(),
+            trigger="scheduler:evening_sell_primary",
         )
         self._publish_schedule_snapshot()
 
@@ -333,6 +338,7 @@ class ActionScheduler:
         await async_run_morning_sell(
             self.hass,
             entry_id=self.entry.entry_id,
+            trigger="scheduler:morning_sell",
         )
         self._publish_schedule_snapshot()
 
@@ -344,6 +350,7 @@ class ActionScheduler:
             entry_id=self.entry.entry_id,
             is_primary=False,
             is_first=not self._primary_evening_window_is_first(),
+            trigger="scheduler:evening_sell_secondary",
         )
         self._publish_schedule_snapshot()
 
@@ -405,6 +412,7 @@ class ActionScheduler:
         decision = await async_restore_export_block_control(
             self.hass,
             entry_id=self.entry.entry_id,
+            trigger="scheduler:sunset_export_restore",
         )
         self._store_export_block_decision(decision)
         self._publish_schedule_snapshot()
@@ -423,11 +431,13 @@ class ActionScheduler:
         await async_run_solar_charge_block(
             self.hass,
             entry_id=self.entry.entry_id,
+            trigger="scheduler:price_change_solar_charge_block",
         )
         await asyncio.sleep(5)
         decision = await async_run_export_block_control(
             self.hass,
             entry_id=self.entry.entry_id,
+            trigger="scheduler:price_change_export_block_control",
         )
         self._store_export_block_decision(decision)
         self._publish_schedule_snapshot()
@@ -437,6 +447,7 @@ class ActionScheduler:
         decision = await async_run_export_block_control(
             self.hass,
             entry_id=self.entry.entry_id,
+            trigger="state_change:bev_charging",
         )
         self._store_export_block_decision(decision)
         self._publish_schedule_snapshot()
@@ -451,6 +462,7 @@ class ActionScheduler:
         await async_run_daytime_min_price_restore(
             self.hass,
             entry_id=self.entry.entry_id,
+            trigger="scheduler:daytime_min_price_restore",
         )
 
     def _schedule_afternoon_charge(self) -> None:

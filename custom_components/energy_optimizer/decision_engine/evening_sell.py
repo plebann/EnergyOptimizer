@@ -33,6 +33,7 @@ from ..decision_engine.common import (
     build_surplus_sell_outcome,
     compute_sufficiency,
     get_required_prog5_soc_state,
+    resolve_entry,
 )
 from ..helpers import (
     get_buy_price_payload,
@@ -46,6 +47,7 @@ from ..helpers import (
 from ..service_handlers.sell_restore import async_handle_sell_restore
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.logging import DecisionOutcome
+from ..utils.decision_dump import active_decision_audit
 from ..utils.time_window import build_hour_window
 from .sell_base import BaseSellStrategy, SellRequest
 
@@ -296,8 +298,16 @@ class EveningSellStrategy(BaseSellStrategy):
             "sell_horizon_reason": "no_qualifying_buy_price",
             "arbitrage_reason": arbitrage.reason,
             "arbitrage_hour": None,
-            "buy_window_reference_price": round(buy_window_reference_price, 2),
-            "buy_window_price_limit": round(buy_window_price_limit, 2),
+            "buy_window_reference_price": (
+                round(buy_window_reference_price, 2)
+                if buy_window_reference_price is not None
+                else None
+            ),
+            "buy_window_price_limit": (
+                round(buy_window_price_limit, 2)
+                if buy_window_price_limit is not None
+                else None
+            ),
         }
         return await self._surplus_sell(require_sufficiency=True)
 
@@ -890,8 +900,12 @@ async def async_run_evening_sell(
     margin: float | None = None,
     is_primary: bool = True,
     is_first: bool = True,
+    trigger: str = "manual:evening_sell",
 ) -> None:
     """Run evening peak sell routine."""
+    entry = resolve_entry(hass, entry_id)
+    if entry is None:
+        return
     strategy = EveningSellStrategy(
         hass,
         entry_id=entry_id,
@@ -899,5 +913,6 @@ async def async_run_evening_sell(
         is_primary=is_primary,
         is_first=is_first,
     )
-    await strategy.run()
+    async with active_decision_audit(hass, entry, trigger=trigger):
+        await strategy.run()
     resolve_night_buy_window_tomorrow_start_hour,

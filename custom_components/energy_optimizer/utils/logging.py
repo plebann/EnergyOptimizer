@@ -8,6 +8,7 @@ from typing import Any, TYPE_CHECKING
 from homeassistant.core import HomeAssistant
 
 from ..const import DOMAIN
+from .decision_dump import DecisionAudit, emit_decision_dump, get_active_audit
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -35,6 +36,9 @@ class DecisionOutcome:
 
     # Compact history-only decision horizon.
     history_windows: list[list[str | int | bool]] = field(default_factory=list)
+
+    # Diagnostic-only context. It is intentionally excluded from HA output channels.
+    audit: DecisionAudit | None = field(default=None, repr=False, compare=False)
 
 
 def format_sufficiency_hour(
@@ -115,6 +119,20 @@ async def log_decision_unified(
 
     if logger:
         logger.info("%s: %s", outcome.scenario, outcome.summary)
+        if audit := outcome.audit or get_active_audit():
+            emit_decision_dump(
+                logger,
+                audit,
+                {
+                    "scenario": outcome.scenario,
+                    "action_type": outcome.action_type,
+                    "summary": outcome.summary,
+                    "reason": outcome.reason,
+                    "details": outcome.details,
+                    "entities_changed": outcome.entities_changed,
+                    "history_windows": outcome.history_windows,
+                },
+            )
 
     await notify_user(hass, outcome.summary, outcome.scenario)
 
