@@ -420,7 +420,11 @@ async def test_sunset_restores_export_control(
 
     await scheduler._handle_sunset()
 
-    restore.assert_awaited_once_with(hass, entry_id="entry-1")
+    restore.assert_awaited_once_with(
+        hass,
+        entry_id="entry-1",
+        trigger="scheduler:sunset_export_restore",
+    )
     assert hass.data[DOMAIN]["entry-1"]["last_export_block_control"] == {
         "reason": "sunset_restore",
         "action": "normal_operation",
@@ -565,8 +569,16 @@ async def test_price_hourly_handler_runs_export_and_solar_block_during_daylight(
 
     await scheduler._handle_price_hourly(now=datetime(2026, 3, 11, 10, 0, 0))
 
-    export_mock.assert_awaited_once_with(hass, entry_id="entry-1")
-    solar_mock.assert_awaited_once_with(hass, entry_id="entry-1")
+    export_mock.assert_awaited_once_with(
+        hass,
+        entry_id="entry-1",
+        trigger="scheduler:price_change_export_block_control",
+    )
+    solar_mock.assert_awaited_once_with(
+        hass,
+        entry_id="entry-1",
+        trigger="scheduler:price_change_solar_charge_block",
+    )
     scheduler._publish_schedule_snapshot.assert_called_once()
 
 

@@ -19,4 +19,5 @@ async def async_handle_morning_grid_charge(
         hass,
         entry_id=call.data.get("entry_id"),
         margin=call.data.get("margin"),
+        trigger="service:energy_optimizer.morning_grid_charge",
     )

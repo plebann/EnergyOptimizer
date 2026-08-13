@@ -43,6 +43,7 @@ from ..decision_engine.common import (
 from ..helpers import get_float_state_info, resolve_tariff_end_hour
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.logging import DecisionOutcome, format_sufficiency_hour, log_decision_unified
+from ..utils.decision_dump import active_decision_audit, record_step
 from ..utils.time_window import build_hour_window
 
 if TYPE_CHECKING:
@@ -176,7 +177,18 @@ async def _handle_balancing(
     pv_compensation_details: dict[str, float | None],
 ) -> bool:
     """Handle balancing scenario and return whether it was activated."""
-    if not (balancing_due and pv_with_efficiency < balancing_pv_threshold):
+    balancing_enabled = balancing_due and pv_with_efficiency < balancing_pv_threshold
+    record_step(
+        "battery_balancing",
+        kind="gate",
+        inputs={
+            "balancing_due": balancing_due,
+            "pv_with_efficiency_kwh": round(pv_with_efficiency, 2),
+            "threshold_kwh": round(balancing_pv_threshold, 2),
+        },
+        result=balancing_enabled,
+    )
+    if not balancing_enabled:
         return False
 
     if balancing_ongoing_sensor is not None:
@@ -277,7 +289,21 @@ async def _handle_preservation(
     pv_compensation_details: dict[str, float | None],
 ) -> bool:
     """Handle preservation scenario and return whether it was activated."""
-    if not (grid_assist_on or reserve_insufficient or pv_with_efficiency < battery_space):
+    preservation_required = (
+        grid_assist_on or reserve_insufficient or pv_with_efficiency < battery_space
+    )
+    record_step(
+        "battery_preservation",
+        kind="gate",
+        inputs={
+            "grid_assist_on": grid_assist_on,
+            "reserve_insufficient": reserve_insufficient,
+            "pv_with_efficiency_kwh": round(pv_with_efficiency, 2),
+            "battery_space_kwh": round(battery_space, 2),
+        },
+        result=preservation_required,
+    )
+    if not preservation_required:
         return False
 
     reasons: list[str] = []
@@ -819,7 +845,7 @@ async def _run_non_balancing_flow(
     _LOGGER.debug("No battery schedule changes needed")
 
 
-async def async_run_evening_behavior(
+async def _async_run_evening_behavior(
     hass: HomeAssistant, *, entry_id: str | None = None
 ) -> None:
     """Run overnight schedule logic (22:00 behavior)."""
@@ -900,3 +926,17 @@ async def async_run_evening_behavior(
         pv_compensation_details=pv_compensation_details,
         afternoon_grid_assist_sensor=afternoon_grid_assist_sensor,
     )
+
+
+async def async_run_evening_behavior(
+    hass: HomeAssistant,
+    *,
+    entry_id: str | None = None,
+    trigger: str = "manual:evening_behavior",
+) -> None:
+    """Run overnight schedule logic with a diagnostic audit."""
+    entry = resolve_entry(hass, entry_id)
+    if entry is None:
+        return
+    async with active_decision_audit(hass, entry, trigger=trigger):
+        await _async_run_evening_behavior(hass, entry_id=entry_id)

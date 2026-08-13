@@ -45,6 +45,7 @@ from ..const import (
 from ..helpers import get_internal_window_price, get_required_float_state
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.logging import DecisionOutcome, log_decision_unified
+from ..utils.decision_dump import record_step
 from ..utils.time_window import build_hour_window
 
 if TYPE_CHECKING:
@@ -244,6 +245,12 @@ def resolve_arbitrage_margin_gate(
     )
     if buy_reference_price is None:
         details["arbitrage_reason"] = "missing_buy_reference_price"
+        record_step(
+            "arbitrage_margin_gate",
+            kind="gate",
+            inputs={"sell_price": round(sell_price, 2), "buy_reference_price": None},
+            result=False,
+        )
         return False, details
 
     arbitrage_margin = sell_price - buy_reference_price
@@ -251,9 +258,31 @@ def resolve_arbitrage_margin_gate(
     details["arbitrage_margin"] = round(arbitrage_margin, 2)
     if arbitrage_margin <= float(min_arbitrage_price or 0.0):
         details["arbitrage_reason"] = "margin_below_threshold"
+        record_step(
+            "arbitrage_margin_gate",
+            kind="gate",
+            inputs={
+                "sell_price": round(sell_price, 2),
+                "buy_reference_price": round(buy_reference_price, 2),
+                "arbitrage_margin": round(arbitrage_margin, 2),
+                "threshold": round(float(min_arbitrage_price or 0.0), 2),
+            },
+            result=False,
+        )
         return False, details
 
     details["arbitrage_reason"] = "enabled"
+    record_step(
+        "arbitrage_margin_gate",
+        kind="gate",
+        inputs={
+            "sell_price": round(sell_price, 2),
+            "buy_reference_price": round(buy_reference_price, 2),
+            "arbitrage_margin": round(arbitrage_margin, 2),
+            "threshold": round(float(min_arbitrage_price or 0.0), 2),
+        },
+        result=True,
+    )
     return True, details
 
 
@@ -279,12 +308,27 @@ def calculate_charge_action(
         voltage=bc.voltage,
         target_charge_time_hours=target_charge_time_hours,
     )
-    return ChargeAction(
+    action = ChargeAction(
         gap_to_charge_kwh=gap_to_charge_kwh,
         soc_delta=soc_delta,
         target_soc=target_soc,
         charge_current=charge_current,
     )
+    record_step(
+        "charge_action",
+        kind="calculation",
+        inputs={
+            "gap_kwh": round(gap_kwh, 2),
+            "current_soc": round(current_soc, 1),
+            "target_charge_time_hours": round(target_charge_time_hours, 2),
+        },
+        result={
+            "target_soc": round(action.target_soc, 1),
+            "charge_current_a": round(action.charge_current, 1),
+            "to_charge_kwh": round(action.gap_to_charge_kwh, 2),
+        },
+    )
+    return action
 
 
 def calculate_target_soc_from_needed_reserve(

@@ -19,6 +19,7 @@ from ..helpers import (
     resolve_prog4_start_time,
     resolve_tariff_start_hour,
 )
+from ..utils.decision_dump import active_decision_audit, emit_decision_dump
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from .common import (
     get_battery_config,
@@ -46,7 +47,7 @@ def _has_configured_pv_forecast(
     )
 
 
-async def async_run_program4_solar_reset(
+async def _async_run_program4_solar_reset(
     hass: HomeAssistant,
     *,
     entry_id: str | None = None,
@@ -156,3 +157,30 @@ async def async_run_program4_solar_reset(
         prog4_start.hour,
         end_hour,
     )
+
+
+async def async_run_program4_solar_reset(
+    hass: HomeAssistant,
+    *,
+    entry_id: str | None = None,
+    trigger: str = "manual:program4_solar_reset",
+) -> None:
+    """Run Program 4 reset and dump a completed inverter decision."""
+    entry = resolve_entry(hass, entry_id)
+    if entry is None:
+        return
+    async with active_decision_audit(hass, entry, trigger=trigger) as audit:
+        await _async_run_program4_solar_reset(hass, entry_id=entry_id)
+        if not audit.actions:
+            return
+        emit_decision_dump(
+            _LOGGER,
+            audit,
+            {
+                "scenario": "Program 4 solar reset",
+                "action_type": "program_soc_updated",
+                "summary": "Reset Program 4 SOC from solar surplus",
+                "reason": "forecast_surplus_positive",
+                "details": {},
+            },
+        )

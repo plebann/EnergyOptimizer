@@ -18,4 +18,5 @@ async def async_handle_overnight_schedule(
     await async_run_evening_behavior(
         hass,
         entry_id=call.data.get("entry_id"),
+        trigger="service:energy_optimizer.overnight_schedule",
     )

@@ -198,12 +198,14 @@ async def async_register_services(hass: HomeAssistant) -> None:
             hass,
             entry_id=call.data.get(SERVICE_FIELD_ENTRY_ID),
             margin=call.data.get("margin"),
+            trigger=f"service:{DOMAIN}.{SERVICE_MORNING_GRID_CHARGE}",
         )
 
     async def _handle_overnight_schedule(call: ServiceCall) -> None:
         await async_run_evening_behavior(
             hass,
             entry_id=call.data.get(SERVICE_FIELD_ENTRY_ID),
+            trigger=f"service:{DOMAIN}.{SERVICE_OVERNIGHT_SCHEDULE}",
         )
 
     async def _handle_afternoon_charge(call: ServiceCall) -> None:
@@ -211,6 +213,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
             hass,
             entry_id=call.data.get(SERVICE_FIELD_ENTRY_ID),
             margin=call.data.get("margin"),
+            trigger=f"service:{DOMAIN}.{SERVICE_AFTERNOON_GRID_CHARGE}",
         )
 
     async def _handle_evening_peak_sell(call: ServiceCall) -> None:
@@ -218,6 +221,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
             hass,
             entry_id=call.data.get(SERVICE_FIELD_ENTRY_ID),
             margin=call.data.get("margin"),
+            trigger=f"service:{DOMAIN}.{SERVICE_EVENING_PEAK_SELL}",
         )
 
     async def _handle_morning_peak_sell(call: ServiceCall) -> None:
@@ -225,12 +229,14 @@ async def async_register_services(hass: HomeAssistant) -> None:
             hass,
             entry_id=call.data.get(SERVICE_FIELD_ENTRY_ID),
             margin=call.data.get("margin"),
+            trigger=f"service:{DOMAIN}.{SERVICE_MORNING_PEAK_SELL}",
         )
 
     async def _handle_solar_charge_block(call: ServiceCall) -> None:
         await async_run_solar_charge_block(
             hass,
             entry_id=call.data.get(SERVICE_FIELD_ENTRY_ID),
+            trigger=f"service:{DOMAIN}.{SERVICE_SOLAR_CHARGE_BLOCK}",
         )
 
     hass.services.async_register(

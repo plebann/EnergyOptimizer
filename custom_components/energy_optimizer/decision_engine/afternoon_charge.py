@@ -26,6 +26,7 @@ from ..decision_engine.common import (
     get_required_prog4_soc_state,
     handle_no_action_soc_update,
     resolve_arbitrage_margin_gate,
+    resolve_entry,
 )
 from ..helpers import (
     get_internal_window_price,
@@ -37,6 +38,7 @@ from ..helpers import (
 )
 from ..utils.pv_forecast import get_forecast_adjusted_kwh
 from ..utils.logging import DecisionOutcome
+from ..utils.decision_dump import active_decision_audit
 from .charge_base import BaseChargeStrategy
 
 if TYPE_CHECKING:
@@ -217,10 +219,15 @@ async def async_run_afternoon_charge(
     *,
     entry_id: str | None = None,
     margin: float | None = None,
+    trigger: str = "manual:afternoon_charge",
 ) -> None:
     """Run afternoon grid charge routine."""
+    entry = resolve_entry(hass, entry_id)
+    if entry is None:
+        return
     strategy = AfternoonChargeStrategy(hass, entry_id=entry_id, margin=margin)
-    await strategy.run()
+    async with active_decision_audit(hass, entry, trigger=trigger):
+        await strategy.run()
 
 
 def _calculate_afternoon_balance(
