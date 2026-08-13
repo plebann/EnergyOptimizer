@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from homeassistant.core import ServiceCall
 
+from ..const import DOMAIN, SERVICE_OVERNIGHT_SCHEDULE
 from ..decision_engine.evening_behavior import async_run_evening_behavior
 
 if TYPE_CHECKING:
@@ -18,5 +19,5 @@ async def async_handle_overnight_schedule(
     await async_run_evening_behavior(
         hass,
         entry_id=call.data.get("entry_id"),
-        trigger="service:energy_optimizer.overnight_schedule",
+        trigger=f"service:{DOMAIN}.{SERVICE_OVERNIGHT_SCHEDULE}",
     )

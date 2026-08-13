@@ -21,11 +21,22 @@ _ACTIVE_AUDIT: ContextVar[DecisionAudit | None] = ContextVar(
 )
 
 _DUMP_PREFIX = "ENERGY_OPTIMIZER_DECISION_DUMP v1 "
-_MANIFEST_VERSION = json.loads(
-    files("custom_components.energy_optimizer").joinpath("manifest.json").read_text(
-        encoding="utf-8"
-    )
-)["version"]
+_LOGGER = logging.getLogger(__name__)
+
+
+def _load_manifest_version() -> str:
+    """Load the integration version from the packaged manifest."""
+    try:
+        content = files("custom_components.energy_optimizer").joinpath(
+            "manifest.json"
+        ).read_text(encoding="utf-8")
+        return str(json.loads(content)["version"])
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as err:
+        _LOGGER.warning("Unable to load Energy Optimizer manifest version: %s", err)
+        return "unknown"
+
+
+_MANIFEST_VERSION = _load_manifest_version()
 
 
 def _json_value(value: Any) -> Any:

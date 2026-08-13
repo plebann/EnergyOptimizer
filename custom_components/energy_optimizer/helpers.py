@@ -10,6 +10,8 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .utils.decision_dump import record_input
+
+
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.config_entries import ConfigEntry
@@ -268,19 +270,29 @@ def get_float_state_info(
     - error: one of "missing", "unavailable", "invalid" or None when ok
     """
     if not entity_id:
-        record_input("float_state", source=None, value=None, status="missing")
+        record_input(
+            "float_state:unconfigured",
+            source=None,
+            value=None,
+            status="missing",
+        )
         return None, None, "missing"
 
     state = hass.states.get(entity_id)
     if not state:
-        record_input("float_state", source=entity_id, value=None, status="missing")
+        record_input(
+            f"float_state:{entity_id}",
+            source=entity_id,
+            value=None,
+            status="missing",
+        )
         return None, None, "missing"
 
     raw = state.state
     if raw in _UNAVAILABLE_STATE_VALUES:
         raw_str = None if raw is None else str(raw)
         record_input(
-            "float_state",
+            f"float_state:{entity_id}",
             source=entity_id,
             value=None,
             status="unavailable",
@@ -289,10 +301,15 @@ def get_float_state_info(
 
     try:
         value = float(raw)
-        record_input("float_state", source=entity_id, value=value)
+        record_input(f"float_state:{entity_id}", source=entity_id, value=value)
         return value, str(raw), None
     except (ValueError, TypeError):
-        record_input("float_state", source=entity_id, value=None, status="invalid")
+        record_input(
+            f"float_state:{entity_id}",
+            source=entity_id,
+            value=None,
+            status="invalid",
+        )
         return None, str(raw), "invalid"
 
 
