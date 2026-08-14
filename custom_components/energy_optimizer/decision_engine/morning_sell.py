@@ -229,8 +229,10 @@ class MorningSellStrategy(BaseSellStrategy):
             voltage = self.battery_config.voltage
 
         calculated_current = ceil((surplus_kwh * 1000.0) / voltage)
-        current = min(float(calculated_current), max_current) if max_current else float(
-            calculated_current
+        current = (
+            min(float(calculated_current), max_current)
+            if max_current is not None
+            else float(calculated_current)
         )
         self._regulator_diagnostics.update(
             {
@@ -356,6 +358,31 @@ class MorningSellStrategy(BaseSellStrategy):
                 sufficiency_hour=None,
                 sufficiency_reached=False,
             )
+        if self._use_discharge_current:
+            discharge_state = self.hass.states.get(
+                str(self.config[CONF_DISCHARGE_CURRENT_ENTITY])
+            )
+            try:
+                previous_discharge_current = (
+                    float(discharge_state.state) if discharge_state is not None else None
+                )
+            except (TypeError, ValueError):
+                previous_discharge_current = None
+            if previous_discharge_current is None:
+                return build_no_action_outcome(
+                    scenario=self.scenario_name,
+                    summary="Morning sell skipped: discharge-current baseline unavailable",
+                    reason=(
+                        "The existing discharge-current value must be available "
+                        "before it can be restored"
+                    ),
+                    current_soc=self.current_soc,
+                    reserve_kwh=0.0,
+                    required_kwh=hourly_demand_kwh,
+                    pv_forecast_kwh=hourly_pv_kwh,
+                    sufficiency_hour=None,
+                    sufficiency_reached=False,
+                )
         self._regulator_diagnostics = {
             "sell_hour": sell_hour,
             "hourly_pv_kwh": round(hourly_pv_kwh, 3),

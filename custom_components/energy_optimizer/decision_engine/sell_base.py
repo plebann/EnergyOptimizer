@@ -542,39 +542,48 @@ class BaseSellStrategy(ABC):
     ) -> None:
         """Best-effort rollback of settings changed before a failed sell write."""
         if original_work_mode:
-            await set_work_mode(
+            try:
+                await set_work_mode(
+                    self.hass,
+                    str(self.config.get(CONF_WORK_MODE_ENTITY) or ""),
+                    original_work_mode,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
+            except HomeAssistantError as err:
+                _LOGGER.error("Failed to roll back work mode after sell error: %s", err)
+        try:
+            await set_program_soc(
                 self.hass,
-                str(self.config.get(CONF_WORK_MODE_ENTITY) or ""),
-                original_work_mode,
+                self.prog_soc_entity,
+                original_prog_soc,
                 entry=self.entry,
                 logger=_LOGGER,
                 context=self.integration_context,
             )
-        await set_program_soc(
-            self.hass,
-            self.prog_soc_entity,
-            original_prog_soc,
-            entry=self.entry,
-            logger=_LOGGER,
-            context=self.integration_context,
-        )
+        except HomeAssistantError as err:
+            _LOGGER.error("Failed to roll back program SOC after sell error: %s", err)
         if regulator.previous_value is None:
             return
-        if regulator.kind == "discharge_current":
-            await set_discharge_current(
-                self.hass,
-                regulator.entity_id,
-                regulator.previous_value,
-                entry=self.entry,
-                logger=_LOGGER,
-                context=self.integration_context,
-            )
-        else:
-            await set_export_power(
-                self.hass,
-                regulator.entity_id,
-                regulator.previous_value,
-                entry=self.entry,
-                logger=_LOGGER,
-                context=self.integration_context,
-            )
+        try:
+            if regulator.kind == "discharge_current":
+                await set_discharge_current(
+                    self.hass,
+                    regulator.entity_id,
+                    regulator.previous_value,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
+            else:
+                await set_export_power(
+                    self.hass,
+                    regulator.entity_id,
+                    regulator.previous_value,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
+        except HomeAssistantError as err:
+            _LOGGER.error("Failed to roll back sell regulator after sell error: %s", err)

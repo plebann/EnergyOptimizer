@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from homeassistant.core import HomeAssistantError
 
 from custom_components.energy_optimizer.const import DOMAIN
 from custom_components.energy_optimizer.decision_engine.sell_base import (
@@ -500,6 +501,85 @@ async def test_restore_callback_restores_previous_discharge_current(
         12.0,
     )
     assert "sell_restore" not in hass.data[DOMAIN]["entry-1"]
+
+
+@pytest.mark.asyncio
+async def test_execute_sell_rolls_back_after_regulator_write_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A regulator write error is logged as sell_failed after rollback attempts."""
+    hass = MagicMock()
+    work_mode_state = MagicMock()
+    work_mode_state.state = "Zero Export to Load"
+    hass.states.get.return_value = work_mode_state
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    outcomes = []
+    set_work_mode_mock = AsyncMock()
+    set_program_soc_mock = AsyncMock()
+    set_export_power_mock = AsyncMock(side_effect=HomeAssistantError("write failed"))
+
+    async def _capture_log(_hass, _entry, outcome, **_kwargs) -> None:
+        outcomes.append(outcome)
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.Store",
+        _FakeStore,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_work_mode",
+        set_work_mode_mock,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_program_soc",
+        set_program_soc_mock,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_export_power",
+        set_export_power_mock,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
+        _capture_log,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
+        lambda _hass, _entry: False,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.calculate_export_power",
+        lambda _surplus: 1200.0,
+    )
+
+    strategy = _TestSellStrategy(hass, entry_id="entry-1", margin=1.0)
+    strategy.entry = entry
+    strategy.config = {
+        "work_mode_entity": "select.work_mode",
+        "export_power_entity": "number.export_power",
+    }
+    strategy.battery_config = SimpleNamespace(
+        min_soc=15.0, capacity_ah=37.0, voltage=640.0, efficiency=95.0
+    )
+    strategy.current_soc = 90.0
+    strategy.prog_soc_entity = "number.prog5_soc"
+    strategy.original_prog_soc = 70.0
+    strategy.restore_hour = 18
+    strategy.integration_context = SimpleNamespace()
+
+    outcome = SimpleNamespace(details={}, entities_changed=[])
+    await strategy._execute_sell(
+        SellRequest(
+            surplus_kwh=3.0,
+            required_kwh=0.0,
+            build_outcome_fn=lambda _target, _surplus, _export: outcome,
+            build_no_action_fn=lambda _surplus: outcome,
+        )
+    )
+
+    assert outcomes[-1].action_type == "sell_failed"
+    assert set_work_mode_mock.await_count == 2
+    assert set_program_soc_mock.await_count == 2
 
 
 @pytest.mark.asyncio

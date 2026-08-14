@@ -833,6 +833,24 @@ def test_morning_sell_discharge_current_uses_ceiling_and_entity_max() -> None:
     assert regulator.value == 9.0
 
 
+def test_morning_sell_discharge_current_honors_zero_entity_maximum() -> None:
+    """A zero maximum is a valid clamp, not a missing entity attribute."""
+    state = MagicMock()
+    state.state = "8"
+    state.attributes = {"max": 0}
+    hass = MagicMock()
+    hass.states.get.return_value = state
+    strategy = MorningSellStrategy(hass, entry_id="entry-1", margin=None)
+    strategy.config = {CONF_DISCHARGE_CURRENT_ENTITY: "number.discharge_current"}
+    strategy.battery_config = SimpleNamespace(voltage=640.0)
+    strategy._use_discharge_current = True
+    strategy._regulator_diagnostics = {}
+
+    regulator = strategy._resolve_sell_regulator(5.1)
+
+    assert regulator.value == 0.0
+
+
 def test_morning_sell_export_power_rounds_up_to_hundreds() -> None:
     """Export regulator rounds the final sell energy up to 100 W."""
     state = MagicMock()
@@ -850,6 +868,60 @@ def test_morning_sell_export_power_rounds_up_to_hundreds() -> None:
     assert regulator.kind == "export_power"
     assert regulator.previous_value == 1200.0
     assert regulator.value == 2400.0
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_skips_without_valid_hourly_pv_forecast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A legacy aggregate forecast cannot select a Morning sell regulator."""
+    config = _base_config()
+    config.pop(CONF_PV_FORECAST_TODAY)
+    hass = _setup_hass(config, _base_states())
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].reason == (
+        "A valid hourly PV forecast is required to select the sell regulator"
+    )
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_skips_without_discharge_current_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Current control is not applied when its baseline cannot be restored."""
+    config = _base_config()
+    config.pop(CONF_DISCHARGE_CURRENT_ENTITY)
+    hass = _setup_hass(config, _base_states())
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+    monkeypatch.setattr(
+        f"{MORNING}.get_morning_pv_forecast",
+        lambda *_args, **_kwargs: MorningPVForecast(
+            total_kwh=10.0,
+            hourly_kwh={hour: 10.0 for hour in range(24)},
+            status="valid_hourly",
+            method="hourly",
+            source_entity="sensor.pv_forecast_today",
+            aggregate_kwh=10.0,
+            raw_hourly_kwh=10.0,
+            difference_kwh=0.0,
+            tolerance_kwh=1.0,
+            daylight_hours=[],
+            sufficiency_available=True,
+        ),
+    )
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].reason == (
+        "PV covers demand, but no discharge-current entity is configured"
+    )
 
 
 @pytest.mark.asyncio
