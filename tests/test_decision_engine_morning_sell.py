@@ -11,24 +11,30 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_CAPACITY_AH,
     CONF_BATTERY_EFFICIENCY,
     CONF_BATTERY_SOC_SENSOR,
+    CONF_BATTERY_VOLTAGE_SENSOR,
     CONF_BATTERY_VOLTAGE,
     CONF_BUY_PRICE_SENSOR,
+    CONF_DISCHARGE_CURRENT_ENTITY,
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_EXPORT_POWER_ENTITY,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MIN_SOC,
     CONF_MIN_SOC_PV,
+    CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
     CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_PROG3_SOC_ENTITY,
+    CONF_PV_FORECAST_TODAY,
     CONF_PV_PRODUCTION_SENSOR,
     CONF_TEST_MODE,
     CONF_WORK_MODE_ENTITY,
     DOMAIN,
 )
 from custom_components.energy_optimizer.decision_engine.morning_sell import (
+    MorningSellStrategy,
     async_run_morning_sell,
 )
 from custom_components.energy_optimizer.calculations.price_windows import ArbitrageBuyHourResult
+from custom_components.energy_optimizer.utils.pv_forecast import MorningPVForecast
 
 pytestmark = pytest.mark.enable_socket
 
@@ -92,7 +98,10 @@ def _base_config() -> dict[str, object]:
         CONF_MIN_ARBITRAGE_PRICE: 400.0,
         CONF_WORK_MODE_ENTITY: "select.work_mode",
         CONF_EXPORT_POWER_ENTITY: "number.export_power",
+        CONF_DISCHARGE_CURRENT_ENTITY: "number.discharge_current",
         CONF_PV_PRODUCTION_SENSOR: "sensor.pv_today",
+        CONF_PV_FORECAST_TODAY: "sensor.pv_forecast_today",
+        CONF_MORNING_SELL_PV_COVERAGE_MARGIN: 0.5,
         CONF_BATTERY_CAPACITY_AH: 37,
         CONF_BATTERY_VOLTAGE: 640,
         CONF_BATTERY_EFFICIENCY: 0.9,
@@ -109,6 +118,8 @@ def _base_states() -> dict[str, str]:
         "sensor.morning_price": "250",
         "sensor.evening_price": "200",
         "sensor.pv_today": "8",
+        "number.discharge_current": ("12", {"max": 30}),
+        "sensor.pv_forecast_today": "2",
         "sensor.energy_optimizer_battery_space": "3",
         "sensor.morning_sell_buy_reference_internal": ("08:00", {"price": 50.0}),
     }
@@ -147,6 +158,26 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, outcomes: list) -> None:
     monkeypatch.setattr(
         f"{SELL_BASE}.set_export_power",
         AsyncMock(),
+    )
+    monkeypatch.setattr(
+        f"{SELL_BASE}.set_discharge_current",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.get_morning_pv_forecast",
+        lambda *_args, **_kwargs: MorningPVForecast(
+            total_kwh=2.0,
+            hourly_kwh={hour: 0.0 for hour in range(24)},
+            status="valid_hourly",
+            method="hourly",
+            source_entity="sensor.pv_forecast_today",
+            aggregate_kwh=2.0,
+            raw_hourly_kwh=2.0,
+            difference_kwh=0.0,
+            tolerance_kwh=0.25,
+            daylight_hours=[],
+            sufficiency_available=True,
+        ),
     )
     monkeypatch.setattr(
         f"{SELL_BASE}.dt_util.utcnow",
@@ -615,9 +646,9 @@ async def test_morning_sell_uses_pv_sufficiency_as_demand_window_end(
     assert outcomes[-1].details["end_hour"] == 10
     assert outcomes[-1].details["sell_horizon_mode"] == "pv_sufficiency"
     assert outcomes[-1].details["sufficiency_hour"] == 10
-    assert captured_surplus_inputs == [(10.0, 1.0, 5.0)]
+    assert captured_surplus_inputs == [(10.0, 1.0, 2.0)]
     assert outcomes[-1].details["base_required_kwh_full"] == 1.0
-    assert outcomes[-1].details["base_pv_forecast_kwh_full"] == 5.0
+    assert outcomes[-1].details["base_pv_forecast_kwh_full"] == 2.0
     assert outcomes[-1].details["required_sufficiency_kwh"] == 2.0
     assert outcomes[-1].details["pv_sufficiency_kwh"] == 1.0
 
@@ -698,6 +729,22 @@ async def test_morning_sell_skips_when_required_reserve_exceeds_current_soc(
     monkeypatch.setattr(f"{SELL_BASE}.set_program_soc", set_program_soc)
     monkeypatch.setattr(f"{SELL_BASE}.set_export_power", set_export_power)
     monkeypatch.setattr(
+        f"{MORNING}.get_morning_pv_forecast",
+        lambda *_args, **_kwargs: MorningPVForecast(
+            total_kwh=2.0,
+            hourly_kwh={hour: 0.0 for hour in range(24)},
+            status="valid_hourly",
+            method="hourly",
+            source_entity="sensor.pv_forecast_today",
+            aggregate_kwh=2.0,
+            raw_hourly_kwh=2.0,
+            difference_kwh=0.0,
+            tolerance_kwh=0.25,
+            daylight_hours=[],
+            sufficiency_available=True,
+        ),
+    )
+    monkeypatch.setattr(
         f"{SELL_BASE}.dt_util.utcnow",
         lambda: datetime(2026, 2, 24, 7, 0, 0),
     )
@@ -755,6 +802,128 @@ async def test_morning_sell_skips_when_required_reserve_exceeds_current_soc(
     set_program_soc.assert_not_awaited()
 
 
+def test_morning_sell_discharge_current_uses_ceiling_and_entity_max() -> None:
+    """Current regulator converts final sell energy to whole amps."""
+    state = MagicMock()
+    state.state = "8"
+    state.attributes = {"max": 9}
+    hass = MagicMock()
+    hass.states.get.return_value = state
+    strategy = MorningSellStrategy(hass, entry_id="entry-1", margin=None)
+    strategy.config = {
+        CONF_DISCHARGE_CURRENT_ENTITY: "number.discharge_current",
+        CONF_BATTERY_VOLTAGE_SENSOR: "sensor.battery_voltage",
+    }
+    strategy.battery_config = SimpleNamespace(voltage=640.0)
+    strategy._use_discharge_current = True
+    strategy._regulator_diagnostics = {}
+
+    voltage_state = MagicMock()
+    voltage_state.state = "600"
+    voltage_state.attributes = {}
+    hass.states.get.side_effect = lambda entity_id: (
+        state if entity_id == "number.discharge_current" else voltage_state
+    )
+
+    regulator = strategy._resolve_sell_regulator(5.1)
+
+    assert regulator.kind == "discharge_current"
+    assert regulator.entity_id == "number.discharge_current"
+    assert regulator.previous_value == 8.0
+    assert regulator.value == 9.0
+
+
+def test_morning_sell_discharge_current_honors_zero_entity_maximum() -> None:
+    """A zero maximum is a valid clamp, not a missing entity attribute."""
+    state = MagicMock()
+    state.state = "8"
+    state.attributes = {"max": 0}
+    hass = MagicMock()
+    hass.states.get.return_value = state
+    strategy = MorningSellStrategy(hass, entry_id="entry-1", margin=None)
+    strategy.config = {CONF_DISCHARGE_CURRENT_ENTITY: "number.discharge_current"}
+    strategy.battery_config = SimpleNamespace(voltage=640.0)
+    strategy._use_discharge_current = True
+    strategy._regulator_diagnostics = {}
+
+    regulator = strategy._resolve_sell_regulator(5.1)
+
+    assert regulator.value == 0.0
+
+
+def test_morning_sell_export_power_rounds_up_to_hundreds() -> None:
+    """Export regulator rounds the final sell energy up to 100 W."""
+    state = MagicMock()
+    state.state = "1200"
+    state.attributes = {}
+    hass = MagicMock()
+    hass.states.get.return_value = state
+    strategy = MorningSellStrategy(hass, entry_id="entry-1", margin=None)
+    strategy.config = {CONF_EXPORT_POWER_ENTITY: "number.export_power"}
+    strategy._use_discharge_current = False
+    strategy._regulator_diagnostics = {}
+
+    regulator = strategy._resolve_sell_regulator(2.301)
+
+    assert regulator.kind == "export_power"
+    assert regulator.previous_value == 1200.0
+    assert regulator.value == 2400.0
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_skips_without_valid_hourly_pv_forecast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A legacy aggregate forecast cannot select a Morning sell regulator."""
+    config = _base_config()
+    config.pop(CONF_PV_FORECAST_TODAY)
+    hass = _setup_hass(config, _base_states())
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].reason == (
+        "A valid hourly PV forecast is required to select the sell regulator"
+    )
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_skips_without_discharge_current_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Current control is not applied when its baseline cannot be restored."""
+    config = _base_config()
+    config.pop(CONF_DISCHARGE_CURRENT_ENTITY)
+    hass = _setup_hass(config, _base_states())
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+    monkeypatch.setattr(
+        f"{MORNING}.get_morning_pv_forecast",
+        lambda *_args, **_kwargs: MorningPVForecast(
+            total_kwh=10.0,
+            hourly_kwh={hour: 10.0 for hour in range(24)},
+            status="valid_hourly",
+            method="hourly",
+            source_entity="sensor.pv_forecast_today",
+            aggregate_kwh=10.0,
+            raw_hourly_kwh=10.0,
+            difference_kwh=0.0,
+            tolerance_kwh=1.0,
+            daylight_hours=[],
+            sufficiency_available=True,
+        ),
+    )
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].reason == (
+        "PV covers demand, but no discharge-current entity is configured"
+    )
+
+
 @pytest.mark.asyncio
 async def test_morning_sell_skips_when_pv_floor_required_reserve_exceeds_current_soc(
     monkeypatch: pytest.MonkeyPatch,
@@ -787,6 +956,22 @@ async def test_morning_sell_skips_when_pv_floor_required_reserve_exceeds_current
     monkeypatch.setattr(f"{SELL_BASE}.set_work_mode", set_work_mode)
     monkeypatch.setattr(f"{SELL_BASE}.set_program_soc", set_program_soc)
     monkeypatch.setattr(f"{SELL_BASE}.set_export_power", set_export_power)
+    monkeypatch.setattr(
+        f"{MORNING}.get_morning_pv_forecast",
+        lambda *_args, **_kwargs: MorningPVForecast(
+            total_kwh=2.0,
+            hourly_kwh={hour: 0.0 for hour in range(24)},
+            status="valid_hourly",
+            method="hourly",
+            source_entity="sensor.pv_forecast_today",
+            aggregate_kwh=2.0,
+            raw_hourly_kwh=2.0,
+            difference_kwh=0.0,
+            tolerance_kwh=0.25,
+            daylight_hours=[],
+            sufficiency_available=True,
+        ),
+    )
     monkeypatch.setattr(
         f"{SELL_BASE}.dt_util.utcnow",
         lambda: datetime(2026, 2, 24, 7, 0, 0),

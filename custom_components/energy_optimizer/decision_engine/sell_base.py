@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import logging
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.core import Context
+from homeassistant.core import Context, HomeAssistantError
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -24,8 +24,14 @@ from ..const import (
     STORAGE_VERSION_SELL_RESTORE,
     WORK_MODE_EXPORT_FIRST,
 )
-from ..controllers.inverter import set_export_power, set_program_soc, set_work_mode
+from ..controllers.inverter import (
+    set_discharge_current,
+    set_export_power,
+    set_program_soc,
+    set_work_mode,
+)
 from ..helpers import get_float_state_info, is_test_sell_mode
+from ..utils.decision_dump import record_input, record_step
 from ..utils.logging import DecisionOutcome, log_decision_unified
 from ..utils.time_window import build_hour_window
 from .common import (
@@ -52,6 +58,16 @@ class SellRequest:
     build_outcome_fn: Callable[[float, float, float], DecisionOutcome]
     build_no_action_fn: Callable[[float], DecisionOutcome]
     skip_restore: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SellRegulator:
+    """Inverter regulator selected for one sell execution."""
+
+    kind: str
+    entity_id: str | None
+    value: float
+    previous_value: float | None
 
 
 class BaseSellStrategy(ABC):
@@ -196,6 +212,23 @@ class BaseSellStrategy(ABC):
         """Return strategy battery configuration."""
         return get_battery_config(self.config)
 
+    def _build_missing_soc_outcome(self) -> DecisionOutcome | None:
+        """Build an optional outcome when the required SOC input is unavailable."""
+        return None
+
+    def _resolve_sell_regulator(self, surplus_kwh: float) -> SellRegulator:
+        """Return the regulator used to control this sell execution."""
+        entity_id = self.config.get(CONF_EXPORT_POWER_ENTITY)
+        previous_value: float | None = None
+        if entity_id:
+            previous_value, _, _ = get_float_state_info(self.hass, str(entity_id))
+        return SellRegulator(
+            kind="export_power",
+            entity_id=str(entity_id) if entity_id else None,
+            value=calculate_export_power(surplus_kwh),
+            previous_value=previous_value,
+        )
+
     @abstractmethod
     async def _evaluate_sell(self) -> DecisionOutcome | SellRequest:
         """Evaluate branch logic and return outcome or execution request."""
@@ -241,8 +274,21 @@ class BaseSellStrategy(ABC):
 
         current_soc_state = get_required_current_soc_state(self.hass, self.config)
         if current_soc_state is None:
+            if outcome := self._build_missing_soc_outcome():
+                await self._log_outcome(outcome)
             return
-        _, self.current_soc = current_soc_state
+        soc_entity, self.current_soc = current_soc_state
+        soc_state = self.hass.states.get(soc_entity)
+        record_input(
+            "battery_soc_snapshot",
+            source=soc_entity,
+            value={
+                "soc": self.current_soc,
+                "last_updated": (
+                    soc_state.last_updated.isoformat() if soc_state is not None else None
+                ),
+            },
+        )
 
         prog_soc_state = self._get_prog_soc_state()
         if prog_soc_state is None:
@@ -349,15 +395,31 @@ class BaseSellStrategy(ABC):
             "rg": round(required_reserve_soc, 1),
             "ra": required_reserve_applied,
         }
+        record_step(
+            "sell_target_soc",
+            kind="calculation",
+            inputs={
+                "current_soc": self.current_soc,
+                "surplus_kwh": surplus_kwh,
+                "capacity_ah": self.battery_config.capacity_ah,
+                "voltage_v": self.battery_config.voltage,
+                "target_soc_floor": target_soc_floor,
+                "required_kwh": request.required_kwh,
+            },
+            result={
+                "raw_target_soc": raw_target_soc,
+                "target_soc": target_soc,
+                "required_reserve_soc": required_reserve_soc,
+            },
+        )
         if target_soc >= self.current_soc:
             outcome = request.build_no_action_fn(surplus_kwh)
             outcome.details.update(target_diagnostics)
             await self._log_outcome(outcome)
             return
 
-        export_power_w = calculate_export_power(surplus_kwh)
+        regulator = self._resolve_sell_regulator(surplus_kwh)
         work_mode_entity = self.config.get(CONF_WORK_MODE_ENTITY)
-        export_power_entity = self.config.get(CONF_EXPORT_POWER_ENTITY)
         sell_test_mode = is_test_sell_mode(self.hass, self.entry)
 
         original_work_mode: str | None = None
@@ -381,7 +443,7 @@ class BaseSellStrategy(ABC):
             if not skip_restore:
                 existing_restore = await self._get_existing_restore_payload()
                 if existing_restore is None or existing_restore.get("sell_type") != self.sell_type:
-                    restore_data = {
+                    restore_data: dict[str, Any] = {
                         "work_mode": original_work_mode,
                         "prog_soc_entity": self.prog_soc_entity,
                         "prog_soc_value": self.original_prog_soc,
@@ -389,6 +451,12 @@ class BaseSellStrategy(ABC):
                         "sell_type": self.sell_type,
                         "timestamp": dt_util.utcnow().isoformat(),
                     }
+                    if regulator.entity_id and regulator.previous_value is not None:
+                        restore_data["regulator"] = {
+                            "kind": regulator.kind,
+                            "entity_id": regulator.entity_id,
+                            "value": regulator.previous_value,
+                        }
                     self.hass.data[DOMAIN][self.entry.entry_id]["sell_restore"] = restore_data
                     store = Store(
                         self.hass,
@@ -402,26 +470,53 @@ class BaseSellStrategy(ABC):
                         self.sell_type,
                     )
 
-            await set_program_soc(
-                self.hass,
-                self.prog_soc_entity,
-                target_soc,
-                entry=self.entry,
-                logger=_LOGGER,
-                context=self.integration_context,
-            )
-            await set_export_power(
-                self.hass,
-                str(export_power_entity) if export_power_entity else None,
-                export_power_w,
-                entry=self.entry,
-                logger=_LOGGER,
-                context=self.integration_context,
-            )
+            try:
+                await set_program_soc(
+                    self.hass,
+                    self.prog_soc_entity,
+                    target_soc,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
+                if regulator.kind == "discharge_current":
+                    await set_discharge_current(
+                        self.hass,
+                        regulator.entity_id,
+                        regulator.value,
+                        entry=self.entry,
+                        logger=_LOGGER,
+                        context=self.integration_context,
+                    )
+                else:
+                    await set_export_power(
+                        self.hass,
+                        regulator.entity_id,
+                        regulator.value,
+                        entry=self.entry,
+                        logger=_LOGGER,
+                        context=self.integration_context,
+                    )
+            except HomeAssistantError as err:
+                _LOGGER.error("%s sell write failed: %s", self.sell_type, err)
+                await self._rollback_sell_write(
+                    original_work_mode=original_work_mode,
+                    original_prog_soc=self.original_prog_soc,
+                    regulator=regulator,
+                )
+                outcome = request.build_no_action_fn(surplus_kwh)
+                outcome.action_type = "sell_failed"
+                outcome.summary = f"{self.scenario_name} skipped after inverter write failure"
+                outcome.reason = str(err)
+                await self._log_outcome(outcome)
+                return
 
+        export_power_w = regulator.value if regulator.kind == "export_power" else 0.0
         outcome = request.build_outcome_fn(target_soc, surplus_kwh, export_power_w)
         outcome.details.update(target_diagnostics)
         outcome.details["test_sell_mode"] = sell_test_mode
+        if regulator.kind == "discharge_current":
+            outcome.details.pop("export_power_w", None)
 
         if not sell_test_mode:
             outcome.entities_changed = [
@@ -431,9 +526,64 @@ class BaseSellStrategy(ABC):
                 outcome.entities_changed.append(
                     {"entity_id": str(work_mode_entity), "option": WORK_MODE_EXPORT_FIRST}
                 )
-            if export_power_entity:
+            if regulator.entity_id:
                 outcome.entities_changed.append(
-                    {"entity_id": str(export_power_entity), "value": export_power_w}
+                    {"entity_id": regulator.entity_id, "value": regulator.value}
                 )
 
         await self._log_outcome(outcome)
+
+    async def _rollback_sell_write(
+        self,
+        *,
+        original_work_mode: str | None,
+        original_prog_soc: float,
+        regulator: SellRegulator,
+    ) -> None:
+        """Best-effort rollback of settings changed before a failed sell write."""
+        if original_work_mode:
+            try:
+                await set_work_mode(
+                    self.hass,
+                    str(self.config.get(CONF_WORK_MODE_ENTITY) or ""),
+                    original_work_mode,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
+            except HomeAssistantError as err:
+                _LOGGER.error("Failed to roll back work mode after sell error: %s", err)
+        try:
+            await set_program_soc(
+                self.hass,
+                self.prog_soc_entity,
+                original_prog_soc,
+                entry=self.entry,
+                logger=_LOGGER,
+                context=self.integration_context,
+            )
+        except HomeAssistantError as err:
+            _LOGGER.error("Failed to roll back program SOC after sell error: %s", err)
+        if regulator.previous_value is None:
+            return
+        try:
+            if regulator.kind == "discharge_current":
+                await set_discharge_current(
+                    self.hass,
+                    regulator.entity_id,
+                    regulator.previous_value,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
+            else:
+                await set_export_power(
+                    self.hass,
+                    regulator.entity_id,
+                    regulator.previous_value,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
+        except HomeAssistantError as err:
+            _LOGGER.error("Failed to roll back sell regulator after sell error: %s", err)

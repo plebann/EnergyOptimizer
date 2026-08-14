@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, time
+from math import ceil
 from typing import TYPE_CHECKING
 
 from homeassistant.util import dt as dt_util
@@ -18,10 +19,14 @@ from ..calculations.price_windows import find_first_arbitrage_buy_hour
 from ..const import (
     ARBITRAGE_BUY_WINDOW_PRICE_MULTIPLIER,
     CONF_BUY_PRICE_SENSOR,
+    CONF_BATTERY_VOLTAGE_SENSOR,
+    CONF_DISCHARGE_CURRENT_ENTITY,
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_MORNING_MAX_PRICE_SENSOR,
+    CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
     CONF_PV_FORECAST_TODAY,
     DOMAIN,
+    DEFAULT_MORNING_SELL_PV_COVERAGE_MARGIN,
     SUN_ENTITY,
 )
 from ..decision_engine.common import (
@@ -42,10 +47,10 @@ from ..helpers import (
 )
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.logging import DecisionOutcome
-from ..utils.decision_dump import active_decision_audit
+from ..utils.decision_dump import active_decision_audit, record_step
 from ..utils.pv_forecast import MorningPVForecast, get_morning_pv_forecast
 from ..utils.time_window import build_hour_window
-from .sell_base import BaseSellStrategy, SellRequest
+from .sell_base import BaseSellStrategy, SellRegulator, SellRequest
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -98,6 +103,8 @@ class MorningSellStrategy(BaseSellStrategy):
         """Initialize morning sell strategy."""
         super().__init__(hass, entry_id=entry_id, margin=margin)
         self._allow_min_soc_pv = False
+        self._use_discharge_current = False
+        self._regulator_diagnostics: dict[str, object] = {}
 
     @property
     def scenario_name(self) -> str:
@@ -124,6 +131,15 @@ class MorningSellStrategy(BaseSellStrategy):
         if self._allow_min_soc_pv:
             return self.battery_config.min_soc_pv
         return self.battery_config.min_soc
+
+    def _build_missing_soc_outcome(self) -> DecisionOutcome:
+        """Report a missing SOC input as a concise skipped morning sell."""
+        return DecisionOutcome(
+            scenario=self.scenario_name,
+            action_type="no_action",
+            summary="Morning sell skipped: battery SOC unavailable",
+            reason="Battery SOC is missing, unavailable, or invalid",
+        )
 
     def _get_prog_soc_state(self) -> tuple[str, float] | None:
         """Resolve program SOC entity/value for morning sell."""
@@ -157,6 +173,92 @@ class MorningSellStrategy(BaseSellStrategy):
         self.price = 0.0
         self._price_unavailable = True
         return True
+
+    def _resolve_sell_regulator(self, surplus_kwh: float) -> SellRegulator:
+        """Select the configured regulator for the evaluated morning sell."""
+        if not self._use_discharge_current:
+            regulator = super()._resolve_sell_regulator(surplus_kwh)
+            export_power_w = ceil((surplus_kwh * 1000.0) / 100.0) * 100.0
+            self._regulator_diagnostics.update(
+                {
+                    "regulator_kind": regulator.kind,
+                    "regulator_value": export_power_w,
+                    "regulator_previous_value": regulator.previous_value,
+                }
+            )
+            record_step(
+                "morning_sell_regulator",
+                kind="calculation",
+                inputs=self._regulator_diagnostics,
+                result={"kind": regulator.kind, "value": export_power_w},
+            )
+            return SellRegulator(
+                kind=regulator.kind,
+                entity_id=regulator.entity_id,
+                value=export_power_w,
+                previous_value=regulator.previous_value,
+            )
+
+        entity_id = self.config.get(CONF_DISCHARGE_CURRENT_ENTITY)
+        previous_value: float | None = None
+        max_current: float | None = None
+        if entity_id:
+            state = self.hass.states.get(str(entity_id))
+            if state is not None:
+                try:
+                    previous_value = float(state.state)
+                except (TypeError, ValueError):
+                    previous_value = None
+                try:
+                    max_current = float(state.attributes.get("max"))
+                except (TypeError, ValueError):
+                    max_current = None
+
+        voltage_entity = self.config.get(CONF_BATTERY_VOLTAGE_SENSOR)
+        voltage = None
+        voltage_source = "configured_nominal"
+        if voltage_entity:
+            voltage, _, voltage_error = get_float_state_info(
+                self.hass, str(voltage_entity)
+            )
+            if voltage_error is None and voltage is not None and voltage > 0:
+                voltage_source = str(voltage_entity)
+            else:
+                voltage = None
+        if voltage is None:
+            voltage = self.battery_config.voltage
+
+        calculated_current = ceil((surplus_kwh * 1000.0) / voltage)
+        current = (
+            min(float(calculated_current), max_current)
+            if max_current is not None
+            else float(calculated_current)
+        )
+        self._regulator_diagnostics.update(
+            {
+                "regulator_kind": "discharge_current",
+                "regulator_entity": entity_id,
+                "surplus_kwh": surplus_kwh,
+                "voltage_v": voltage,
+                "voltage_source": voltage_source,
+                "calculated_current_a": calculated_current,
+                "max_current_a": max_current,
+                "requested_current_a": current,
+                "previous_current_a": previous_value,
+            }
+        )
+        record_step(
+            "morning_sell_regulator",
+            kind="calculation",
+            inputs=self._regulator_diagnostics,
+            result={"kind": "discharge_current", "value": current},
+        )
+        return SellRegulator(
+            kind="discharge_current",
+            entity_id=str(entity_id) if entity_id else None,
+            value=current,
+            previous_value=previous_value,
+        )
 
     async def _evaluate_sell(self) -> DecisionOutcome | SellRequest:
         """Run morning sell logic using a single surplus branch."""
@@ -212,6 +314,90 @@ class MorningSellStrategy(BaseSellStrategy):
             self.hass,
             self.config,
             hours=base_hours,
+        )
+
+        if base_pv_forecast is None or not base_pv_forecast.sufficiency_available:
+            return build_no_action_outcome(
+                scenario=self.scenario_name,
+                summary="Morning sell skipped: hourly PV forecast unavailable",
+                reason="A valid hourly PV forecast is required to select the sell regulator",
+                current_soc=self.current_soc,
+                reserve_kwh=0.0,
+                required_kwh=0.0,
+                pv_forecast_kwh=0.0,
+                sufficiency_hour=None,
+                sufficiency_reached=False,
+            )
+
+        sell_hour = self._resolve_sell_hour()
+        hourly_demand_kwh = (
+            hourly_usage[sell_hour]
+            + base_heat_pump_hourly.get(sell_hour, 0.0)
+            + base_losses_hourly
+        ) * self.margin
+        hourly_pv_kwh = base_pv_forecast_hourly[sell_hour]
+        coverage_margin = float(
+            self.config.get(
+                CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
+                DEFAULT_MORNING_SELL_PV_COVERAGE_MARGIN,
+            )
+        )
+        required_pv_kwh = hourly_demand_kwh * (1.0 + coverage_margin)
+        self._use_discharge_current = hourly_pv_kwh >= required_pv_kwh
+        if self._use_discharge_current and not self.config.get(
+            CONF_DISCHARGE_CURRENT_ENTITY
+        ):
+            return build_no_action_outcome(
+                scenario=self.scenario_name,
+                summary="Morning sell skipped: discharge-current control unavailable",
+                reason="PV covers demand, but no discharge-current entity is configured",
+                current_soc=self.current_soc,
+                reserve_kwh=0.0,
+                required_kwh=hourly_demand_kwh,
+                pv_forecast_kwh=hourly_pv_kwh,
+                sufficiency_hour=None,
+                sufficiency_reached=False,
+            )
+        if self._use_discharge_current:
+            discharge_state = self.hass.states.get(
+                str(self.config[CONF_DISCHARGE_CURRENT_ENTITY])
+            )
+            try:
+                previous_discharge_current = (
+                    float(discharge_state.state) if discharge_state is not None else None
+                )
+            except (TypeError, ValueError):
+                previous_discharge_current = None
+            if previous_discharge_current is None:
+                return build_no_action_outcome(
+                    scenario=self.scenario_name,
+                    summary="Morning sell skipped: discharge-current baseline unavailable",
+                    reason=(
+                        "The existing discharge-current value must be available "
+                        "before it can be restored"
+                    ),
+                    current_soc=self.current_soc,
+                    reserve_kwh=0.0,
+                    required_kwh=hourly_demand_kwh,
+                    pv_forecast_kwh=hourly_pv_kwh,
+                    sufficiency_hour=None,
+                    sufficiency_reached=False,
+                )
+        self._regulator_diagnostics = {
+            "sell_hour": sell_hour,
+            "hourly_pv_kwh": round(hourly_pv_kwh, 3),
+            "hourly_demand_kwh": round(hourly_demand_kwh, 3),
+            "pv_coverage_margin": coverage_margin,
+            "required_pv_kwh": round(required_pv_kwh, 3),
+            "selected_regulator": (
+                "discharge_current" if self._use_discharge_current else "export_power"
+            ),
+        }
+        record_step(
+            "morning_sell_regulator_selection",
+            kind="gate",
+            inputs=self._regulator_diagnostics,
+            result=self._use_discharge_current,
         )
 
         if _LOGGER.isEnabledFor(logging.DEBUG):
