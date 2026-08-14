@@ -15,6 +15,7 @@ from custom_components.energy_optimizer.decision_engine.sell_base import (
 from custom_components.energy_optimizer.scheduler.action_scheduler import ActionScheduler
 from custom_components.energy_optimizer.service_handlers.sell_restore import (
     async_check_pending_sell_restore,
+    async_handle_sell_restore,
 )
 
 
@@ -440,6 +441,65 @@ async def test_restore_callback_restores_work_mode_and_soc(
     assert set_export_power_mock.await_args.args[2] == pytest.approx(15000.0)
     assert "sell_restore" not in hass.data[DOMAIN]["entry-1"]
     assert _FakeStore.removed is True
+
+
+@pytest.mark.asyncio
+async def test_restore_callback_restores_previous_discharge_current(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Morning restore returns the changed discharge-current limit to its baseline."""
+    hass = MagicMock()
+    hass.data = {
+        DOMAIN: {
+            "entry-1": {
+                "sell_restore": {
+                    "work_mode": "Zero Export to Load",
+                    "prog_soc_entity": "number.prog3_soc",
+                    "prog_soc_value": 65.0,
+                    "restore_hour": 8,
+                    "sell_type": "morning",
+                    "timestamp": "2026-02-27T07:00:00+00:00",
+                    "regulator": {
+                        "kind": "discharge_current",
+                        "entity_id": "number.discharge_current",
+                        "value": 12.0,
+                    },
+                }
+            }
+        }
+    }
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {"work_mode_entity": "select.work_mode"}
+    set_discharge_current_mock = AsyncMock()
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.service_handlers.sell_restore.Store",
+        _FakeStore,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.service_handlers.sell_restore.set_work_mode",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.service_handlers.sell_restore.set_program_soc",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.service_handlers.sell_restore.set_discharge_current",
+        set_discharge_current_mock,
+    )
+
+    _FakeStore.load_data = None
+    _FakeStore.removed = False
+
+    await async_handle_sell_restore(hass, entry, "morning")
+
+    assert set_discharge_current_mock.await_args.args[1:] == (
+        "number.discharge_current",
+        12.0,
+    )
+    assert "sell_restore" not in hass.data[DOMAIN]["entry-1"]
 
 
 @pytest.mark.asyncio

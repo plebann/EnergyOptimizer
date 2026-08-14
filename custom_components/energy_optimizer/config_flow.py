@@ -47,6 +47,7 @@ from .const import (
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MIN_SOC,
     CONF_MIN_SOC_PV,
+    CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
     CONF_PROG1_SOC_ENTITY,
     CONF_PROG1_TIME_START_ENTITY,
     CONF_PROG2_SOC_ENTITY,
@@ -81,6 +82,7 @@ from .const import (
     DEFAULT_HEAT_PUMP_FORECAST_DOMAIN,
     DEFAULT_HEAT_PUMP_FORECAST_SERVICE,
     DEFAULT_MAX_SOC,
+    DEFAULT_MORNING_SELL_PV_COVERAGE_MARGIN,
     DEFAULT_MAX_EXPORT_POWER,
     DEFAULT_MIN_ARBITRAGE_PRICE,
     DEFAULT_MIN_SOC,
@@ -405,6 +407,10 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_PV_EFFICIENCY,
                     default=DEFAULT_PV_EFFICIENCY,
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
+                vol.Optional(
+                    CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
+                    default=DEFAULT_MORNING_SELL_PV_COVERAGE_MARGIN,
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
                 vol.Optional(CONF_PV_FORECAST_TODAY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -1182,6 +1188,13 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                         CONF_PV_EFFICIENCY, DEFAULT_PV_EFFICIENCY
                     ),
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
+                vol.Optional(
+                    CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
+                    default=self._config_entry.data.get(
+                        CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
+                        DEFAULT_MORNING_SELL_PV_COVERAGE_MARGIN,
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
                 vol.Optional(
                     CONF_WEATHER_FORECAST,
                     default=self._config_entry.data.get(CONF_WEATHER_FORECAST),
