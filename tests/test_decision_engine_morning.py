@@ -32,6 +32,7 @@ from custom_components.energy_optimizer.calculations.battery import (
     calculate_target_soc,
 )
 from custom_components.energy_optimizer.decision_engine.morning_charge import (
+    MorningChargeStrategy,
     async_run_morning_charge,
 )
 
@@ -82,6 +83,29 @@ def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
         }
     }
     return hass
+
+
+def test_morning_charge_uses_uncompensated_pv_forecast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep morning PV sufficiency aligned with morning sell."""
+    strategy = MorningChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
+    strategy.entry = MagicMock(entry_id="entry-1")
+    strategy.config = {}
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_tariff_end_hour",
+        lambda *args, **kwargs: 13,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_night_buy_window_end_hour",
+        lambda *args, **kwargs: 5,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_day_buy_window_start_hour",
+        lambda *args, **kwargs: 12,
+    )
+
+    assert strategy._resolve_forecast_params() == (5, 12, {"compensate": False})
 
 
 @pytest.mark.asyncio

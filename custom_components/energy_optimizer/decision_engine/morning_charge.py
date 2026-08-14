@@ -79,7 +79,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
                 entry_id=self.entry.entry_id,
                 default_hour=tariff_end_hour,
             ),
-            {},
+            {"compensate": False},
         )
 
     async def _check_early_exit(self) -> bool:
