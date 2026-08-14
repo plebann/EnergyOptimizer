@@ -25,7 +25,12 @@ from ..const import (
 )
 from ..controllers.inverter import turn_off_switch, turn_on_switch
 from ..helpers import get_float_state_info, get_required_float_state
-from ..utils.decision_dump import active_decision_audit, emit_decision_dump, record_step
+from ..utils.decision_dump import (
+    active_decision_audit,
+    emit_decision_dump,
+    record_input,
+    record_step,
+)
 from ..utils.forecast import get_pv_forecast_window
 from .common import get_battery_config, resolve_entry
 
@@ -58,7 +63,13 @@ def _get_offgrid_threshold(hass: HomeAssistant, entry_id: str) -> float:
         .get("export_block_offgrid_threshold")
     )
     try:
-        return float(threshold_number.native_value)
+        value = float(threshold_number.native_value)
+        record_input(
+            "export_block_offgrid_threshold",
+            source=None,
+            value=value,
+        )
+        return value
     except (AttributeError, TypeError, ValueError):
         _LOGGER.warning(
             "Export block control: threshold number unavailable; using its default value"
@@ -142,6 +153,12 @@ def _get_bev_state_and_power_kwh(
         return False, 0.0
 
     bev_state = hass.states.get(str(bev_state_entity))
+    record_input(
+        "bev_charging_state",
+        source=str(bev_state_entity),
+        value=None if bev_state is None else bev_state.state,
+        status="missing" if bev_state is None else "ok",
+    )
     if bev_state is None or bev_state.state in {"unknown", "unavailable"}:
         _LOGGER.warning(
             "Export block control: BEV charging sensor %s is unavailable",
@@ -178,6 +195,21 @@ def _get_current_hour_pv_kwh(
     """Return compensated PV forecast for the current hour."""
     pv_entity = config.get(CONF_PV_FORECAST_TODAY)
     pv_state = hass.states.get(str(pv_entity)) if pv_entity else None
+    record_input(
+        "pv_forecast_today",
+        source=str(pv_entity) if pv_entity else None,
+        value=None if pv_state is None else pv_state.state,
+        status="missing" if pv_state is None else "ok",
+        attributes=(
+            {
+                key: pv_state.attributes[key]
+                for key in ("detailedHourly", "detailedForecast")
+                if key in pv_state.attributes
+            }
+            if pv_state is not None
+            else None
+        ),
+    )
     detailed_forecast = (
         pv_state.attributes.get("detailedHourly")
         if pv_state is not None
@@ -219,6 +251,12 @@ async def _set_switch_state(
     if not entity_id:
         return False
     switch_state = hass.states.get(str(entity_id))
+    record_input(
+        "switch_state",
+        source=str(entity_id),
+        value=None if switch_state is None else switch_state.state,
+        status="missing" if switch_state is None else "ok",
+    )
     if switch_state is None or switch_state.state in {"unknown", "unavailable"}:
         _LOGGER.warning(
             "Export block control: switch entity %s is unavailable", entity_id
@@ -345,6 +383,12 @@ def _can_enter_offgrid(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     for switch_entity in (export_switch, offgrid_switch):
         state = hass.states.get(str(switch_entity))
+        record_input(
+            "switch_state",
+            source=str(switch_entity),
+            value=None if state is None else state.state,
+            status="missing" if state is None else "ok",
+        )
         if state is None or state.state in {"unknown", "unavailable"}:
             return False
     return True
@@ -383,6 +427,12 @@ async def _async_run_export_block_control(
 ) -> dict[str, Any] | None:
     """Evaluate export control using a pre-resolved entry and active audit."""
     sun_state = hass.states.get(SUN_ENTITY)
+    record_input(
+        "sun",
+        source=SUN_ENTITY,
+        value=None if sun_state is None else sun_state.state,
+        status="missing" if sun_state is None else "ok",
+    )
     if sun_state is None or sun_state.state != SUN_ABOVE_HORIZON:
         record_step(
             "sun_above_horizon",
