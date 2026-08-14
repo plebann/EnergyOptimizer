@@ -27,6 +27,7 @@ from ..const import (
 from ..controllers.inverter import set_export_power, set_program_soc, set_work_mode
 from ..helpers import get_float_state_info, is_test_sell_mode
 from ..utils.logging import DecisionOutcome, log_decision_unified
+from ..utils.time_window import build_hour_window
 from .common import (
     BatteryConfig,
     get_battery_config,
@@ -170,13 +171,24 @@ class BaseSellStrategy(ABC):
         purpose: str = "sr",
     ) -> DecisionOutcome:
         """Attach the final compact energy horizon to a sell outcome."""
+        hour_window = build_hour_window(start_hour, end_hour)
+        end_day_offset = int(end_hour < start_hour)
+        outcome.details.update(
+            {
+                "window_start_hour": start_hour,
+                "window_end_hour": end_hour,
+                "window_end_day_offset": end_day_offset,
+                "window_duration_hours": len(hour_window),
+                "window_hours": hour_window,
+            }
+        )
         outcome.history_windows = [[
             purpose,
             start_hour,
             "next_h",
             end_hour % 24,
             end_kind,
-            end_hour <= start_hour,
+            bool(end_day_offset),
         ]]
         return outcome
 

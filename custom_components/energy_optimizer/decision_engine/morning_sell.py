@@ -20,6 +20,7 @@ from ..const import (
     CONF_BUY_PRICE_SENSOR,
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_MORNING_MAX_PRICE_SENSOR,
+    CONF_PV_FORECAST_TODAY,
     DOMAIN,
     SUN_ENTITY,
 )
@@ -42,6 +43,7 @@ from ..helpers import (
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.logging import DecisionOutcome
 from ..utils.decision_dump import active_decision_audit
+from ..utils.pv_forecast import MorningPVForecast, get_morning_pv_forecast
 from ..utils.time_window import build_hour_window
 from .sell_base import BaseSellStrategy, SellRequest
 
@@ -50,6 +52,37 @@ if TYPE_CHECKING:
 
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _get_morning_pv_window(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    start_hour: int,
+    end_hour: int,
+    apply_efficiency: bool,
+    entry_id: str,
+) -> tuple[float, dict[int, float], MorningPVForecast | None]:
+    """Return validated morning PV when configured, otherwise preserve legacy input."""
+    if config.get(CONF_PV_FORECAST_TODAY):
+        forecast = get_morning_pv_forecast(
+            hass,
+            config,
+            start_hour=start_hour,
+            end_hour=end_hour,
+            apply_efficiency=apply_efficiency,
+        )
+        return forecast.total_kwh, forecast.hourly_kwh, forecast
+    total_kwh, hourly_kwh = get_pv_forecast_window(
+        hass,
+        config,
+        start_hour=start_hour,
+        end_hour=end_hour,
+        apply_efficiency=apply_efficiency,
+        compensate=False,
+        entry_id=entry_id,
+    )
+    return total_kwh, hourly_kwh, None
 
 
 class MorningSellStrategy(BaseSellStrategy):
@@ -161,15 +194,20 @@ class MorningSellStrategy(BaseSellStrategy):
             start_hour=start_hour,
             end_hour=base_end_hour,
         )
-        base_pv_forecast_kwh, base_pv_forecast_hourly = get_pv_forecast_window(
+        (
+            base_pv_forecast_kwh,
+            base_pv_forecast_hourly,
+            base_pv_forecast,
+        ) = _get_morning_pv_window(
             self.hass,
             self.config,
             start_hour=start_hour,
             end_hour=base_end_hour,
             apply_efficiency=True,
-            compensate=False,
             entry_id=self.entry.entry_id,
         )
+        if base_pv_forecast is not None:
+            horizon_details.update(base_pv_forecast.audit_details())
         base_losses_hourly, _ = calculate_losses(
             self.hass,
             self.config,
@@ -228,6 +266,7 @@ class MorningSellStrategy(BaseSellStrategy):
             losses_hourly=base_losses_hourly,
             losses_kwh=base_losses_hourly * base_hours,
             margin=self.margin,
+            morning_pv_forecast=base_pv_forecast,
         )
 
         sufficiency = _resolve_sufficiency(base_forecasts)
@@ -358,13 +397,12 @@ class MorningSellStrategy(BaseSellStrategy):
                 start_hour=start_hour,
                 end_hour=selected_end_hour,
             )
-            pv_forecast_kwh, _ = get_pv_forecast_window(
+            pv_forecast_kwh, _, _ = _get_morning_pv_window(
                 self.hass,
                 self.config,
                 start_hour=start_hour,
                 end_hour=selected_end_hour,
                 apply_efficiency=True,
-                compensate=False,
                 entry_id=self.entry.entry_id,
             )
             selected_losses_hourly, _ = calculate_losses(
@@ -492,13 +530,16 @@ class MorningSellStrategy(BaseSellStrategy):
                 start_hour=start_hour,
                 end_hour=surplus_end_hour,
             )
-            surplus_pv_forecast_kwh, surplus_pv_forecast_hourly = get_pv_forecast_window(
+            (
+                surplus_pv_forecast_kwh,
+                surplus_pv_forecast_hourly,
+                surplus_pv_forecast,
+            ) = _get_morning_pv_window(
                 self.hass,
                 self.config,
                 start_hour=start_hour,
                 end_hour=surplus_end_hour,
                 apply_efficiency=True,
-                compensate=False,
                 entry_id=self.entry.entry_id,
             )
             surplus_losses_hourly, _ = calculate_losses(
@@ -519,6 +560,7 @@ class MorningSellStrategy(BaseSellStrategy):
                 losses_hourly=surplus_losses_hourly,
                 losses_kwh=surplus_losses_hourly * surplus_hours,
                 margin=self.margin,
+                morning_pv_forecast=surplus_pv_forecast,
             )
             sufficiency_to_sunset = _resolve_sufficiency(forecasts_to_sunset)
             required_to_sunset_kwh = sufficiency_to_sunset.required_kwh

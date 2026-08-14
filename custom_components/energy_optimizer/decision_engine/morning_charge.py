@@ -45,6 +45,7 @@ from ..helpers import (
 from .charge_base import BaseChargeStrategy
 from ..utils.logging import DecisionOutcome, log_decision_unified
 from ..utils.decision_dump import active_decision_audit
+from ..utils.time_window import build_hour_window
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -79,7 +80,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
                 entry_id=self.entry.entry_id,
                 default_hour=tariff_end_hour,
             ),
-            {"compensate": False},
+            {"compensate": False, "use_morning_pv_fallback": True},
         )
 
     async def _check_early_exit(self) -> bool:
@@ -162,7 +163,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
         balance: EnergyBalance,
     ) -> DecisionOutcome:
         """Build morning charge outcome payload."""
-        return build_morning_charge_outcome(
+        outcome = build_morning_charge_outcome(
             scenario=self.scenario_name,
             action=action,
             balance=balance,
@@ -176,6 +177,8 @@ class MorningChargeStrategy(BaseChargeStrategy):
             arbitrage_kwh=self._arbitrage_kwh,
             arbitrage_details=self._arbitrage_details,
         )
+        outcome.details["gap_required_kwh"] = round(self._base_gap_kwh, 2)
+        return outcome
 
     async def _handle_no_action(self, balance: EnergyBalance) -> None:
         """Handle morning no-action path."""
@@ -222,7 +225,25 @@ class MorningChargeStrategy(BaseChargeStrategy):
                 "heat_pump_kwh": round(self.forecasts.heat_pump_kwh, 2),
                 "losses_kwh": round(self.forecasts.losses_kwh, 2),
                 "gap_kwh": round(self._total_gap_kwh, 2),
+                "gap_required_kwh": round(self._base_gap_kwh, 2),
                 "gap_sufficiency_kwh": round(self._gap_sufficiency_kwh, 2),
+                "gap_before_clamp_kwh": round(balance.gap_kwh, 2),
+                "gap_clamped_kwh": round(max(balance.gap_kwh, 0.0), 2),
+                "window_start_hour": self.forecasts.start_hour,
+                "window_end_hour": self.forecasts.end_hour,
+                "window_end_day_offset": int(
+                    self.forecasts.end_hour < self.forecasts.start_hour
+                ),
+                "window_duration_hours": self.forecasts.hours,
+                "window_hours": build_hour_window(
+                    self.forecasts.start_hour,
+                    self.forecasts.end_hour,
+                ),
+                **(
+                    self.forecasts.morning_pv_forecast.audit_details()
+                    if self.forecasts.morning_pv_forecast is not None
+                    else {}
+                ),
                 **(self._arbitrage_details or {}),
             },
         )

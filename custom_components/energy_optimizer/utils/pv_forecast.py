@@ -1,9 +1,12 @@
 """PV forecast utilities."""
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
 import logging
 from typing import TYPE_CHECKING
 
+from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.util import dt as dt_util
 
 from ..const import (
@@ -22,6 +25,217 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class MorningPVForecast:
+    """Validated PV forecast data for a morning decision horizon."""
+
+    total_kwh: float
+    hourly_kwh: dict[int, float]
+    status: str
+    method: str
+    source_entity: str | None
+    aggregate_kwh: float | None
+    raw_hourly_kwh: float | None
+    difference_kwh: float | None
+    tolerance_kwh: float | None
+    daylight_hours: list[int]
+    sufficiency_available: bool
+
+    def audit_details(self) -> dict[str, object]:
+        """Return PV provenance suitable for decision audit details."""
+        return {
+            "pv_data_status": self.status,
+            "pv_forecast_method": self.method,
+            "pv_source_entity": self.source_entity,
+            "pv_aggregate_kwh": _round_or_none(self.aggregate_kwh),
+            "pv_hourly_raw_kwh": _round_or_none(self.raw_hourly_kwh),
+            "pv_hourly_difference_kwh": _round_or_none(self.difference_kwh),
+            "pv_hourly_tolerance_kwh": _round_or_none(self.tolerance_kwh),
+            "pv_daylight_hours": self.daylight_hours,
+            "pv_sufficiency_status": (
+                "available" if self.sufficiency_available else "unavailable"
+            ),
+        }
+
+
+def get_morning_pv_forecast(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    start_hour: int,
+    end_hour: int,
+    apply_efficiency: bool = True,
+) -> MorningPVForecast:
+    """Return validated hourly PV or a documented morning fallback."""
+    source_entity = config.get(CONF_PV_FORECAST_TODAY)
+    if not source_entity:
+        return _invalid_morning_forecast(source_entity=None)
+
+    pv_state = hass.states.get(source_entity)
+    if pv_state is None:
+        _LOGGER.warning("Morning PV forecast sensor %s unavailable", source_entity)
+        return _invalid_morning_forecast(source_entity=str(source_entity))
+
+    try:
+        aggregate_kwh = float(pv_state.state)
+    except (ValueError, TypeError):
+        _LOGGER.warning(
+            "Morning PV forecast sensor %s has invalid aggregate value: %s",
+            source_entity,
+            pv_state.state,
+        )
+        return _invalid_morning_forecast(source_entity=str(source_entity))
+    if aggregate_kwh < 0:
+        _LOGGER.warning(
+            "Morning PV forecast sensor %s has negative aggregate value: %s",
+            source_entity,
+            aggregate_kwh,
+        )
+        return _invalid_morning_forecast(source_entity=str(source_entity))
+
+    now = dt_util.as_local(dt_util.now())
+    raw_hourly, hourly_status = _collect_today_hourly_kwh(pv_state, now)
+    if hourly_status == "valid_hourly":
+        raw_hourly_total = sum(raw_hourly.values())
+        tolerance_kwh = max(0.25, aggregate_kwh * 0.1)
+        difference_kwh = abs(raw_hourly_total - aggregate_kwh)
+        last_updated = getattr(pv_state, "last_updated", None)
+        if isinstance(last_updated, datetime) and dt_util.as_local(last_updated).date() < now.date():
+            hourly_status = "stale_hourly"
+        elif difference_kwh > tolerance_kwh:
+            hourly_status = "invalid_hourly"
+    else:
+        raw_hourly_total = None
+        tolerance_kwh = None
+        difference_kwh = None
+
+    hour_window = build_hour_window(start_hour, end_hour)
+    if hourly_status == "valid_hourly":
+        hourly_kwh = {hour: raw_hourly.get(hour, 0.0) for hour in hour_window}
+        if apply_efficiency:
+            hourly_kwh = _apply_pv_efficiency(config, hourly_kwh)
+        return MorningPVForecast(
+            total_kwh=sum(hourly_kwh.values()),
+            hourly_kwh=hourly_kwh,
+            status=hourly_status,
+            method="hourly",
+            source_entity=str(source_entity),
+            aggregate_kwh=aggregate_kwh,
+            raw_hourly_kwh=raw_hourly_total,
+            difference_kwh=difference_kwh,
+            tolerance_kwh=tolerance_kwh,
+            daylight_hours=[],
+            sufficiency_available=True,
+        )
+
+    daylight_hours = _get_daylight_hours(hass, now)
+    if daylight_hours:
+        fallback_method = "daylight_uniform"
+        hourly_value = aggregate_kwh / len(daylight_hours)
+        hourly_kwh = {
+            hour: hourly_value if hour in daylight_hours else 0.0
+            for hour in hour_window
+        }
+    else:
+        fallback_method = "half_aggregate"
+        hourly_kwh = {hour: 0.0 for hour in hour_window}
+        if hourly_kwh:
+            hourly_kwh[next(iter(hourly_kwh))] = aggregate_kwh * 0.5
+
+    if apply_efficiency:
+        hourly_kwh = _apply_pv_efficiency(config, hourly_kwh)
+    return MorningPVForecast(
+        total_kwh=sum(hourly_kwh.values()),
+        hourly_kwh=hourly_kwh,
+        status=hourly_status,
+        method=fallback_method,
+        source_entity=str(source_entity),
+        aggregate_kwh=aggregate_kwh,
+        raw_hourly_kwh=raw_hourly_total,
+        difference_kwh=difference_kwh,
+        tolerance_kwh=tolerance_kwh,
+        daylight_hours=daylight_hours,
+        sufficiency_available=False,
+    )
+
+
+def _invalid_morning_forecast(source_entity: str | None) -> MorningPVForecast:
+    """Return the safe fallback when the aggregate forecast is invalid."""
+    return MorningPVForecast(
+        total_kwh=0.0,
+        hourly_kwh={},
+        status="invalid_forecast",
+        method="none",
+        source_entity=source_entity,
+        aggregate_kwh=None,
+        raw_hourly_kwh=None,
+        difference_kwh=None,
+        tolerance_kwh=None,
+        daylight_hours=[],
+        sufficiency_available=False,
+    )
+
+
+def _collect_today_hourly_kwh(
+    pv_state: object, now: datetime
+) -> tuple[dict[int, float], str]:
+    """Return raw hourly PV for today or a data-quality status."""
+    attributes = getattr(pv_state, "attributes", {})
+    detailed = attributes.get("detailedHourly")
+    if not isinstance(detailed, list):
+        detailed = attributes.get("detailedForecast")
+    if not isinstance(detailed, list) or not detailed:
+        return {}, "missing_hourly"
+
+    hourly: dict[int, float] = {}
+    for item in detailed:
+        if not isinstance(item, dict):
+            return {}, "invalid_hourly"
+        period_start = item.get("period_start")
+        estimate = item.get("pv_estimate")
+        parsed = dt_util.parse_datetime(str(period_start))
+        if parsed is None:
+            return {}, "invalid_hourly"
+        try:
+            value = float(estimate)
+        except (ValueError, TypeError):
+            return {}, "invalid_hourly"
+        local_period = dt_util.as_local(parsed)
+        if local_period.date() != now.date():
+            return {}, "invalid_hourly"
+        hourly[local_period.hour] = hourly.get(local_period.hour, 0.0) + value
+    return hourly, "valid_hourly"
+
+
+def _get_daylight_hours(hass: HomeAssistant, now: datetime) -> list[int]:
+    """Return full local daylight hours when both sun boundaries are available."""
+    sun_state = hass.states.get("sun.sun")
+    if sun_state is None:
+        return []
+    next_rising = dt_util.parse_datetime(str(sun_state.attributes.get("next_rising")))
+    next_setting = dt_util.parse_datetime(str(sun_state.attributes.get("next_setting")))
+    if next_rising is None or next_setting is None:
+        return []
+
+    local_rising = dt_util.as_local(next_rising)
+    local_setting = dt_util.as_local(next_setting)
+    if local_rising.date() != now.date():
+        current_rising = get_astral_event_date(hass, "sunrise", now.date())
+        if current_rising is None:
+            return []
+        local_rising = dt_util.as_local(current_rising)
+    if local_rising.date() != now.date() or local_setting.date() != now.date():
+        return []
+    if local_setting.hour <= local_rising.hour:
+        return []
+    return list(range(local_rising.hour + (local_rising.minute > 0), local_setting.hour))
+
+
+def _round_or_none(value: float | None) -> float | None:
+    """Round an optional audit value."""
+    return round(value, 3) if value is not None else None
 
 
 def get_forecast_adjusted_kwh(

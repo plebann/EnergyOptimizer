@@ -105,7 +105,11 @@ def test_morning_charge_uses_uncompensated_pv_forecast(
         lambda *args, **kwargs: 12,
     )
 
-    assert strategy._resolve_forecast_params() == (5, 12, {"compensate": False})
+    assert strategy._resolve_forecast_params() == (
+        5,
+        12,
+        {"compensate": False, "use_morning_pv_fallback": True},
+    )
 
 
 @pytest.mark.asyncio

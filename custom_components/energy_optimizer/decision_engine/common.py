@@ -34,6 +34,7 @@ from ..const import (
     CONF_PROG2_SOC_ENTITY,
     CONF_PROG4_SOC_ENTITY,
     CONF_PROG5_SOC_ENTITY,
+    CONF_PV_FORECAST_TODAY,
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
@@ -44,6 +45,7 @@ from ..const import (
 )
 from ..helpers import get_internal_window_price, get_required_float_state
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
+from ..utils.pv_forecast import MorningPVForecast, get_morning_pv_forecast
 from ..utils.logging import DecisionOutcome, log_decision_unified
 from ..utils.decision_dump import record_step
 from ..utils.time_window import build_hour_window
@@ -83,6 +85,7 @@ class ForecastData:
     losses_hourly: float
     losses_kwh: float
     margin: float
+    morning_pv_forecast: MorningPVForecast | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -139,6 +142,7 @@ async def gather_forecasts(
     entry_id: str,
     apply_efficiency: bool = True,
     compensate: bool = True,
+    use_morning_pv_fallback: bool = False,
 ) -> ForecastData:
     """Gather all forecast data for a time window."""
     hour_window = build_hour_window(start_hour, end_hour)
@@ -157,15 +161,38 @@ async def gather_forecasts(
         start_hour=start_hour,
         end_hour=end_hour,
     )
-    pv_forecast_kwh, pv_forecast_hourly = get_pv_forecast_window(
-        hass,
-        config,
-        start_hour=start_hour,
-        end_hour=end_hour,
-        apply_efficiency=apply_efficiency,
-        compensate=compensate,
-        entry_id=entry_id,
-    )
+    morning_pv_forecast = None
+    if use_morning_pv_fallback:
+        if config.get(CONF_PV_FORECAST_TODAY):
+            morning_pv_forecast = get_morning_pv_forecast(
+                hass,
+                config,
+                start_hour=start_hour,
+                end_hour=end_hour,
+                apply_efficiency=apply_efficiency,
+            )
+            pv_forecast_kwh = morning_pv_forecast.total_kwh
+            pv_forecast_hourly = morning_pv_forecast.hourly_kwh
+        else:
+            pv_forecast_kwh, pv_forecast_hourly = get_pv_forecast_window(
+                hass,
+                config,
+                start_hour=start_hour,
+                end_hour=end_hour,
+                apply_efficiency=apply_efficiency,
+                compensate=compensate,
+                entry_id=entry_id,
+            )
+    else:
+        pv_forecast_kwh, pv_forecast_hourly = get_pv_forecast_window(
+            hass,
+            config,
+            start_hour=start_hour,
+            end_hour=end_hour,
+            apply_efficiency=apply_efficiency,
+            compensate=compensate,
+            entry_id=entry_id,
+        )
     losses_hourly, losses_kwh = calculate_losses(hass, config, hours=hours)
 
     return ForecastData(
@@ -181,6 +208,7 @@ async def gather_forecasts(
         losses_hourly=losses_hourly,
         losses_kwh=losses_kwh,
         margin=margin,
+        morning_pv_forecast=morning_pv_forecast,
     )
 
 
@@ -205,13 +233,25 @@ def compute_sufficiency(
         margin=forecasts.margin,
         pv_forecast_hourly=forecasts.pv_forecast_hourly,
     )
-    return SufficiencyResult(
+    result = SufficiencyResult(
         required_kwh=required_kwh,
         required_sufficiency_kwh=required_sufficiency_kwh,
         pv_sufficiency_kwh=pv_sufficiency_kwh,
         sufficiency_hour=sufficiency_hour,
         sufficiency_reached=sufficiency_reached,
     )
+    if (
+        forecasts.morning_pv_forecast is not None
+        and not forecasts.morning_pv_forecast.sufficiency_available
+    ):
+        return SufficiencyResult(
+            required_kwh=result.required_kwh,
+            required_sufficiency_kwh=0.0,
+            pv_sufficiency_kwh=0.0,
+            sufficiency_hour=forecasts.end_hour,
+            sufficiency_reached=False,
+        )
+    return result
 
 
 def resolve_arbitrage_margin_gate(
@@ -581,6 +621,14 @@ def build_charge_outcome_base(
         "usage_kwh": round(forecasts.usage_kwh, 2),
         "window_start_hour": forecasts.start_hour,
         "window_end_hour": forecasts.end_hour,
+        "window_end_day_offset": int(forecasts.end_hour < forecasts.start_hour),
+        "window_duration_hours": len(
+            build_hour_window(forecasts.start_hour, forecasts.end_hour)
+        ),
+        "window_hours": build_hour_window(
+            forecasts.start_hour,
+            forecasts.end_hour,
+        ),
     }
     if arbitrage_kwh is not None:
         details["arbitrage_kwh"] = round(arbitrage_kwh, 2)
@@ -618,8 +666,15 @@ def build_morning_charge_outcome(
         "needed_reserve_sufficiency_kwh": round(needed_reserve_sufficiency_kwh, 2),
         "gap_full_kwh": round(balance.gap_kwh, 2),
         "gap_sufficiency_kwh": round(gap_sufficiency_kwh, 2),
+        "gap_before_clamp_kwh": round(balance.gap_kwh, 2),
+        "gap_clamped_kwh": round(max(balance.gap_kwh, 0.0), 2),
         "sufficiency_hour": sufficiency.sufficiency_hour,
         "sufficiency_reached": sufficiency.sufficiency_reached,
+        **(
+            forecasts.morning_pv_forecast.audit_details()
+            if forecasts.morning_pv_forecast is not None
+            else {}
+        ),
         **(arbitrage_details or {}),
     }
 

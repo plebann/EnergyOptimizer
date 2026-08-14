@@ -14,6 +14,7 @@ from custom_components.energy_optimizer.const import (
 from custom_components.energy_optimizer.utils.pv_forecast import (
     _collect_pv_forecast_hourly_kwh,
     get_pv_compensation_factor,
+    get_morning_pv_forecast,
     get_pv_forecast,
 )
 
@@ -50,6 +51,201 @@ def test_collect_pv_forecast_empty_window_returns_empty(
     )
 
     assert hourly == {}
+
+
+@pytest.mark.unit
+def test_morning_pv_forecast_uses_daylight_fallback_when_hourly_data_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the aggregate forecast across full daylight hours without sufficiency."""
+    now = datetime(2026, 8, 14, 5, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
+    hass = MagicMock()
+
+    aggregate = MagicMock()
+    aggregate.state = "120"
+    aggregate.attributes = {}
+    aggregate.last_updated = now
+    sun = MagicMock()
+    sun.attributes = {
+        "next_rising": "2026-08-14T06:40:00+00:00",
+        "next_setting": "2026-08-14T20:15:00+00:00",
+    }
+    hass.states.get.side_effect = lambda entity_id: {
+        "sensor.pv_today": aggregate,
+        "sun.sun": sun,
+    }.get(entity_id)
+
+    forecast = get_morning_pv_forecast(
+        hass,
+        {CONF_PV_FORECAST_TODAY: "sensor.pv_today"},
+        start_hour=5,
+        end_hour=12,
+        apply_efficiency=False,
+    )
+
+    assert forecast.status == "missing_hourly"
+    assert forecast.method == "daylight_uniform"
+    assert forecast.sufficiency_available is False
+    assert forecast.daylight_hours == [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    assert forecast.total_kwh == pytest.approx(46.153846)
+    assert forecast.hourly_kwh[7] == pytest.approx(9.230769)
+
+
+@pytest.mark.unit
+def test_morning_pv_forecast_accepts_zero_hourly_values_when_aggregate_is_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Treat matching zero forecasts as valid hourly data, not missing PV."""
+    now = datetime(2026, 8, 14, 5, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
+    hass = MagicMock()
+    aggregate = MagicMock()
+    aggregate.state = "0"
+    aggregate.last_updated = now
+    aggregate.attributes = {
+        "detailedForecast": [
+            {"period_start": "2026-08-14T07:00:00+00:00", "pv_estimate": 0.0},
+        ]
+    }
+    hass.states.get.return_value = aggregate
+
+    forecast = get_morning_pv_forecast(
+        hass,
+        {CONF_PV_FORECAST_TODAY: "sensor.pv_today"},
+        start_hour=5,
+        end_hour=12,
+        apply_efficiency=False,
+    )
+
+    assert forecast.status == "valid_hourly"
+    assert forecast.method == "hourly"
+    assert forecast.sufficiency_available is True
+    assert forecast.total_kwh == 0.0
+
+
+@pytest.mark.unit
+def test_morning_pv_forecast_uses_half_aggregate_when_hourly_data_disagrees(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the second fallback when aggregate and hourly forecasts diverge."""
+    now = datetime(2026, 8, 14, 5, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
+    hass = MagicMock()
+    aggregate = MagicMock()
+    aggregate.state = "10"
+    aggregate.last_updated = now
+    aggregate.attributes = {
+        "detailedForecast": [
+            {"period_start": "2026-08-14T07:00:00+00:00", "pv_estimate": 1.0},
+        ]
+    }
+    hass.states.get.side_effect = lambda entity_id: (
+        aggregate if entity_id == "sensor.pv_today" else None
+    )
+
+    forecast = get_morning_pv_forecast(
+        hass,
+        {CONF_PV_FORECAST_TODAY: "sensor.pv_today"},
+        start_hour=5,
+        end_hour=12,
+        apply_efficiency=False,
+    )
+
+    assert forecast.status == "invalid_hourly"
+    assert forecast.method == "half_aggregate"
+    assert forecast.total_kwh == 5.0
+    assert forecast.sufficiency_available is False
+
+
+@pytest.mark.unit
+def test_morning_pv_forecast_marks_previous_day_update_as_stale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not use matching hourly entries from a stale sensor update."""
+    now = datetime(2026, 8, 14, 5, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
+    hass = MagicMock()
+    aggregate = MagicMock()
+    aggregate.state = "1"
+    aggregate.last_updated = datetime(2026, 8, 13, 23, 59, tzinfo=timezone.utc)
+    aggregate.attributes = {
+        "detailedForecast": [
+            {"period_start": "2026-08-14T07:00:00+00:00", "pv_estimate": 1.0},
+        ]
+    }
+    hass.states.get.side_effect = lambda entity_id: (
+        aggregate if entity_id == "sensor.pv_today" else None
+    )
+
+    forecast = get_morning_pv_forecast(
+        hass,
+        {CONF_PV_FORECAST_TODAY: "sensor.pv_today"},
+        start_hour=5,
+        end_hour=12,
+        apply_efficiency=False,
+    )
+
+    assert forecast.status == "stale_hourly"
+    assert forecast.method == "half_aggregate"
+    assert forecast.total_kwh == 0.5
+
+
+@pytest.mark.unit
+def test_morning_pv_forecast_uses_todays_sunrise_after_dawn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use today's sunrise when sun.sun already reports tomorrow's next rise."""
+    now = datetime(2026, 8, 14, 7, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.utils.pv_forecast.get_astral_event_date",
+        lambda hass, event, date: datetime(2026, 8, 14, 6, 40, tzinfo=timezone.utc),
+    )
+    hass = MagicMock()
+    aggregate = MagicMock()
+    aggregate.state = "120"
+    aggregate.attributes = {}
+    aggregate.last_updated = now
+    sun = MagicMock()
+    sun.attributes = {
+        "next_rising": "2026-08-15T06:41:00+00:00",
+        "next_setting": "2026-08-14T20:15:00+00:00",
+    }
+    hass.states.get.side_effect = lambda entity_id: {
+        "sensor.pv_today": aggregate,
+        "sun.sun": sun,
+    }.get(entity_id)
+
+    forecast = get_morning_pv_forecast(
+        hass,
+        {CONF_PV_FORECAST_TODAY: "sensor.pv_today"},
+        start_hour=7,
+        end_hour=12,
+        apply_efficiency=False,
+    )
+
+    assert forecast.method == "daylight_uniform"
+    assert forecast.total_kwh == pytest.approx(46.153846)
+
+
+@pytest.mark.unit
+def test_morning_pv_forecast_rejects_negative_aggregate() -> None:
+    """Continue safely without PV when the aggregate forecast is negative."""
+    hass = MagicMock()
+    aggregate = MagicMock()
+    aggregate.state = "-1"
+    hass.states.get.return_value = aggregate
+
+    forecast = get_morning_pv_forecast(
+        hass,
+        {CONF_PV_FORECAST_TODAY: "sensor.pv_today"},
+        start_hour=5,
+        end_hour=12,
+    )
+
+    assert forecast.status == "invalid_forecast"
+    assert forecast.total_kwh == 0.0
 
 
 @pytest.mark.unit

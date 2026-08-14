@@ -10,6 +10,8 @@ from custom_components.energy_optimizer.entities.sensors.tracking import (
     _HISTORY_MAX_BYTES,
     OptimizationHistorySensor,
 )
+from custom_components.energy_optimizer.decision_engine.sell_base import BaseSellStrategy
+from custom_components.energy_optimizer.utils.logging import DecisionOutcome
 
 
 def _history_sensor() -> OptimizationHistorySensor:
@@ -47,6 +49,29 @@ def test_history_entry_is_compact_and_includes_decision_window() -> None:
     assert entry["v"] == {"s": 80.0, "c": 12.5}
     assert entry["m"] == {"g": 3.2, "q": 5.6}
     assert entry["w"] == [["cr", 6, "nb_e", 13, "db_s", False]]
+
+
+def test_equal_hour_history_window_has_zero_duration_on_same_day() -> None:
+    """Do not serialize a zero-length decision horizon as tomorrow."""
+    outcome = DecisionOutcome(
+        scenario="Morning Peak Sell",
+        action_type="no_action",
+        summary="No action",
+        reason="Test",
+        details={},
+    )
+
+    BaseSellStrategy._apply_history_window(
+        outcome,
+        start_hour=7,
+        end_hour=7,
+        end_kind="pv_s",
+    )
+
+    assert outcome.history_windows == [["sr", 7, "next_h", 7, "pv_s", False]]
+    assert outcome.details["window_end_day_offset"] == 0
+    assert outcome.details["window_duration_hours"] == 0
+    assert outcome.details["window_hours"] == []
 
 
 def test_history_discards_entries_older_than_fourteen_days() -> None:
