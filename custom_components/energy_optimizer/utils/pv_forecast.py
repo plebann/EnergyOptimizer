@@ -19,6 +19,7 @@ from ..const import (
     DOMAIN,
 )
 from ..helpers import is_pv_forecast_compensation_enabled
+from .decision_dump import record_input
 from .time_window import build_hour_window
 
 if TYPE_CHECKING:
@@ -378,6 +379,27 @@ def _get_detailed_forecast(
         _LOGGER.warning("PV forecast %s sensor not configured", label)
         return None
     pv_state = hass.states.get(sensor)
+    record_input(
+        f"pv_forecast_{label}",
+        source=sensor,
+        value=None if pv_state is None else pv_state.state,
+        status=(
+            "missing"
+            if pv_state is None
+            else "unavailable"
+            if pv_state.state in {"unknown", "unavailable"}
+            else "ok"
+        ),
+        attributes=(
+            {
+                key: pv_state.attributes[key]
+                for key in ("detailedHourly", "detailedForecast")
+                if key in pv_state.attributes
+            }
+            if pv_state is not None
+            else None
+        ),
+    )
     if pv_state is None:
         _LOGGER.warning("PV forecast %s sensor %s unavailable", label, sensor)
         return None
@@ -469,6 +491,12 @@ def _get_sensor_compensation_factor(
     if sensor is None:
         return None
     value = getattr(sensor, "native_value", None)
+    record_input(
+        "pv_forecast_compensation_factor",
+        source=None,
+        value=value,
+        status="unavailable" if value is None else "ok",
+    )
     if value is None:
         return None
     try:
@@ -509,16 +537,52 @@ def _get_forecast_inputs(
         return None, None, None, "missing_sensor"
 
     remaining_state = hass.states.get(remaining_sensor)
+    record_input(
+        "pv_forecast_remaining",
+        source=str(remaining_sensor),
+        value=None if remaining_state is None else remaining_state.state,
+        status=(
+            "missing"
+            if remaining_state is None
+            else "unavailable"
+            if remaining_state.state in {"unknown", "unavailable"}
+            else "ok"
+        ),
+    )
     if remaining_state is None:
         _LOGGER.warning("PV remaining forecast sensor %s unavailable", remaining_sensor)
         return None, None, None, "missing_remaining"
 
     today_state = hass.states.get(today_sensor)
+    record_input(
+        "pv_forecast_today",
+        source=str(today_sensor),
+        value=None if today_state is None else today_state.state,
+        status=(
+            "missing"
+            if today_state is None
+            else "unavailable"
+            if today_state.state in {"unknown", "unavailable"}
+            else "ok"
+        ),
+    )
     if today_state is None:
         _LOGGER.warning("PV forecast today sensor %s unavailable", today_sensor)
         return None, None, None, "missing_today"
 
     production_state = hass.states.get(production_sensor)
+    record_input(
+        "pv_production_sensor",
+        source=str(production_sensor),
+        value=None if production_state is None else production_state.state,
+        status=(
+            "missing"
+            if production_state is None
+            else "unavailable"
+            if production_state.state in {"unknown", "unavailable"}
+            else "ok"
+        ),
+    )
     if production_state is None:
         _LOGGER.warning("PV production sensor %s unavailable", production_sensor)
         return None, None, None, "missing_production"

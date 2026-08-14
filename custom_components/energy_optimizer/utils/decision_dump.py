@@ -30,6 +30,7 @@ _DUMP_LOGGER = logging.getLogger("custom_components.energy_optimizer.decision_re
 _LOGGER = logging.getLogger(__name__)
 _ENTITY_ID_PATTERN = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 _FIXED_ENTITY_ALIASES = {"sun": "sun.sun"}
+_ALGORITHM_REVISIONS: dict[str, str] = {}
 
 
 def _load_manifest_version() -> str:
@@ -84,22 +85,64 @@ def _entry_snapshot(entry: ConfigEntry) -> dict[str, Any]:
     }
 
 
-def _algorithm_revision() -> str:
-    """Return a source-based revision for the decision engine that emitted replay."""
+def _calling_decision_module() -> str:
+    """Return the decision module that owns the active audit."""
     for frame_info in inspect.stack():
         module = inspect.getmodule(frame_info.frame)
         module_name = getattr(module, "__name__", "")
-        module_path = getattr(module, "__file__", None)
         if (
-            module_path
-            and module_name.startswith("custom_components.energy_optimizer")
+            module_name.startswith("custom_components.energy_optimizer")
             and ".utils." not in module_name
         ):
-            try:
-                return sha256(Path(module_path).read_bytes()).hexdigest()[:16]
-            except OSError:
-                break
+            return module_name
     return "unknown"
+
+
+def _compute_algorithm_revision(module_name: str) -> str:
+    """Hash the scenario module and its shared decision dependencies."""
+    package_root = Path(__file__).parent.parent
+    dependency_paths = [
+        package_root / "helpers.py",
+        package_root / "controllers" / "inverter.py",
+        package_root / "decision_engine" / "common.py",
+        package_root / "decision_engine" / "charge_base.py",
+        package_root / "decision_engine" / "sell_base.py",
+        package_root / "utils" / "forecast.py",
+        package_root / "utils" / "heat_pump.py",
+        package_root / "utils" / "pv_forecast.py",
+        package_root / "utils" / "time_window.py",
+    ]
+    dependency_paths.extend((package_root / "calculations").glob("*.py"))
+    if module_name.startswith("custom_components.energy_optimizer."):
+        relative_module = module_name.removeprefix(
+            "custom_components.energy_optimizer."
+        )
+        dependency_paths.append(package_root / f"{relative_module.replace('.', '/')}.py")
+
+    digest = sha256()
+    for path in sorted(set(dependency_paths)):
+        if not path.is_file():
+            continue
+        digest.update(path.relative_to(package_root).as_posix().encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
+
+
+async def _get_algorithm_revision(
+    hass: HomeAssistant, module_name: str
+) -> str:
+    """Return the cached revision without blocking the event loop."""
+    if revision := _ALGORITHM_REVISIONS.get(module_name):
+        return revision
+    executor_job = hass.async_add_executor_job(
+        _compute_algorithm_revision, module_name
+    )
+    if inspect.isawaitable(executor_job):
+        revision = await executor_job
+    else:
+        revision = _compute_algorithm_revision(module_name)
+    _ALGORITHM_REVISIONS[module_name] = revision
+    return revision
 
 
 @dataclass(slots=True)
@@ -110,8 +153,10 @@ class DecisionAudit:
     entry: ConfigEntry
     trigger: str
     integration_version: str = "unknown"
+    algorithm_revision: str = "unknown"
     timestamp: datetime = field(default_factory=dt_util.now)
     inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    actions: list[dict[str, Any]] = field(default_factory=list)
 
     def _alias_for(self, source: str | None, key: str) -> str:
         """Return the stable config alias for a dynamic entity input."""
@@ -138,7 +183,25 @@ class DecisionAudit:
         }
         if attributes:
             input_value["attributes"] = _json_value(attributes)
-        self.inputs[alias] = input_value
+        self.inputs.setdefault(alias, input_value)
+
+    def record_action(
+        self,
+        kind: str,
+        *,
+        entity_id: str | None,
+        requested: Any,
+        status: str,
+    ) -> None:
+        """Track actions for wrappers without including service results in replay."""
+        self.actions.append(
+            {
+                "kind": kind,
+                "entity_id": entity_id,
+                "requested": _json_value(requested),
+                "status": status,
+            }
+        )
 
     def as_payload(self, decision: Mapping[str, Any]) -> dict[str, Any]:
         """Build the complete replay fixture."""
@@ -146,7 +209,7 @@ class DecisionAudit:
         return {
             "schema_version": 1,
             "integration_version": self.integration_version,
-            "algorithm_revision": _algorithm_revision(),
+            "algorithm_revision": self.algorithm_revision,
             "config_snapshot_id": _entry_snapshot(self.entry)["config_snapshot_id"],
             "timestamp": local_time.isoformat(),
             "timezone": str(local_time.tzinfo),
@@ -174,11 +237,13 @@ async def active_decision_audit(
     trigger: str,
 ):
     """Activate and reliably clear an audit for one public decision run."""
+    module_name = _calling_decision_module()
     audit = DecisionAudit(
         hass=hass,
         entry=entry,
         trigger=trigger,
         integration_version=str(_MANIFEST_VERSION),
+        algorithm_revision=await _get_algorithm_revision(hass, module_name),
     )
     token = activate_audit(audit)
     try:
@@ -228,7 +293,14 @@ def record_action(
     requested: Any,
     status: str,
 ) -> None:
-    """Retain the action-audit API while replay fixtures omit service outcomes."""
+    """Track actions when an audit is active without exposing them in replay."""
+    if audit := get_active_audit():
+        audit.record_action(
+            kind,
+            entity_id=entity_id,
+            requested=requested,
+            status=status,
+        )
 
 
 def emit_decision_dump(

@@ -50,6 +50,15 @@ _LOAD_USAGE_KEYS = (
 )
 
 
+def _state_status(state: Any) -> str:
+    """Return replay availability status for an entity state."""
+    if state is None:
+        return "missing"
+    if state.state in {"unknown", "unavailable"}:
+        return "unavailable"
+    return "ok"
+
+
 def _decision(reason: str, **details: Any) -> dict[str, Any]:
     """Build a structured export-block decision for diagnostics."""
     return {"reason": reason, "timestamp": dt_util.now().isoformat(), **details}
@@ -157,7 +166,7 @@ def _get_bev_state_and_power_kwh(
         "bev_charging_state",
         source=str(bev_state_entity),
         value=None if bev_state is None else bev_state.state,
-        status="missing" if bev_state is None else "ok",
+        status=_state_status(bev_state),
     )
     if bev_state is None or bev_state.state in {"unknown", "unavailable"}:
         _LOGGER.warning(
@@ -199,7 +208,7 @@ def _get_current_hour_pv_kwh(
         "pv_forecast_today",
         source=str(pv_entity) if pv_entity else None,
         value=None if pv_state is None else pv_state.state,
-        status="missing" if pv_state is None else "ok",
+        status=_state_status(pv_state),
         attributes=(
             {
                 key: pv_state.attributes[key]
@@ -255,7 +264,7 @@ async def _set_switch_state(
         "switch_state",
         source=str(entity_id),
         value=None if switch_state is None else switch_state.state,
-        status="missing" if switch_state is None else "ok",
+        status=_state_status(switch_state),
     )
     if switch_state is None or switch_state.state in {"unknown", "unavailable"}:
         _LOGGER.warning(
@@ -387,7 +396,7 @@ def _can_enter_offgrid(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "switch_state",
             source=str(switch_entity),
             value=None if state is None else state.state,
-            status="missing" if state is None else "ok",
+            status=_state_status(state),
         )
         if state is None or state.state in {"unknown", "unavailable"}:
             return False
@@ -431,7 +440,7 @@ async def _async_run_export_block_control(
         "sun",
         source=SUN_ENTITY,
         value=None if sun_state is None else sun_state.state,
-        status="missing" if sun_state is None else "ok",
+        status=_state_status(sun_state),
     )
     if sun_state is None or sun_state.state != SUN_ABOVE_HORIZON:
         record_step(

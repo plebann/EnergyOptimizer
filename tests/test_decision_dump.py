@@ -91,3 +91,20 @@ def test_emit_config_snapshot_is_deduplicated(monkeypatch) -> None:
         "battery_soc_sensor": "sensor.battery_soc",
         "sun": "sun.sun",
     }
+
+
+def test_replay_retains_first_read_for_each_alias() -> None:
+    """Replay preserves the state that was used before later side effects."""
+    entry = MagicMock()
+    entry.data = {"export_switch": "switch.export"}
+    entry.options = {}
+    audit = DecisionAudit(
+        hass=MagicMock(),
+        entry=entry,
+        trigger="scheduler:export_block",
+    )
+
+    audit.record_input("switch_state", source="switch.export", value="off")
+    audit.record_input("switch_state", source="switch.export", value="on")
+
+    assert audit.inputs == {"export_switch": {"state": "off", "status": "ok"}}
