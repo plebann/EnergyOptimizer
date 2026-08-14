@@ -294,20 +294,20 @@ def get_float_state_info(
         record_input(
             f"float_state:{entity_id}",
             source=entity_id,
-            value=None,
+            value=raw,
             status="unavailable",
         )
         return None, raw_str, "unavailable"
 
     try:
         value = float(raw)
-        record_input(f"float_state:{entity_id}", source=entity_id, value=value)
+        record_input(f"float_state:{entity_id}", source=entity_id, value=raw)
         return value, str(raw), None
     except (ValueError, TypeError):
         record_input(
             f"float_state:{entity_id}",
             source=entity_id,
-            value=None,
+            value=raw,
             status="invalid",
         )
         return None, str(raw), "invalid"

@@ -93,6 +93,22 @@ Last Optimization includes sell-target diagnostics when a sell decision is made:
 SOC reserved for required energy after discharge-efficiency compensation, and
 `ra` indicates whether that reserve was applied.
 
+### Decision replay logs
+
+For reproducible decision diagnostics, the integration emits JSON lines through
+the `custom_components.energy_optimizer.decision_replay` logger:
+
+- `ENERGY_OPTIMIZER_CONFIG_SNAPSHOT v1` is emitted once for each configuration
+  revision. It contains decision settings and semantic aliases for configured
+  entities.
+- `ENERGY_OPTIMIZER_DECISION_REPLAY v1` is emitted for each completed decision.
+  It references the configuration snapshot and contains only dynamic inputs
+  read by the decision, its time/trigger, source revision, and expected result.
+
+Configure that logger in the host/container logging setup to route it to a
+dedicated rotating file. The integration does not create or manage log files
+itself.
+
 ## Prerequisites
 
 ### Recommended Integrations

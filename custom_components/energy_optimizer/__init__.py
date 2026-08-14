@@ -12,6 +12,7 @@ from .const import DOMAIN, SERVICE_OVERNIGHT_SCHEDULE
 from .coordinator import EnergyOptimizerCoordinator
 from .scheduler.action_scheduler import ActionScheduler
 from .services import async_register_services
+from .utils.decision_dump import emit_config_snapshot
 
 if TYPE_CHECKING:
     from homeassistant.helpers.typing import ConfigType
@@ -42,6 +43,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = EnergyOptimizerCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id]["coordinator"] = coordinator
+    emit_config_snapshot(hass, entry)
 
     # Forward entry setup to sensor platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
