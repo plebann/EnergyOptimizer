@@ -482,22 +482,24 @@ class OptimizationHistorySensor(EnergyOptimizerSensor, RestoreSensor):
     @staticmethod
     def _build_values(details: dict[str, Any]) -> dict[str, float]:
         """Return compact inverter setpoints from an outcome."""
-        source_keys = {
-            "s": "target_soc",
-            "c": "charge_current_a",
-            "e": "export_power_w",
-        }
-        return {
+        values = {
             compact_key: float(details[source_key])
-            for compact_key, source_key in source_keys.items()
+            for compact_key, source_key in {
+                "s": "target_soc",
+                "c": "charge_current_a",
+            }.items()
             if isinstance(details.get(source_key), (int, float))
         }
+        if isinstance(export_power_w := details.get("export_power_w"), (int, float)):
+            values["e"] = round(float(export_power_w) / 1000.0, 2)
+        return values
 
     @staticmethod
     def _build_metrics(details: dict[str, Any]) -> dict[str, float]:
         """Return compact decision metrics from an outcome."""
         metric_sources = {
             "g": ("to_charge_kwh", "gap_kwh"),
+            "n": ("needed_reserve_all_kwh", "needed_reserve_kwh"),
             "x": ("surplus_kwh", "selected_surplus_kwh"),
             "q": ("required_kwh",),
             "p": ("evening_price", "morning_price"),

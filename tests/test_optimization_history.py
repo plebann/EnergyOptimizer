@@ -34,6 +34,7 @@ def test_history_entry_is_compact_and_includes_decision_window() -> None:
             "target_soc": 80.0,
             "charge_current_a": 12.5,
             "to_charge_kwh": 3.2,
+            "needed_reserve_kwh": 1.4,
             "required_kwh": 5.6,
         },
         action_type="charge_scheduled",
@@ -47,8 +48,45 @@ def test_history_entry_is_compact_and_includes_decision_window() -> None:
     assert entry["a"] == "c"
     assert entry["r"] == "other"
     assert entry["v"] == {"s": 80.0, "c": 12.5}
-    assert entry["m"] == {"g": 3.2, "q": 5.6}
+    assert entry["m"] == {"g": 3.2, "n": 1.4, "q": 5.6}
     assert entry["w"] == [["cr", 6, "nb_e", 13, "db_s", False]]
+
+
+def test_history_prefers_effective_needed_reserve() -> None:
+    """History records the reserve used to derive the no-action target SOC."""
+    sensor = _history_sensor()
+
+    sensor.add_entry(
+        "Morning Grid Charge",
+        {
+            "result": "No action needed",
+            "needed_reserve_kwh": 0.5,
+            "needed_reserve_sufficiency_kwh": 1.2,
+            "needed_reserve_all_kwh": 1.2,
+        },
+        action_type="no_action",
+        reason="Gap 0.0 kWh, gap sufficiency -0.1 kWh",
+    )
+
+    entry = sensor.extra_state_attributes["history"][0]
+
+    assert entry["m"] == {"n": 1.2}
+
+
+def test_history_stores_export_power_in_kw() -> None:
+    """History stores compact export setpoints in kW rather than W."""
+    sensor = _history_sensor()
+
+    sensor.add_entry(
+        "Morning Peak Sell",
+        {"result": "Sell", "target_soc": 52.0, "export_power_w": 10200.0},
+        action_type="sell",
+        reason="Eligible surplus",
+    )
+
+    entry = sensor.extra_state_attributes["history"][0]
+
+    assert entry["v"] == {"s": 52.0, "e": 10.2}
 
 
 def test_equal_hour_history_window_has_zero_duration_on_same_day() -> None:

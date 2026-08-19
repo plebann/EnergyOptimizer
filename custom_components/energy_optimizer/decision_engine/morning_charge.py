@@ -211,6 +211,10 @@ class MorningChargeStrategy(BaseChargeStrategy):
                     self._needed_reserve_sufficiency_kwh,
                     2,
                 ),
+                "needed_reserve_all_kwh": round(
+                    self._needed_reserve_all_kwh,
+                    2,
+                ),
                 "required_sufficiency_kwh": round(
                     self._sufficiency.required_sufficiency_kwh,
                     2,
