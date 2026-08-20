@@ -271,7 +271,8 @@ class MorningSellStrategy(BaseSellStrategy):
             entry_id=self.entry.entry_id,
             default_hour=tariff_end_hour,
         )
-        sell_window_end_hour = (self._resolve_sell_hour() + 1) % 24
+        sell_hour = self._resolve_sell_hour()
+        sell_window_end_hour = (sell_hour + 1) % 24
         horizon_details: dict[str, object] = {
             "sell_horizon_mode": "base_daily",
             "sell_horizon_reason": "pv_sufficiency_or_day_buy_window",
@@ -316,7 +317,6 @@ class MorningSellStrategy(BaseSellStrategy):
             hours=base_hours,
         )
 
-        sell_hour = self._resolve_sell_hour()
         if (
             base_pv_forecast is None
             or not base_pv_forecast.sufficiency_available

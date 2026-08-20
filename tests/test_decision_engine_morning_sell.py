@@ -897,6 +897,18 @@ async def test_morning_sell_skips_when_forecast_omits_sell_hour(
     hass = _setup_hass(_base_config(), _base_states())
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
+    resolve_count = 0
+
+    def _resolve_sell_hour(_strategy: MorningSellStrategy) -> int:
+        nonlocal resolve_count
+        resolve_count += 1
+        return 7
+
+    monkeypatch.setattr(
+        MorningSellStrategy,
+        "_resolve_sell_hour",
+        _resolve_sell_hour,
+    )
     monkeypatch.setattr(
         f"{MORNING}.get_morning_pv_forecast",
         lambda *_args, **_kwargs: MorningPVForecast(
@@ -920,6 +932,7 @@ async def test_morning_sell_skips_when_forecast_omits_sell_hour(
     assert outcomes[-1].reason == (
         "A valid hourly PV forecast is required to select the sell regulator"
     )
+    assert resolve_count == 2
 
 
 @pytest.mark.asyncio
