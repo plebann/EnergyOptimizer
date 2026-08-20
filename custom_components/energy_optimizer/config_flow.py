@@ -111,7 +111,7 @@ def _price_margin_selector() -> selector.NumberSelector:
 class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Energy Optimizer."""
 
-    VERSION = 2
+    VERSION = 3
 
     def __init__(self) -> None:
         """Initialize config flow."""
