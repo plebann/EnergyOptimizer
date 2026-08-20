@@ -75,10 +75,10 @@ class _FakeStore:
 
 
 @pytest.mark.asyncio
-async def test_execute_sell_reserves_required_energy_at_min_soc(
+async def test_execute_sell_clamps_target_to_safety_soc_floor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Required energy raises a target that would otherwise reach minimum SOC."""
+    """Target SOC never drops below the configured safety floor."""
     hass = MagicMock()
     hass.data = {DOMAIN: {"entry-1": {}}}
     entry = MagicMock()
@@ -100,14 +100,6 @@ async def test_execute_sell_reserves_required_energy_at_min_soc(
         lambda _hass, _entry: True,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.calculate_export_power",
-        lambda _surplus: 1200.0,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.kwh_to_soc",
-        lambda kwh, _capacity, _voltage: 25.0 if kwh == 5.0 else 3.0,
-    )
-    monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
         AsyncMock(),
     )
@@ -126,8 +118,64 @@ async def test_execute_sell_reserves_required_energy_at_min_soc(
         )
     )
 
-    assert captured["target"] == pytest.approx(23.0)
-    assert outcome.details == {"rt": 15.0, "rg": 3.0, "ra": True, "test_sell_mode": True}
+    assert captured["target"] == 20.0
+    assert outcome.details["safety_soc_floor"] == 20.0
+    assert outcome.details["required_battery_energy_dc_kwh"] == pytest.approx(5.556)
+
+
+@pytest.mark.asyncio
+async def test_execute_sell_uses_ac_export_and_consumption_for_dc_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Convert the planned AC export and load to DC energy exactly once."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    strategy = _TestSellStrategy(hass, entry_id="entry-1", margin=1.0)
+    strategy.entry = entry
+    strategy.config = {"max_export_power": 12000}
+    strategy.battery_config = SimpleNamespace(
+        min_soc=20.0,
+        capacity_ah=37.0,
+        voltage=640.0,
+        efficiency=0.9,
+    )
+    strategy.current_soc = 98.0
+    strategy.integration_context = SimpleNamespace()
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
+        lambda _hass, _entry: True,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
+        AsyncMock(),
+    )
+
+    outcome = SimpleNamespace(details={}, entities_changed=[])
+    captured: dict[str, float] = {}
+    await strategy._execute_sell(
+        SellRequest(
+            surplus_kwh=9.91,
+            required_kwh=0.0,
+            sell_window_consumption_kwh=0.4,
+            build_outcome_fn=lambda target, surplus, export: (
+                captured.update(
+                    target=target,
+                    surplus=surplus,
+                    export=export,
+                )
+                or outcome
+            ),
+            build_no_action_fn=lambda _surplus: outcome,
+        )
+    )
+
+    assert captured == {"target": 49.0, "surplus": 9.91, "export": 9910.0}
+    assert outcome.details["required_battery_energy_dc_kwh"] == pytest.approx(11.456)
+    assert outcome.details["sell_window_consumption_ac_kwh"] == 0.4
+    assert outcome.details["export_power_basis"] == "executable_export_ac_kwh / duration_hours"
 
 
 @pytest.mark.asyncio
@@ -163,10 +211,6 @@ async def test_execute_sell_saves_restore_data(monkeypatch: pytest.MonkeyPatch) 
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.calculate_export_power",
-        lambda _surplus: 1200.0,
-    )
-    monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
         lambda _hass, _entry: False,
     )
@@ -183,7 +227,12 @@ async def test_execute_sell_saves_restore_data(monkeypatch: pytest.MonkeyPatch) 
         "work_mode_entity": "select.work_mode",
         "export_power_entity": "number.export_power",
     }
-    strategy.battery_config = SimpleNamespace(min_soc=15.0, capacity_ah=37.0, voltage=640.0)
+    strategy.battery_config = SimpleNamespace(
+        min_soc=15.0,
+        capacity_ah=37.0,
+        voltage=640.0,
+        efficiency=90.0,
+    )
     strategy.current_soc = 90.0
     strategy.prog_soc_entity = "number.prog5_soc"
     strategy.original_prog_soc = 70.0
@@ -253,10 +302,6 @@ async def test_execute_sell_preserves_existing_restore_baseline_in_memory(
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.calculate_export_power",
-        lambda _surplus: 1200.0,
-    )
-    monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
         lambda _hass, _entry: False,
     )
@@ -273,7 +318,12 @@ async def test_execute_sell_preserves_existing_restore_baseline_in_memory(
         "work_mode_entity": "select.work_mode",
         "export_power_entity": "number.export_power",
     }
-    strategy.battery_config = SimpleNamespace(min_soc=15.0, capacity_ah=37.0, voltage=640.0)
+    strategy.battery_config = SimpleNamespace(
+        min_soc=15.0,
+        capacity_ah=37.0,
+        voltage=640.0,
+        efficiency=90.0,
+    )
     strategy.current_soc = 90.0
     strategy.prog_soc_entity = "number.prog5_soc"
     strategy.original_prog_soc = 40.0
@@ -337,10 +387,6 @@ async def test_execute_sell_preserves_existing_restore_baseline_from_store(
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.calculate_export_power",
-        lambda _surplus: 1200.0,
-    )
-    monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
         lambda _hass, _entry: False,
     )
@@ -357,7 +403,12 @@ async def test_execute_sell_preserves_existing_restore_baseline_from_store(
         "work_mode_entity": "select.work_mode",
         "export_power_entity": "number.export_power",
     }
-    strategy.battery_config = SimpleNamespace(min_soc=15.0, capacity_ah=37.0, voltage=640.0)
+    strategy.battery_config = SimpleNamespace(
+        min_soc=15.0,
+        capacity_ah=37.0,
+        voltage=640.0,
+        efficiency=90.0,
+    )
     strategy.current_soc = 90.0
     strategy.prog_soc_entity = "number.prog5_soc"
     strategy.original_prog_soc = 35.0
@@ -546,10 +597,6 @@ async def test_execute_sell_rolls_back_after_regulator_write_failure(
     monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
         lambda _hass, _entry: False,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.calculate_export_power",
-        lambda _surplus: 1200.0,
     )
 
     strategy = _TestSellStrategy(hass, entry_id="entry-1", margin=1.0)

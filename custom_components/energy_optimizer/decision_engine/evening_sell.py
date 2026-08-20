@@ -1,6 +1,7 @@
 """Evening peak sell decision logic."""
 from __future__ import annotations
 
+from dataclasses import replace
 import logging
 from datetime import datetime, time, timedelta
 from typing import TYPE_CHECKING
@@ -332,6 +333,24 @@ class EveningSellStrategy(BaseSellStrategy):
             return max(0.0, base_surplus_kwh - reserved_for_primary_kwh)
         return base_surplus_kwh
 
+    async def _get_sell_window_consumption_kwh(self) -> float:
+        """Return forecast AC consumption during the selected sell hour."""
+        sell_hour = self._current_window_hour
+        end_hour = (sell_hour + 1) % 24
+        hourly_usage = build_hourly_usage_array(
+            self.config,
+            self.hass.states.get,
+            daily_load_fallback=None,
+        )
+        heat_pump_kwh, _ = await get_heat_pump_forecast_window(
+            self.hass,
+            self.config,
+            start_hour=sell_hour,
+            end_hour=end_hour,
+        )
+        _, losses_kwh = calculate_losses(self.hass, self.config, hours=1)
+        return (hourly_usage[sell_hour] + heat_pump_kwh + losses_kwh) * self.margin
+
     async def _on_price_unavailable(self) -> bool:
         """Fall back to surplus sell when evening price sensor is unavailable."""
         _LOGGER.info(
@@ -387,6 +406,13 @@ class EveningSellStrategy(BaseSellStrategy):
         evaluation = await self._compute_base_evaluation()
 
         if not self._has_secondary_window:
+            if isinstance(evaluation, SellRequest):
+                return replace(
+                    evaluation,
+                    sell_window_consumption_kwh=(
+                        await self._get_sell_window_consumption_kwh()
+                    ),
+                )
             return evaluation
 
         if isinstance(evaluation, DecisionOutcome):
@@ -413,6 +439,9 @@ class EveningSellStrategy(BaseSellStrategy):
             build_outcome_fn=evaluation.build_outcome_fn,
             build_no_action_fn=evaluation.build_no_action_fn,
             skip_restore=False,
+            sell_window_consumption_kwh=(
+                await self._get_sell_window_consumption_kwh()
+            ),
         )
 
     async def _high_price_sell(

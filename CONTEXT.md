@@ -78,6 +78,11 @@ A control action that temporarily prevents PV energy from charging the battery w
 A deliberate control action that lowers battery state of charge by selling or otherwise using energy already stored in the battery.
 _Avoid_: Emptying the battery
 
+### Safety SOC Floor
+
+The configured minimum battery state of charge that an EnergyOptimizer decision must preserve. `min_soc` is the default floor; `min_soc_pv` applies only when the decision confirms sufficient PV energy for the relevant horizon.
+_Avoid_: Program SOC safety level
+
 ### Night Buy Window
 
 A Buy Window within 00:00-06:00, seeded from the cheapest two consecutive hours in that range, then grown outward one

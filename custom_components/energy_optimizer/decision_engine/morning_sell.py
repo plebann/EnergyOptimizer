@@ -174,11 +174,19 @@ class MorningSellStrategy(BaseSellStrategy):
         self._price_unavailable = True
         return True
 
-    def _resolve_sell_regulator(self, surplus_kwh: float) -> SellRegulator:
+    def _resolve_sell_regulator(
+        self,
+        surplus_kwh: float,
+        *,
+        duration_hours: float = 1.0,
+    ) -> SellRegulator:
         """Select the configured regulator for the evaluated morning sell."""
         if not self._use_discharge_current:
-            regulator = super()._resolve_sell_regulator(surplus_kwh)
-            export_power_w = ceil((surplus_kwh * 1000.0) / 100.0) * 100.0
+            regulator = super()._resolve_sell_regulator(
+                surplus_kwh,
+                duration_hours=duration_hours,
+            )
+            export_power_w = regulator.value
             self._regulator_diagnostics.update(
                 {
                     "regulator_kind": regulator.kind,
@@ -911,6 +919,7 @@ class MorningSellStrategy(BaseSellStrategy):
             required_kwh=required_kwh,
             build_outcome_fn=_make_outcome,
             build_no_action_fn=_make_no_action,
+            sell_window_consumption_kwh=hourly_demand_kwh,
         )
 
 
