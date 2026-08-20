@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, SERVICE_OVERNIGHT_SCHEDULE
 from .coordinator import EnergyOptimizerCoordinator
@@ -25,6 +26,57 @@ PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.SWITCH,
 ]
+
+_CONSUME_WINDOW_ENTITY_MIGRATIONS = (
+    (
+        "midday_sell_window",
+        "consume_window",
+        "sensor.energy_optimizer_midday_sell_window",
+        "sensor.energy_optimizer_consume_window",
+    ),
+    (
+        "midday_sell_window_tomorrow",
+        "consume_window_tomorrow",
+        "sensor.energy_optimizer_midday_sell_window_tomorrow",
+        "sensor.energy_optimizer_consume_window_tomorrow",
+    ),
+)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate an Energy Optimizer config entry."""
+    if entry.version >= 3:
+        return True
+
+    registry = er.async_get(hass)
+    for (
+        old_suffix,
+        new_suffix,
+        old_default_entity_id,
+        new_default_entity_id,
+    ) in _CONSUME_WINDOW_ENTITY_MIGRATIONS:
+        old_unique_id = f"{entry.entry_id}_{old_suffix}"
+        entity_id = registry.async_get_entity_id("sensor", DOMAIN, old_unique_id)
+        if entity_id is not None:
+            new_unique_id = f"{entry.entry_id}_{new_suffix}"
+            if entity_id == old_default_entity_id:
+                new_entity_id = registry.async_generate_entity_id(
+                    "sensor",
+                    new_default_entity_id.removeprefix("sensor."),
+                )
+                registry.async_update_entity(
+                    entity_id,
+                    new_entity_id=new_entity_id,
+                    new_unique_id=new_unique_id,
+                )
+            else:
+                registry.async_update_entity(
+                    entity_id,
+                    new_unique_id=new_unique_id,
+                )
+
+    hass.config_entries.async_update_entry(entry, version=3)
+    return True
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:

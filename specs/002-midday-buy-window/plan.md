@@ -5,7 +5,7 @@
 
 ## Summary
 
-Extend the existing midday sell-window feature into a day-scoped sensor pair: keep the current-day text sensor for the cheapest sell-price window between 08:00 and 16:00, add a second analogous tomorrow sensor, and publish a rounded float `price` attribute for the average selected window price when available. The implementation will reuse one pure calculation path, read `prices_today` and `prices_tomorrow` from shared integration state, preserve earliest-start tie-breaking and `unavailable` semantics, omit `price` when a sensor is unavailable, and keep Home Assistant entity logic thin and translation-backed.
+Extend the existing consume-window feature into a day-scoped sensor pair: keep the current-day text sensor for the cheapest sell-price window between 08:00 and 16:00, add a second analogous tomorrow sensor, and publish a rounded float `price` attribute for the average selected window price when available. The implementation will reuse one pure calculation path, read `prices_today` and `prices_tomorrow` from shared integration state, preserve earliest-start tie-breaking and `unavailable` semantics, omit `price` when a sensor is unavailable, and keep Home Assistant entity logic thin and translation-backed.
 
 ## Technical Context
 

@@ -15,8 +15,8 @@ Add two derived Home Assistant text sensors that expose the cheapest 8-quarter-h
    - returns no valid result when data is incomplete,
    - resolves ties by earliest start time.
 2. Add or extend derived sensor entities under `custom_components/energy_optimizer/entities/sensors/` so the integration publishes:
-   - the existing current-day midday sell window sensor backed by `prices_today`,
-   - an analogous tomorrow midday sell window sensor backed by `prices_tomorrow`.
+   - the existing current-day consume window sensor backed by `prices_today`,
+   - an analogous tomorrow consume window sensor backed by `prices_tomorrow`.
 3. Ensure each sensor publishes state in `HH:MM-HH:MM` format, includes `price` only when available, and omits `price` when the sensor is `unavailable`.
 4. Wire both sensors into `custom_components/energy_optimizer/sensor.py` and/or shared sensor registration so payload-source updates trigger recalculation through the existing refresh path.
 5. Extend translations in `custom_components/energy_optimizer/translations/en.json` for both derived sensors.

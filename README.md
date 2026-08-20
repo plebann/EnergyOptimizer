@@ -25,12 +25,12 @@ Energy Optimizer is a Home Assistant custom integration focused on price-aware b
 - Sensors: battery, configuration, tracking, forecast helpers, and pricing window sensors.
 - Pricing sensors include buy-window references used by arbitrage decisions, including `morning_sell_buy_reference`.
 
-### Midday Sell Window Sensors
+### Consume Window Sensors
 
-The integration publishes two derived midday sell-window sensors:
+The integration publishes two derived consume-window sensors:
 
-- **Current day**: `sensor.<device>_midday_sell_window`
-- **Tomorrow**: `sensor.<device>_midday_sell_window_tomorrow`
+- **Current day**: `sensor.<device>_consume_window`
+- **Tomorrow**: `sensor.<device>_consume_window_tomorrow`
 
 Both sensors publish the cheapest 8-quarter-hour (2-hour) sell-price window between 08:00 and 16:00 for their respective local day.
 

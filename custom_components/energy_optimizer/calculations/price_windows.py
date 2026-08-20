@@ -10,8 +10,8 @@ from homeassistant.util import dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
 
-MIDDAY_START = time(8, 0)
-MIDDAY_END = time(16, 0)
+CONSUME_WINDOW_START = time(8, 0)
+CONSUME_WINDOW_END = time(16, 0)
 WINDOW_SLOTS = 8
 SLOT_DURATION = timedelta(minutes=15)
 HOUR_DURATION = timedelta(hours=1)
@@ -31,8 +31,8 @@ class QuarterHourPricePoint:
 
 
 @dataclass
-class MiddaySellWindowResult:
-    """Result of the cheapest midday sell-price window selection."""
+class ConsumeWindowResult:
+    """Result of the cheapest consume window selection."""
 
     start_local: datetime
     end_local: datetime
@@ -663,32 +663,34 @@ def expand_hourly_sell_prices(
     return sorted(points, key=lambda point: point.start_local)
 
 
-def _filter_midday_points(
+def _filter_consume_window_points(
     points: list[QuarterHourPricePoint],
 ) -> list[QuarterHourPricePoint]:
     """Keep only quarter-hour slots fully inside 08:00-16:00."""
     return [
         point
         for point in points
-        if point.start_local.time() >= MIDDAY_START
-        and point.end_local.time() <= MIDDAY_END
+        if point.start_local.time() >= CONSUME_WINDOW_START
+        and point.end_local.time() <= CONSUME_WINDOW_END
     ]
 
 
-def select_midday_window(
+def select_consume_window(
     points: list[QuarterHourPricePoint],
-) -> MiddaySellWindowResult | None:
-    """Select the midday sell window per zero-price expansion and 8-slot fallback rules."""
-    midday_points = _filter_midday_points(sorted(points, key=lambda point: point.start_local))
-    if not midday_points:
+) -> ConsumeWindowResult | None:
+    """Select the consume window per zero-price expansion and 8-slot fallback rules."""
+    consume_window_points = _filter_consume_window_points(
+        sorted(points, key=lambda point: point.start_local)
+    )
+    if not consume_window_points:
         return None
 
-    # Zero mode: when >2 midday hours are zero-priced, span from the earliest
+    # Zero mode: when >2 consume-window hours are zero-priced, span from the earliest
     # zero hour start to the latest zero hour end (including non-zero gaps).
     zero_hour_starts = sorted(
         {
             point.start_local.replace(minute=0, second=0, microsecond=0)
-            for point in midday_points
+            for point in consume_window_points
             if point.sell_price_value == 0
         }
     )
@@ -697,7 +699,7 @@ def select_midday_window(
         window_end = zero_hour_starts[-1] + HOUR_DURATION
         window_points = [
             point
-            for point in midday_points
+            for point in consume_window_points
             if point.start_local >= window_start and point.end_local <= window_end
         ]
         if not window_points:
@@ -705,7 +707,7 @@ def select_midday_window(
 
         total_cost = sum(point.sell_price_value for point in window_points)
         slot_count = len(window_points)
-        return MiddaySellWindowResult(
+        return ConsumeWindowResult(
             start_local=window_start,
             end_local=window_end,
             total_cost=total_cost,
@@ -713,12 +715,12 @@ def select_midday_window(
             slot_count=slot_count,
         )
 
-    if len(midday_points) < WINDOW_SLOTS:
+    if len(consume_window_points) < WINDOW_SLOTS:
         return None
 
-    best: MiddaySellWindowResult | None = None
-    for index in range(len(midday_points) - WINDOW_SLOTS + 1):
-        window = midday_points[index : index + WINDOW_SLOTS]
+    best: ConsumeWindowResult | None = None
+    for index in range(len(consume_window_points) - WINDOW_SLOTS + 1):
+        window = consume_window_points[index : index + WINDOW_SLOTS]
         contiguous = all(
             window[offset].end_local == window[offset + 1].start_local
             for offset in range(WINDOW_SLOTS - 1)
@@ -728,7 +730,7 @@ def select_midday_window(
 
         total_cost = sum(point.sell_price_value for point in window)
         if best is None or total_cost < best.total_cost:
-            best = MiddaySellWindowResult(
+            best = ConsumeWindowResult(
                 start_local=window[0].start_local,
                 end_local=window[-1].end_local,
                 total_cost=total_cost,
@@ -738,13 +740,13 @@ def select_midday_window(
     return best
 
 
-def build_midday_sell_window_result(
+def build_consume_window_result(
     prices_today: list[dict[str, Any]],
     entity_id: str,
     *,
     now_local: datetime | None = None,
-) -> MiddaySellWindowResult | None:
-    """Build the cheapest midday sell window from hourly shared-state payload."""
+) -> ConsumeWindowResult | None:
+    """Build the cheapest consume window from hourly shared-state payload."""
     reference_now = now_local or dt_util.now()
     if reference_now.tzinfo is None:
         reference_now = reference_now.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
@@ -755,24 +757,24 @@ def build_midday_sell_window_result(
         reference_now.date(),
         reference_now.tzinfo,
     )
-    return select_midday_window(points)
+    return select_consume_window(points)
 
 
-def format_sell_window(result: MiddaySellWindowResult) -> str:
-    """Format a midday sell window result as HH:MM-HH:MM."""
+def format_consume_window(result: ConsumeWindowResult) -> str:
+    """Format a consume window result as HH:MM-HH:MM."""
     start = result.start_local.strftime("%H:%M")
     end = result.end_local.strftime("%H:%M")
     return f"{start}-{end}"
 
 
-def find_cheapest_midday_sell_window(
+def find_cheapest_consume_window(
     prices_today: list[dict[str, Any]],
     entity_id: str,
     *,
     now_local: datetime | None = None,
-) -> MiddaySellWindowResult | None:
-    """Compatibility wrapper for midday sell window calculation."""
-    return build_midday_sell_window_result(
+) -> ConsumeWindowResult | None:
+    """Compatibility wrapper for consume window calculation."""
+    return build_consume_window_result(
         prices_today,
         entity_id,
         now_local=now_local,

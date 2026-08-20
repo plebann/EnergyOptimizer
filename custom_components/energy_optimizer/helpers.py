@@ -1061,13 +1061,13 @@ def resolve_daytime_min_price_time(
         entity_id = get_internal_sensor_entity_id(
             hass,
             entry_id=entry_id,
-            unique_id_suffix="midday_sell_window",
+            unique_id_suffix="consume_window",
         )
         resolved_time = _resolve_time_from_state_or_attribute(hass, entity_id)
         if resolved_time is not None:
             return resolved_time
         _LOGGER.warning(
-            "Internal midday sell window unavailable, trying configured fallback",
+            "Internal consume window unavailable, trying configured fallback",
         )
         _LOGGER.warning(
             "If fallback is also missing, using default %s",

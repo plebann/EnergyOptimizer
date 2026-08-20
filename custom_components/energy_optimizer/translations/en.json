@@ -314,11 +314,11 @@
       "evening_sell_window_tomorrow": {
         "name": "Evening sell window tomorrow"
       },
-      "midday_sell_window": {
-        "name": "Midday sell window"
+      "consume_window": {
+        "name": "Consume window"
       },
-      "midday_sell_window_tomorrow": {
-        "name": "Midday sell window tomorrow"
+      "consume_window_tomorrow": {
+        "name": "Consume window tomorrow"
       },
       "scheduled_actions": {
         "name": "Scheduled actions"

@@ -13,7 +13,7 @@ Add four derived Home Assistant sensors alongside the current pricing sensor set
    - evaluates candidates inside either the night range `00:00-06:00` or the day range `10:00-16:00`,
    - ranks candidates by average buy price ascending with the clarified night/day tie-break policies,
    - returns one selected candidate with raw average price and enough information for HA publication.
-2. Add four buy-window sensor variants in `custom_components/energy_optimizer/entities/sensors/pricing.py` while leaving the current sell-window, midday sell-window, and other pricing sensor classes unchanged:
+2. Add four buy-window sensor variants in `custom_components/energy_optimizer/entities/sensors/pricing.py` while leaving the current sell-window, consume-window, and other pricing sensor classes unchanged:
    - today night,
    - today day,
    - tomorrow night,

@@ -54,7 +54,7 @@ The payloads are consumed from coordinator-managed shared state rather than by d
 - Each sensor recalculates during the existing integration refresh/listener path when its underlying payload snapshot changes.
 - A change affecting only one day or one range must not overwrite or invalidate the other three sensors unless their own slice changes.
 - The sensors do not require user service calls or feature-specific persistence.
-- The four ranked sensors are added beside the existing sensor set; the old midday sell-window pair remains unchanged.
+- The four ranked sensors are added beside the existing sensor set; the old consume-window pair remains unchanged.
 
 ## Error Semantics
 

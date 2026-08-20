@@ -42,7 +42,7 @@
 - `resolve_evening_max_price_hour()` prefers the internal `evening_sell_window` sensor when `entry_id` is supplied, then falls back to `CONF_EVENING_MAX_PRICE_HOUR_SENSOR`, then default 17. Out-of-range values fall back to default.
 - `resolve_evening_second_max_price_hour()` prefers the `second_window_start` attribute on the internal `evening_sell_window` sensor, then falls back to `CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR`; invalid, missing, or out-of-range values return `None`.
 - `resolve_morning_max_price_hour()` prefers the internal `morning_sell_window` sensor when `entry_id` is supplied, then falls back to `CONF_MORNING_MAX_PRICE_HOUR_SENSOR`, then default 7. Out-of-range values fall back to default.
-- `resolve_daytime_min_price_time()` prefers the internal `midday_sell_window` sensor when `entry_id` is supplied, then falls back to `CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR`, then a parsed default time of 12:00. Invalid default strings also fall back to 12:00.
+- `resolve_daytime_min_price_time()` prefers the internal `consume_window` sensor when `entry_id` is supplied, then falls back to `CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR`, then a parsed default time of 12:00. Invalid default strings also fall back to 12:00.
 
 ## Buy Window Rules
 
@@ -74,10 +74,10 @@
 - Midday Avoidance Windows use hourly sell-price entries expanded into quarter-hour points by `expand_hourly_sell_prices()`; each hour produces four quarter-hour slots.
 - Midday filtering keeps quarter-hour slots fully inside 08:00-16:00.
 - Prices below `0.05` PLN/kWh are treated as zero during expansion.
-- If more than two midday hours are zero-priced, `select_midday_window()` returns a variable-length window from the earliest zero hour start through the latest zero hour end, including non-zero gaps between them.
-- Otherwise, `select_midday_window()` returns the cheapest contiguous 8-quarter-hour window; ties keep the earliest start because replacement only happens on strictly lower total cost.
+- If more than two midday hours are zero-priced, `select_consume_window()` returns a variable-length window from the earliest zero hour start through the latest zero hour end, including non-zero gaps between them.
+- Otherwise, `select_consume_window()` returns the cheapest contiguous 8-quarter-hour window; ties keep the earliest start because replacement only happens on strictly lower total cost.
 - Missing midday points, fewer than eight contiguous quarter-hour points, or gaps inside a candidate window produce no result.
-- `format_sell_window()` publishes `HH:MM-HH:MM`.
+- `format_consume_window()` publishes `HH:MM-HH:MM`.
 - Midday Avoidance Window sensors publish that range as state, and publish `price` rounded to 2 decimals.
 - The today Midday Avoidance Window sensor also publishes `is_active` as string `on` or `off`; tomorrow does not publish `is_active`.
 - Midday Avoidance Window sensors are isolated to the configured sell price entity and ignore buy-price-only changes.
@@ -90,7 +90,7 @@
 - Evening primary sell is scheduled at the resolved primary Evening Sell Window hour; a secondary listener is added only when a secondary hour resolves.
 - Sell restore listeners run one hour after the resolved morning sell hour and one hour after the later/effective evening sell hour. With a secondary evening hour, the evening restore source and time use the secondary hour only when it is at or after the primary hour.
 - Daytime min price restore is scheduled at the resolved Midday Avoidance Window time.
-- Scheduler registers state-change listeners for the high-tariff start sensor and for integration-owned `evening_sell_window`, `morning_sell_window`, and `midday_sell_window` sensors when those internal entity ids exist.
+- Scheduler registers state-change listeners for the high-tariff start sensor and for integration-owned `evening_sell_window`, `morning_sell_window`, and `consume_window` sensors when those internal entity ids exist.
 - Only one state-change listener is registered for the shared evening sell sensor.
 - Hourly price-driven controls run at minute 1 during daylight only; sunrise enables the listener and sunset disables it.
 - Hourly price-driven controls call `solar_charge_block`, wait five seconds, then call `export_block_control`.

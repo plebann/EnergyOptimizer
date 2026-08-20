@@ -637,8 +637,8 @@ def test_resolve_day_buy_window_duration_hours_falls_back_to_default(
 def test_resolve_daytime_min_price_time_from_internal_sensor_hh_mm(
     mock_get_internal: MagicMock,
 ) -> None:
-    """resolve_daytime_min_price_time reads time from internal midday window sensor."""
-    mock_get_internal.return_value = "sensor.eo_midday_sell_window"
+    """resolve_daytime_min_price_time reads time from internal consume window sensor."""
+    mock_get_internal.return_value = "sensor.eo_consume_window"
     hass = create_mock_hass()
     hass.states.get.return_value = create_time_state("11:30", domain="sensor")
 
@@ -652,7 +652,7 @@ def test_resolve_daytime_min_price_time_from_internal_sensor_hh_mm_range(
     mock_get_internal: MagicMock,
 ) -> None:
     """resolve_daytime_min_price_time extracts start time from HH:MM-HH:MM range state."""
-    mock_get_internal.return_value = "sensor.eo_midday_sell_window"
+    mock_get_internal.return_value = "sensor.eo_consume_window"
     hass = create_mock_hass()
     hass.states.get.return_value = create_time_state("11:00-13:00", domain="sensor")
 
@@ -665,7 +665,7 @@ def test_resolve_daytime_min_price_time_from_internal_sensor_hh_mm_range(
 def test_resolve_daytime_min_price_time_internal_sensor_not_found_falls_back(
     mock_get_internal: MagicMock,
 ) -> None:
-    """Falls back to config sensor when internal midday window entity is not in registry."""
+    """Falls back to config sensor when internal consume window entity is not in registry."""
     mock_get_internal.return_value = None
     hass = create_mock_hass()
     hass.states.get.return_value = create_time_state("10:00", domain="sensor")

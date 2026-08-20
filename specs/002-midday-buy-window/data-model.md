@@ -56,9 +56,9 @@
 - Each hourly entry must expand into 4 consecutive quarter-hour points with the same `sell_price_value`.
 
 **Relationships**
-- Many `QuarterHourPricePoint` objects feed one `MiddaySellWindowCandidate`.
+- Many `QuarterHourPricePoint` objects feed one `ConsumeWindowCandidate`.
 
-## 4. MiddaySellWindowCandidate
+## 4. ConsumeWindowCandidate
 
 **Purpose**: One contiguous 8-slot candidate window evaluated against other windows for a single day-scoped payload.
 
@@ -85,7 +85,7 @@
 - Many candidates may be derived from one `DayScopedPricePayload`.
 - Exactly zero or one candidate becomes the published sensor state for a given day.
 
-## 5. MiddaySellWindowSensorState
+## 5. ConsumeWindowSensorState
 
 **Purpose**: Published Home Assistant state contract for one day-scoped derived sensor.
 

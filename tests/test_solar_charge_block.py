@@ -9,12 +9,10 @@ import pytest
 
 from custom_components.energy_optimizer.const import (
     CONF_BATTERY_SOC_SENSOR,
-    CONF_DAYTIME_MIN_PRICE_SENSOR,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_MIN_SOC_PV,
     CONF_PROG3_SOC_ENTITY,
     CONF_PV_FORECAST_TODAY,
-    CONF_SELL_PRICE_SENSOR,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_MAX_CHARGE_CURRENT,
     DOMAIN,
@@ -26,8 +24,6 @@ from custom_components.energy_optimizer.decision_engine.solar_charge_block impor
 pytestmark = pytest.mark.enable_socket
 
 _ENTRY_ID = "entry-solar"
-_SELL_PRICE_ENTITY = "sensor.sell_price"
-_MIDDAY_PRICE_ENTITY = "sensor.midday_price"
 _PV_FORECAST_ENTITY = "sensor.pv_forecast"
 _MAX_CHARGE_ENTITY = "number.max_charge"
 
@@ -45,7 +41,6 @@ def _setup_hass(
     now_minute: int = 0,
     sun_state: str = "above_horizon",
     sun_attrs: dict | None = None,
-    current_price: float | None = 500.0,
     battery_space_value: float | None = 2.0,
     pv_forecast_available: bool = True,
     max_charge_current_value: float | str | None = DEFAULT_MAX_CHARGE_CURRENT,
@@ -56,8 +51,6 @@ def _setup_hass(
     entry.domain = DOMAIN
     entry.options = {}
     entry.data = {
-        CONF_SELL_PRICE_SENSOR: _SELL_PRICE_ENTITY,
-        CONF_DAYTIME_MIN_PRICE_SENSOR: _MIDDAY_PRICE_ENTITY,
         CONF_MAX_CHARGE_CURRENT_ENTITY: _MAX_CHARGE_ENTITY,
         CONF_PV_FORECAST_TODAY: _PV_FORECAST_ENTITY,
         # These values must not affect the narrowed action.
@@ -75,10 +68,7 @@ def _setup_hass(
 
     states = {
         "sun.sun": _state(sun_state, default_sun_attrs),
-        _MIDDAY_PRICE_ENTITY: _state("400"),
     }
-    if current_price is not None:
-        states[_SELL_PRICE_ENTITY] = _state(str(current_price))
     if max_charge_current_value is not None:
         states[_MAX_CHARGE_ENTITY] = _state(str(max_charge_current_value))
     if pv_forecast_available:
@@ -121,18 +111,11 @@ async def _run(
     hass: MagicMock,
     *,
     morning_sell_hour: int = 7,
-    morning_sell_price: float | None = 800.0,
-    midday_avoidance_price: float | None = 400.0,
     daytime_min_price_time: time = time(12, 0),
     pv_total_kwh: float = 8.0,
     pv_current_hour_kwh: float = 3.0,
     current_hour_demand_kwh: float = 1.0,
 ) -> None:
-    def _window_price(*_args, **kwargs):
-        if kwargs["unique_id_suffix"] == "morning_sell_window":
-            return morning_sell_price
-        return midday_avoidance_price
-
     with ExitStack() as stack:
         stack.enter_context(
             patch(
@@ -150,12 +133,6 @@ async def _run(
             patch(
                 "custom_components.energy_optimizer.decision_engine.solar_charge_block.resolve_daytime_min_price_time",
                 return_value=daytime_min_price_time,
-            )
-        )
-        stack.enter_context(
-            patch(
-                "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_internal_window_price",
-                side_effect=_window_price,
             )
         )
         stack.enter_context(
@@ -225,55 +202,30 @@ async def test_sun_below_horizon_makes_no_changes() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("morning_price", "midday_price", "current_price"),
-    [
-        (800.0, 400.0, 480.0),
-        (100.0, 0.0, 20.0),
-        (50.0, -50.0, -30.0),
-    ],
-)
-async def test_blocks_at_or_above_dynamic_threshold(
-    morning_price: float,
-    midday_price: float,
-    current_price: float,
-) -> None:
+async def test_blocks_when_all_pv_guards_are_true() -> None:
     """Set only maximum charge current to zero when every block guard is true."""
-    hass = _setup_hass(current_price=current_price)
+    hass = _setup_hass()
 
-    await _run(
-        hass,
-        morning_sell_price=morning_price,
-        midday_avoidance_price=midday_price,
-    )
+    await _run(hass)
 
     _assert_charge_current(hass, 0)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("morning_price", "midday_price", "current_price"),
-    [
-        (800.0, 400.0, 479.9),
-        (100.0, 0.0, 19.9),
-        (50.0, -50.0, -30.1),
-    ],
-)
-async def test_restores_below_dynamic_threshold(
-    morning_price: float,
-    midday_price: float,
-    current_price: float,
+async def test_low_current_price_alone_still_blocks(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Restore default charging below the low-value spread threshold."""
-    hass = _setup_hass(current_price=current_price)
-
-    await _run(
-        hass,
-        morning_sell_price=morning_price,
-        midday_avoidance_price=midday_price,
+    """Do not restore solely because the sell price is below the former threshold."""
+    hass = _setup_hass()
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.solar_charge_block.get_required_float_state",
+        lambda *_args, **_kwargs: pytest.fail("current sell price must not be read"),
+        raising=False,
     )
 
-    _assert_charge_current(hass, DEFAULT_MAX_CHARGE_CURRENT)
+    await _run(hass)
+
+    _assert_charge_current(hass, 0)
 
 
 @pytest.mark.asyncio
@@ -303,7 +255,7 @@ async def test_restores_when_current_hour_pv_does_not_exceed_demand() -> None:
 @pytest.mark.asyncio
 async def test_at_daytime_min_price_restores_when_current_charge_is_zero() -> None:
     """Restore once the midday cutoff is reached if solar charging is blocked."""
-    hass = _setup_hass(now_hour=12, current_price=500.0, max_charge_current_value=0)
+    hass = _setup_hass(now_hour=12, max_charge_current_value=0)
 
     await _run(hass)
 
@@ -325,7 +277,6 @@ async def test_at_daytime_min_price_skips_when_charge_is_not_zero() -> None:
     """Do not continue block evaluation after the midday cutoff."""
     hass = _setup_hass(
         now_hour=12,
-        current_price=500.0,
         max_charge_current_value=DEFAULT_MAX_CHARGE_CURRENT,
     )
 
@@ -340,37 +291,6 @@ async def test_at_daytime_min_price_skips_when_charge_state_is_invalid() -> None
     hass = _setup_hass(now_hour=12, max_charge_current_value="unknown")
 
     await _run(hass)
-
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_missing_current_sell_price_makes_no_changes() -> None:
-    """Missing current sell-price data must not trigger a command."""
-    hass = _setup_hass(current_price=None)
-
-    await _run(hass)
-
-    hass.services.async_call.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("morning_price", "midday_price"),
-    [(None, 400.0), (800.0, None)],
-)
-async def test_missing_window_price_makes_no_changes(
-    morning_price: float | None,
-    midday_price: float | None,
-) -> None:
-    """Missing Morning Sell or Midday Avoidance prices must not trigger a command."""
-    hass = _setup_hass()
-
-    await _run(
-        hass,
-        morning_sell_price=morning_price,
-        midday_avoidance_price=midday_price,
-    )
 
     hass.services.async_call.assert_not_called()
 

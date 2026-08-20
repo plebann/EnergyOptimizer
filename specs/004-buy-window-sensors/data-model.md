@@ -128,4 +128,4 @@
 
 - No feature-specific persistence is required; all four sensors reflect current coordinator state.
 - The same selection model applies to today/tomorrow and night/day variants; only `payload_key`, `evaluation_date_local`, and `range_key` differ.
-- The existing sell-window, midday sell-window, and other current sensors remain outside the scope of this state model and must keep their current behavior unchanged.
+- The existing sell-window, consume-window, and other current sensors remain outside the scope of this state model and must keep their current behavior unchanged.

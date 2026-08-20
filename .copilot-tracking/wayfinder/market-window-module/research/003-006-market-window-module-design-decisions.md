@@ -16,7 +16,7 @@ The deepened Market Window module should preserve distinct category-specific res
 
 A single universal result shape would either lose domain meaning or grow many optional fields. Buy Windows need two-hour average-price output and negative-price metadata. Ranked Sell Windows need primary and secondary one-hour outputs plus a secondary-gap attribute. Midday Avoidance Windows can be variable length, can represent zero-price expansion, and have today-only active-state publication. High-Tariff Windows resolve hours rather than price-selected payload windows.
 
-The public interface should expose resolved domain operations rather than raw calculation dataclasses. Internally, the module can keep or evolve `BuyWindowResult`, `RankedSellWindowResult`, and `MiddaySellWindowResult` while callers receive the minimum shape they need for their use case: sensor state and attributes, schedule timing context, or decision-engine numeric/time values.
+The public interface should expose resolved domain operations rather than raw calculation dataclasses. Internally, the module can keep or evolve `BuyWindowResult`, `RankedSellWindowResult`, and `ConsumeWindowResult` while callers receive the minimum shape they need for their use case: sensor state and attributes, schedule timing context, or decision-engine numeric/time values.
 
 This decision preserves depth: callers learn one Market Window module interface while the module owns parsing, ranking, fallback, default, warning, and publication compatibility rules.
 
