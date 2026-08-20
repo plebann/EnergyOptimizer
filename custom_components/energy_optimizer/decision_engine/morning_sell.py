@@ -316,7 +316,12 @@ class MorningSellStrategy(BaseSellStrategy):
             hours=base_hours,
         )
 
-        if base_pv_forecast is None or not base_pv_forecast.sufficiency_available:
+        sell_hour = self._resolve_sell_hour()
+        if (
+            base_pv_forecast is None
+            or not base_pv_forecast.sufficiency_available
+            or sell_hour not in base_pv_forecast_hourly
+        ):
             return build_no_action_outcome(
                 scenario=self.scenario_name,
                 summary="Morning sell skipped: hourly PV forecast unavailable",
@@ -329,7 +334,6 @@ class MorningSellStrategy(BaseSellStrategy):
                 sufficiency_reached=False,
             )
 
-        sell_hour = self._resolve_sell_hour()
         hourly_demand_kwh = (
             hourly_usage[sell_hour]
             + base_heat_pump_hourly.get(sell_hour, 0.0)
