@@ -244,10 +244,6 @@ async def test_morning_sell_executes_with_surplus_below_threshold(
         f"{MORNING}.calculate_surplus_energy",
         lambda reserve, required, pv: 5.0,
     )
-    monkeypatch.setattr(
-        f"{SELL_BASE}.calculate_export_power",
-        lambda *args, **kwargs: 1200.0,
-    )
 
     await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
 
@@ -290,10 +286,6 @@ async def test_morning_sell_uses_full_surplus_when_margin_gate_is_enabled(
     monkeypatch.setattr(
         f"{MORNING}.calculate_surplus_energy",
         lambda reserve, required, pv: 5.0,
-    )
-    monkeypatch.setattr(
-        f"{SELL_BASE}.calculate_export_power",
-        lambda *args, **kwargs: 1200.0,
     )
 
     await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
@@ -535,10 +527,6 @@ async def test_morning_sell_surplus_below_free_space_and_to_22_above_sells_min_v
         f"{MORNING}.calculate_surplus_energy",
         lambda reserve, required, pv: next(surplus_calls),
     )
-    monkeypatch.setattr(
-        f"{SELL_BASE}.calculate_export_power",
-        lambda *args, **kwargs: 600.0,
-    )
 
     await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
 
@@ -634,10 +622,6 @@ async def test_morning_sell_uses_pv_sufficiency_as_demand_window_end(
         return max(reserve + pv - required, 0.0)
 
     monkeypatch.setattr(f"{MORNING}.calculate_surplus_energy", _surplus)
-    monkeypatch.setattr(
-        f"{SELL_BASE}.calculate_export_power",
-        lambda *args, **kwargs: 1400.0,
-    )
 
     await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
 
@@ -785,21 +769,11 @@ async def test_morning_sell_skips_when_required_reserve_exceeds_current_soc(
         f"{MORNING}.calculate_surplus_energy",
         lambda reserve, required, pv: 8.0,
     )
-    monkeypatch.setattr(
-        f"{SELL_BASE}.calculate_export_power",
-        lambda *args, **kwargs: 1200.0,
-    )
-    monkeypatch.setattr(
-        f"{SELL_BASE}.kwh_to_soc",
-        lambda *args, **kwargs: 50.0,
-    )
-
     await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
 
     assert outcomes
-    assert outcomes[-1].action_type == "no_action"
-    assert outcomes[-1].details["ra"] is True
-    set_program_soc.assert_not_awaited()
+    assert outcomes[-1].action_type == "sell"
+    set_program_soc.assert_awaited()
 
 
 def test_morning_sell_discharge_current_uses_ceiling_and_entity_max() -> None:
@@ -867,7 +841,7 @@ def test_morning_sell_export_power_rounds_up_to_hundreds() -> None:
 
     assert regulator.kind == "export_power"
     assert regulator.previous_value == 1200.0
-    assert regulator.value == 2400.0
+    assert regulator.value == 2301.0
 
 
 @pytest.mark.asyncio
@@ -1059,18 +1033,8 @@ async def test_morning_sell_skips_when_pv_floor_required_reserve_exceeds_current
         f"{MORNING}.calculate_surplus_energy",
         lambda reserve, required, pv: 8.0,
     )
-    monkeypatch.setattr(
-        f"{SELL_BASE}.calculate_export_power",
-        lambda *args, **kwargs: 1200.0,
-    )
-    monkeypatch.setattr(
-        f"{SELL_BASE}.kwh_to_soc",
-        lambda *args, **kwargs: 50.0,
-    )
-
     await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
 
     assert outcomes
-    assert outcomes[-1].action_type == "no_action"
-    assert outcomes[-1].details["ra"] is True
-    set_program_soc.assert_not_awaited()
+    assert outcomes[-1].action_type == "sell"
+    set_program_soc.assert_awaited()

@@ -241,10 +241,6 @@ async def test_evening_sell_high_sell_action_type(monkeypatch: pytest.MonkeyPatc
         f"{EVENING}.calculate_surplus_energy",
         lambda reserve, required, pv: 5.0,
     )
-    monkeypatch.setattr(
-        f"{SELL_BASE}.calculate_export_power",
-        lambda *args, **kwargs: 1200.0,
-    )
 
     await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
 
@@ -302,7 +298,7 @@ async def test_evening_sell_uses_next_day_qualifying_buy_hour(
     assert bounds["end"].date() == datetime(2026, 2, 25).date()
     assert bounds["end"].hour == 4
     assert bounds["max_buy_price"] == 240.0
-    assert forecast_windows == [(18, 1)]
+    assert forecast_windows == [(18, 1), (17, 18)]
     assert outcomes[-1].details["sell_horizon_mode"] == "arbitrage"
     assert outcomes[-1].details["arbitrage_hour"] == 1
     assert outcomes[-1].details["buy_window_reference_price"] == 200.0
@@ -551,10 +547,6 @@ async def test_evening_sell_surplus_sell_success(monkeypatch: pytest.MonkeyPatch
         f"{EVENING}.calculate_sufficiency_window",
         lambda **kwargs: (9.0, 8.0, 2.0, 5, True),
     )
-    monkeypatch.setattr(
-        f"{SELL_BASE}.calculate_export_power",
-        lambda *args, **kwargs: 1500.0,
-    )
 
     await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
 
@@ -666,28 +658,18 @@ async def test_evening_sell_max_sell_energy_clamp_and_fail_open(
     monkeypatch.setattr(f"{EVENING}.calculate_losses", lambda *args, **kwargs: (0.0, 0.0))
     monkeypatch.setattr(f"{EVENING}.calculate_battery_reserve", lambda *args, **kwargs: 10.0)
     monkeypatch.setattr(f"{EVENING}.calculate_surplus_energy", lambda reserve, required, pv: 7.0)
-    monkeypatch.setattr(f"{SELL_BASE}.calculate_export_power", lambda *args, **kwargs: 1200.0)
-
-    kwh_calls: list[float] = []
-
-    def _kwh_to_soc(kwh: float, capacity_ah: float, voltage: float) -> float:
-        kwh_calls.append(kwh)
-        return 10.0
-
-    monkeypatch.setattr(f"{SELL_BASE}.kwh_to_soc", _kwh_to_soc)
 
     await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
 
     assert outcomes
-    assert kwh_calls[-1] == 3.0
+    assert outcomes[-1].details["executable_export_ac_kwh"] == 3.0
 
     caplog.clear()
-    kwh_calls.clear()
     del states["sensor.max_sell_energy"]
 
     await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
 
-    assert kwh_calls[-1] == 7.0
+    assert outcomes[-1].details["executable_export_ac_kwh"] == 7.0
 
 
 @pytest.mark.asyncio
@@ -714,18 +696,9 @@ async def test_evening_sell_a_first_splits_primary_then_secondary(
         return _sell_request(12.0 if self._is_primary else 3.0)
 
     monkeypatch.setattr(f"{EVENING}.EveningSellStrategy._compute_base_evaluation", _compute_base)
-    monkeypatch.setattr(f"{SELL_BASE}.calculate_export_power", lambda *args, **kwargs: 1100.0)
     _CountingStoreStub.save_calls = []
     _CountingStoreStub.load_data = None
     monkeypatch.setattr(f"{SELL_BASE}.Store", _CountingStoreStub)
-
-    kwh_calls: list[float] = []
-
-    def _kwh_to_soc(kwh: float, capacity_ah: float, voltage: float) -> float:
-        kwh_calls.append(kwh)
-        return 10.0
-
-    monkeypatch.setattr(f"{SELL_BASE}.kwh_to_soc", _kwh_to_soc)
 
     await async_run_evening_sell(
         hass,
@@ -742,7 +715,7 @@ async def test_evening_sell_a_first_splits_primary_then_secondary(
         is_first=False,
     )
 
-    assert kwh_calls == [9.0, 3.0]
+    assert [outcome.details["surplus_kwh"] for outcome in outcomes[-2:]] == [9.0, 3.0]
     assert len(_CountingStoreStub.save_calls) == 1
 
 
@@ -772,18 +745,9 @@ async def test_evening_sell_b_first_sells_only_overflow_before_primary_window(
         return _sell_request(9.0)
 
     monkeypatch.setattr(f"{EVENING}.EveningSellStrategy._compute_base_evaluation", _compute_base)
-    monkeypatch.setattr(f"{SELL_BASE}.calculate_export_power", lambda *args, **kwargs: 900.0)
     _CountingStoreStub.save_calls = []
     _CountingStoreStub.load_data = None
     monkeypatch.setattr(f"{SELL_BASE}.Store", _CountingStoreStub)
-
-    kwh_calls: list[float] = []
-
-    def _kwh_to_soc(kwh: float, capacity_ah: float, voltage: float) -> float:
-        kwh_calls.append(kwh)
-        return 10.0
-
-    monkeypatch.setattr(f"{SELL_BASE}.kwh_to_soc", _kwh_to_soc)
 
     await async_run_evening_sell(
         hass,
@@ -800,7 +764,7 @@ async def test_evening_sell_b_first_sells_only_overflow_before_primary_window(
         is_first=False,
     )
 
-    assert kwh_calls == [3.0, 9.0]
+    assert [outcome.details["surplus_kwh"] for outcome in outcomes[-2:]] == [3.0, 9.0]
     assert len(_CountingStoreStub.save_calls) == 1
 
 
@@ -827,7 +791,6 @@ async def test_evening_sell_second_window_early_exit_restores_active_sell(
         return _sell_request(8.0)
 
     monkeypatch.setattr(f"{EVENING}.EveningSellStrategy._compute_base_evaluation", _compute_base)
-    monkeypatch.setattr(f"{SELL_BASE}.calculate_export_power", lambda *args, **kwargs: 800.0)
 
     restore_mock = AsyncMock()
     monkeypatch.setattr(f"{EVENING}.async_handle_sell_restore", restore_mock)
@@ -882,7 +845,6 @@ async def test_evening_sell_second_window_zero_surplus_restores_active_sell(
         )
 
     monkeypatch.setattr(f"{EVENING}.EveningSellStrategy._compute_base_evaluation", _compute_base)
-    monkeypatch.setattr(f"{SELL_BASE}.calculate_export_power", lambda *args, **kwargs: 800.0)
 
     restore_mock = AsyncMock()
     monkeypatch.setattr(f"{EVENING}.async_handle_sell_restore", restore_mock)

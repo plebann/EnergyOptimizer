@@ -5,19 +5,20 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 import logging
+from math import floor
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import Context, HomeAssistantError
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from ..calculations.battery import kwh_to_soc
-from ..calculations.energy import calculate_export_power
 from ..const import (
     CONF_EXPORT_POWER_ENTITY,
+    CONF_MAX_EXPORT_POWER,
     CONF_MAX_SELL_ENERGY_ENTITY,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_PV_PRODUCTION_SENSOR,
+    DEFAULT_MAX_EXPORT_POWER,
     CONF_WORK_MODE_ENTITY,
     DOMAIN,
     STORAGE_KEY_SELL_RESTORE,
@@ -51,13 +52,15 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class SellRequest:
-    """Deferred sell execution request produced by strategy evaluation."""
+    """Deferred sell request with planned AC export and sell-window AC demand."""
 
     surplus_kwh: float
     required_kwh: float
     build_outcome_fn: Callable[[float, float, float], DecisionOutcome]
     build_no_action_fn: Callable[[float], DecisionOutcome]
     skip_restore: bool = False
+    sell_window_consumption_kwh: float = 0.0
+    sell_window_duration_hours: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,16 +219,29 @@ class BaseSellStrategy(ABC):
         """Build an optional outcome when the required SOC input is unavailable."""
         return None
 
-    def _resolve_sell_regulator(self, surplus_kwh: float) -> SellRegulator:
+    def _resolve_sell_regulator(
+        self,
+        surplus_kwh: float,
+        *,
+        duration_hours: float = 1.0,
+    ) -> SellRegulator:
         """Return the regulator used to control this sell execution."""
         entity_id = self.config.get(CONF_EXPORT_POWER_ENTITY)
         previous_value: float | None = None
         if entity_id:
             previous_value, _, _ = get_float_state_info(self.hass, str(entity_id))
+        max_export_power = float(
+            self.config.get(CONF_MAX_EXPORT_POWER, DEFAULT_MAX_EXPORT_POWER)
+            or DEFAULT_MAX_EXPORT_POWER
+        )
+        export_power_w = min(
+            (surplus_kwh / duration_hours) * 1000.0,
+            max(max_export_power, 0.0),
+        )
         return SellRegulator(
             kind="export_power",
             entity_id=str(entity_id) if entity_id else None,
-            value=calculate_export_power(surplus_kwh),
+            value=export_power_w,
             previous_value=previous_value,
         )
 
@@ -369,56 +385,101 @@ class BaseSellStrategy(ABC):
                     max_sell_error,
                 )
 
-        target_soc_floor = self._get_target_soc_floor(surplus_kwh=surplus_kwh)
-        raw_target_soc = self.current_soc - kwh_to_soc(
-            surplus_kwh,
-            self.battery_config.capacity_ah,
-            self.battery_config.voltage,
+        duration_hours = request.sell_window_duration_hours
+        if duration_hours <= 0.0:
+            _LOGGER.error(
+                "%s sell has invalid window duration %.3f hours",
+                self.sell_type,
+                duration_hours,
+            )
+            outcome = request.build_no_action_fn(surplus_kwh)
+            await self._log_outcome(outcome)
+            return
+
+        max_export_power = float(
+            self.config.get(CONF_MAX_EXPORT_POWER, DEFAULT_MAX_EXPORT_POWER)
+            or DEFAULT_MAX_EXPORT_POWER
         )
-        required_reserve_soc = 0.0
-        required_reserve_applied = raw_target_soc <= target_soc_floor
-        if required_reserve_applied:
-            required_reserve_kwh = request.required_kwh / (
-                self.battery_config.efficiency / 100.0
+        export_limit_kwh = max(max_export_power, 0.0) * duration_hours / 1000.0
+        executable_export_kwh = min(surplus_kwh, export_limit_kwh)
+        configured_efficiency = self.battery_config.efficiency
+        efficiency = (
+            configured_efficiency
+            if 0.0 < configured_efficiency <= 1.0
+            else configured_efficiency / 100.0
+        )
+        if efficiency <= 0.0:
+            _LOGGER.error(
+                "%s sell has invalid discharge efficiency %.3f",
+                self.sell_type,
+                efficiency,
             )
-            required_reserve_soc = kwh_to_soc(
-                required_reserve_kwh,
-                self.battery_config.capacity_ah,
-                self.battery_config.voltage,
-            )
-            target_soc = target_soc_floor + required_reserve_soc
-        else:
-            target_soc = raw_target_soc
+            outcome = request.build_no_action_fn(executable_export_kwh)
+            await self._log_outcome(outcome)
+            return
+
+        sell_window_demand_kwh = request.sell_window_consumption_kwh
+        required_battery_energy_kwh = (
+            executable_export_kwh + sell_window_demand_kwh
+        ) / efficiency
+        battery_capacity_kwh = (
+            self.battery_config.capacity_ah * self.battery_config.voltage / 1000.0
+        )
+        if battery_capacity_kwh <= 0.0:
+            _LOGGER.error("%s sell has invalid battery capacity", self.sell_type)
+            outcome = request.build_no_action_fn(executable_export_kwh)
+            await self._log_outcome(outcome)
+            return
+
+        target_soc_floor = self._get_target_soc_floor(
+            surplus_kwh=executable_export_kwh
+        )
+        raw_target_soc = self.current_soc - (
+            required_battery_energy_kwh / battery_capacity_kwh * 100.0
+        )
+        target_soc = max(float(floor(raw_target_soc)), target_soc_floor)
 
         target_diagnostics = {
             "rt": round(raw_target_soc, 1),
-            "rg": round(required_reserve_soc, 1),
-            "ra": required_reserve_applied,
+            "planned_export_ac_kwh": round(surplus_kwh, 3),
+            "export_limit_ac_kwh": round(export_limit_kwh, 3),
+            "executable_export_ac_kwh": round(executable_export_kwh, 3),
+            "sell_window_consumption_ac_kwh": round(sell_window_demand_kwh, 3),
+            "required_battery_energy_dc_kwh": round(required_battery_energy_kwh, 3),
+            "discharge_efficiency": round(efficiency, 3),
+            "safety_soc_floor": round(target_soc_floor, 1),
+            "sell_window_duration_hours": round(duration_hours, 3),
+            "export_power_basis": "executable_export_ac_kwh / duration_hours",
         }
         record_step(
             "sell_target_soc",
             kind="calculation",
             inputs={
                 "current_soc": self.current_soc,
-                "surplus_kwh": surplus_kwh,
+                "planned_export_ac_kwh": surplus_kwh,
+                "executable_export_ac_kwh": executable_export_kwh,
+                "sell_window_consumption_ac_kwh": sell_window_demand_kwh,
+                "discharge_efficiency": efficiency,
                 "capacity_ah": self.battery_config.capacity_ah,
                 "voltage_v": self.battery_config.voltage,
                 "target_soc_floor": target_soc_floor,
-                "required_kwh": request.required_kwh,
             },
             result={
                 "raw_target_soc": raw_target_soc,
                 "target_soc": target_soc,
-                "required_reserve_soc": required_reserve_soc,
+                "required_battery_energy_dc_kwh": required_battery_energy_kwh,
             },
         )
         if target_soc >= self.current_soc:
-            outcome = request.build_no_action_fn(surplus_kwh)
+            outcome = request.build_no_action_fn(executable_export_kwh)
             outcome.details.update(target_diagnostics)
             await self._log_outcome(outcome)
             return
 
-        regulator = self._resolve_sell_regulator(surplus_kwh)
+        regulator = self._resolve_sell_regulator(
+            executable_export_kwh,
+            duration_hours=duration_hours,
+        )
         work_mode_entity = self.config.get(CONF_WORK_MODE_ENTITY)
         sell_test_mode = is_test_sell_mode(self.hass, self.entry)
 
@@ -504,7 +565,7 @@ class BaseSellStrategy(ABC):
                     original_prog_soc=self.original_prog_soc,
                     regulator=regulator,
                 )
-                outcome = request.build_no_action_fn(surplus_kwh)
+                outcome = request.build_no_action_fn(executable_export_kwh)
                 outcome.action_type = "sell_failed"
                 outcome.summary = f"{self.scenario_name} skipped after inverter write failure"
                 outcome.reason = str(err)
@@ -512,7 +573,11 @@ class BaseSellStrategy(ABC):
                 return
 
         export_power_w = regulator.value if regulator.kind == "export_power" else 0.0
-        outcome = request.build_outcome_fn(target_soc, surplus_kwh, export_power_w)
+        outcome = request.build_outcome_fn(
+            target_soc,
+            executable_export_kwh,
+            export_power_w,
+        )
         outcome.details.update(target_diagnostics)
         outcome.details["test_sell_mode"] = sell_test_mode
         if regulator.kind == "discharge_current":
