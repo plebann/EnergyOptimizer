@@ -18,9 +18,9 @@ A Market Window selected because exporting energy during that window is favorabl
 
 A Sell Window selected from the morning price peak. EnergyOptimizer uses it as the morning export opportunity and as a reference point for later PV charging decisions.
 
-### Midday Avoidance Window
+### Consume Window
 
-A Market Window selected because exporting energy during that window is unfavorable, so EnergyOptimizer may avoid or limit export-oriented behavior.
+A Market Window selected because consuming energy during that window is favorable, so EnergyOptimizer may enable or prioritize consumption-oriented behavior.
 _Avoid_: Midday Sell Window
 
 ### High-Tariff Window

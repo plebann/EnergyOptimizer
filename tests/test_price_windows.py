@@ -8,15 +8,15 @@ import pytest
 from custom_components.energy_optimizer.calculations.price_windows import (
     WINDOW_SLOTS,
     BuyWindowResult,
-    MiddaySellWindowResult,
+    ConsumeWindowResult,
     QuarterHourPricePoint,
     build_best_buy_window_result,
-    build_midday_sell_window_result,
+    build_consume_window_result,
     build_ranked_sell_window_result,
     expand_hourly_sell_prices,
     find_first_arbitrage_buy_hour,
-    format_sell_window,
-    select_midday_window,
+    format_consume_window,
+    select_consume_window,
 )
 
 TZ = timezone(timedelta(hours=2))
@@ -189,10 +189,10 @@ def test_expand_hourly_sell_prices_skips_invalid_entries() -> None:
 
 
 @pytest.mark.unit
-def test_select_midday_window_picks_cheapest_contiguous_eight_quarters() -> None:
+def test_select_consume_window_picks_cheapest_contiguous_eight_quarters() -> None:
     points = expand_hourly_sell_prices(_full_day_entries(low_start_hour=10), ENTITY_ID, TODAY, TZ)
 
-    result = select_midday_window(points)
+    result = select_consume_window(points)
 
     assert result is not None
     assert result.start_local == datetime(2026, 5, 8, 10, 0, tzinfo=TZ)
@@ -203,10 +203,10 @@ def test_select_midday_window_picks_cheapest_contiguous_eight_quarters() -> None
 
 
 @pytest.mark.unit
-def test_select_midday_window_breaks_ties_by_earliest_start() -> None:
+def test_select_consume_window_breaks_ties_by_earliest_start() -> None:
     points = expand_hourly_sell_prices(_full_day_entries(low_start_hour=8, low_hours=8), ENTITY_ID, TODAY, TZ)
 
-    result = select_midday_window(points)
+    result = select_consume_window(points)
 
     assert result is not None
     assert result.start_local == datetime(2026, 5, 8, 8, 0, tzinfo=TZ)
@@ -214,14 +214,14 @@ def test_select_midday_window_breaks_ties_by_earliest_start() -> None:
 
 
 @pytest.mark.unit
-def test_select_midday_window_returns_none_when_less_than_eight_contiguous_quarters() -> None:
+def test_select_consume_window_returns_none_when_less_than_eight_contiguous_quarters() -> None:
     points = expand_hourly_sell_prices([_hourly_entry(8, 0.4)], ENTITY_ID, TODAY, TZ)
 
-    assert select_midday_window(points) is None
+    assert select_consume_window(points) is None
 
 
 @pytest.mark.unit
-def test_select_midday_window_returns_none_for_gap_in_required_window() -> None:
+def test_select_consume_window_returns_none_for_gap_in_required_window() -> None:
     points = [
         _point_at(8, 0, 1.0),
         _point_at(8, 15, 1.0),
@@ -233,12 +233,12 @@ def test_select_midday_window_returns_none_for_gap_in_required_window() -> None:
         _point_at(10, 0, 1.0),
     ]
 
-    assert select_midday_window(points) is None
+    assert select_consume_window(points) is None
 
 
 @pytest.mark.unit
-def test_build_midday_sell_window_result_ignores_tomorrow_even_when_cheaper() -> None:
-    result = build_midday_sell_window_result(
+def test_build_consume_window_result_ignores_tomorrow_even_when_cheaper() -> None:
+    result = build_consume_window_result(
         [_hourly_entry(8, 1.0), _hourly_entry(9, 1.0)]
         + _full_day_entries(low_start_hour=12)
         + [_hourly_entry(8, 0.1, day=TOMORROW), _hourly_entry(9, 0.1, day=TOMORROW)],
@@ -252,8 +252,8 @@ def test_build_midday_sell_window_result_ignores_tomorrow_even_when_cheaper() ->
 
 
 @pytest.mark.unit
-def test_build_midday_sell_window_result_selects_tomorrow_payload_when_evaluating_tomorrow() -> None:
-    result = build_midday_sell_window_result(
+def test_build_consume_window_result_selects_tomorrow_payload_when_evaluating_tomorrow() -> None:
+    result = build_consume_window_result(
         _full_day_entries(low_start_hour=11, day=TOMORROW),
         ENTITY_ID,
         now_local=datetime(2026, 5, 9, 12, 0, tzinfo=TZ),
@@ -266,8 +266,8 @@ def test_build_midday_sell_window_result_selects_tomorrow_payload_when_evaluatin
 
 
 @pytest.mark.unit
-def test_build_midday_sell_window_result_returns_none_when_data_missing() -> None:
-    result = build_midday_sell_window_result(
+def test_build_consume_window_result_returns_none_when_data_missing() -> None:
+    result = build_consume_window_result(
         [_hourly_entry(7, 1.0), _hourly_entry(8, 1.0)],
         ENTITY_ID,
         now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
@@ -277,11 +277,11 @@ def test_build_midday_sell_window_result_returns_none_when_data_missing() -> Non
 
 
 @pytest.mark.unit
-def test_build_midday_sell_window_result_skips_invalid_hour_and_selects_other_window() -> None:
+def test_build_consume_window_result_skips_invalid_hour_and_selects_other_window() -> None:
     entries = _full_day_entries(low_start_hour=10)
     entries[2] = _hourly_entry(10, "bad")
 
-    result = build_midday_sell_window_result(
+    result = build_consume_window_result(
         entries,
         ENTITY_ID,
         now_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
@@ -292,8 +292,8 @@ def test_build_midday_sell_window_result_skips_invalid_hour_and_selects_other_wi
 
 
 @pytest.mark.unit
-def test_build_midday_sell_window_result_treats_prices_below_threshold_as_zero() -> None:
-    result = build_midday_sell_window_result(
+def test_build_consume_window_result_treats_prices_below_threshold_as_zero() -> None:
+    result = build_consume_window_result(
         [
             _hourly_entry(8, 1.0),
             _hourly_entry(9, 1.0),
@@ -313,8 +313,8 @@ def test_build_midday_sell_window_result_treats_prices_below_threshold_as_zero()
 
 
 @pytest.mark.unit
-def test_build_midday_sell_window_result_extends_window_when_more_than_two_zero_hours() -> None:
-    result = build_midday_sell_window_result(
+def test_build_consume_window_result_extends_window_when_more_than_two_zero_hours() -> None:
+    result = build_consume_window_result(
         [
             _hourly_entry(8, 1.0),
             _hourly_entry(9, 0.0),
@@ -337,15 +337,15 @@ def test_build_midday_sell_window_result_extends_window_when_more_than_two_zero_
 
 
 @pytest.mark.unit
-def test_format_sell_window_uses_hhmm_hhmm_format() -> None:
-    result = MiddaySellWindowResult(
+def test_format_consume_window_uses_hhmm_hhmm_format() -> None:
+    result = ConsumeWindowResult(
         start_local=datetime(2026, 5, 8, 12, 0, tzinfo=TZ),
         end_local=datetime(2026, 5, 8, 14, 0, tzinfo=TZ),
         total_cost=4.0,
         average_price=0.5,
     )
 
-    assert format_sell_window(result) == "12:00-14:00"
+    assert format_consume_window(result) == "12:00-14:00"
 
 
 @pytest.mark.unit

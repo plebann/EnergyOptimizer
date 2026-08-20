@@ -31,8 +31,8 @@ from .entities.sensors import (
     LastBalancingTimestampSensor,
     LastOptimizationSensor,
     MaxSocSensor,
-    MiddaySellWindowSensor,
-    MiddaySellWindowTomorrowSensor,
+    ConsumeWindowSensor,
+    ConsumeWindowTomorrowSensor,
     MinArbitrageMarginSensor,
     MorningSellBuyReferenceSensor,
     MinSocSensor,
@@ -85,8 +85,8 @@ async def async_setup_entry(
         EveningSellWindowSensor(coordinator, config_entry, config),
         MorningSellWindowTomorrowSensor(coordinator, config_entry, config),
         EveningSellWindowTomorrowSensor(coordinator, config_entry, config),
-        MiddaySellWindowSensor(coordinator, config_entry, config),
-        MiddaySellWindowTomorrowSensor(coordinator, config_entry, config),
+        ConsumeWindowSensor(coordinator, config_entry, config),
+        ConsumeWindowTomorrowSensor(coordinator, config_entry, config),
         PvForecastCompensationSensor(coordinator, config_entry, config),
     ]
 

@@ -1,4 +1,4 @@
-# Contract: Midday Sell Window Sensors
+# Contract: Consume Window Sensors
 
 ## Interface Type
 
@@ -37,7 +37,7 @@ The payloads are consumed from coordinator-managed shared state rather than by d
 | Property | Current-day sensor | Tomorrow sensor |
 |----------|--------------------|-----------------|
 | Entity domain | `sensor` | `sensor` |
-| Translation key | `midday_sell_window` | `midday_sell_window_tomorrow` |
+| Translation key | `consume_window` | `consume_window_tomorrow` |
 | State when available | Text in `HH:MM-HH:MM` format | Text in `HH:MM-HH:MM` format |
 | `price` when available | Rounded float average in PLN/kWh | Rounded float average in PLN/kWh |
 | State when insufficient data | `unavailable` | `unavailable` |

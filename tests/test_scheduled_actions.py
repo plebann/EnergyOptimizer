@@ -144,7 +144,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
             "night_buy_window": "sensor.night_buy_window",
             "morning_sell_window": "sensor.morning_peak",
             "evening_sell_window": "sensor.evening_peak",
-            "midday_sell_window": "sensor.daytime_min",
+            "consume_window": "sensor.daytime_min",
         }.get(unique_id_suffix),
     )
     monkeypatch.setattr(

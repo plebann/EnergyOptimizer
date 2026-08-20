@@ -10,10 +10,8 @@ from homeassistant.util import dt as dt_util
 from ..calculations.energy import calculate_losses, hourly_demand
 from ..calculations.utils import build_hourly_usage_array
 from ..const import (
-    CONF_DAYTIME_MIN_PRICE_SENSOR,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_PV_FORECAST_TODAY,
-    CONF_SELL_PRICE_SENSOR,
     DEFAULT_MAX_CHARGE_CURRENT,
     SUN_ABOVE_HORIZON,
     SUN_ENTITY,
@@ -21,8 +19,6 @@ from ..const import (
 from ..controllers.inverter import set_max_charge_current
 from ..helpers import (
     get_float_state_info,
-    get_internal_window_price,
-    get_required_float_state,
     resolve_daytime_min_price_time,
     resolve_morning_max_price_hour,
 )
@@ -34,9 +30,6 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
-
-_PRICE_BLOCK_FACTOR = 0.2
-
 
 async def _async_run_solar_charge_block(
     hass: HomeAssistant,
@@ -106,62 +99,6 @@ async def _async_run_solar_charge_block(
     sun_state = hass.states.get(SUN_ENTITY)
     if sun_state is None or sun_state.state != SUN_ABOVE_HORIZON:
         _LOGGER.debug("Solar charge block: sun not above horizon — skip")
-        return
-
-    current_price = get_required_float_state(
-        hass,
-        config.get(CONF_SELL_PRICE_SENSOR),
-        entity_name="Sell price sensor",
-    )
-    if current_price is None:
-        _LOGGER.warning("Solar charge block: current sell price unavailable — skip")
-        return
-
-    morning_sell_price = get_internal_window_price(
-        hass,
-        entry_id=entry.entry_id,
-        unique_id_suffix="morning_sell_window",
-        entity_name="Morning Sell Window",
-        attribute_name="price",
-    )
-    if morning_sell_price is None:
-        _LOGGER.warning(
-            "Solar charge block: Morning Sell Window price unavailable — skip"
-        )
-        return
-
-    midday_avoidance_price = get_internal_window_price(
-        hass,
-        entry_id=entry.entry_id,
-        unique_id_suffix="midday_sell_window",
-        entity_name="Midday Avoidance Window",
-        attribute_name="price",
-        fallback_entity_id=config.get(CONF_DAYTIME_MIN_PRICE_SENSOR),
-    )
-    if midday_avoidance_price is None:
-        _LOGGER.warning(
-            "Solar charge block: Midday Avoidance Window price unavailable — skip"
-        )
-        return
-
-    threshold = midday_avoidance_price + _PRICE_BLOCK_FACTOR * (
-        morning_sell_price - midday_avoidance_price
-    )
-    if current_price < threshold:
-        _LOGGER.info(
-            "Solar charge block: RESTORING — current sell price %.4f "
-            "below threshold %.4f",
-            current_price,
-            threshold,
-        )
-        await set_max_charge_current(
-            hass,
-            max_charge_entity,
-            DEFAULT_MAX_CHARGE_CURRENT,
-            entry=entry,
-            logger=_LOGGER,
-            context=Context(),
-        )
         return
 
     # Determine sunset hour from sun entity attribute
@@ -285,17 +222,12 @@ async def _async_run_solar_charge_block(
         return
 
     _LOGGER.info(
-        "Solar charge block: BLOCKING — current sell price %.4f >= threshold %.4f, "
-        "PV surplus %.2f kWh > free space %.2f kWh, current hour PV %.2f kWh > "
-        "demand %.2f kWh (morning %.4f, midday %.4f, sunset %02d:00)",
-        current_price,
-        threshold,
+        "Solar charge block: BLOCKING — PV surplus %.2f kWh > free space %.2f kWh, "
+        "current hour PV %.2f kWh > demand %.2f kWh (sunset %02d:00)",
         pv_surplus_kwh,
         free_space_kwh,
         pv_production_current_hour_kwh,
         current_hour_required_kwh,
-        morning_sell_price,
-        midday_avoidance_price,
         sunset_hour,
     )
     await set_max_charge_current(

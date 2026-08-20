@@ -15,7 +15,7 @@
 ## Decision: Add a generalized two-hour minimum-average buy-window helper to `calculations/price_windows.py` instead of embedding selection logic in sensor classes.
 
 **Rationale**
-- The current module already hosts pure price-window helpers for midday sell windows and ranked one-hour sell windows, so it is the natural place for another deterministic selection helper.
+- The current module already hosts pure price-window helpers for consume windows and ranked one-hour sell windows, so it is the natural place for another deterministic selection helper.
 - The new feature needs day-aware filtering, contiguous two-hour candidate building, and asymmetric tie-breaking for night and day ranges; those are domain rules that belong in a pure calculation layer.
 - Centralizing the logic in pure functions keeps tests deterministic and allows the entity layer to focus on HA state and attribute publication.
 

@@ -18,8 +18,8 @@ from custom_components.energy_optimizer.entities.sensors.pricing import (
     DayBuyWindowTomorrowSensor,
     EveningSellWindowSensor,
     EveningSellWindowTomorrowSensor,
-    MiddaySellWindowSensor,
-    MiddaySellWindowTomorrowSensor,
+    ConsumeWindowSensor,
+    ConsumeWindowTomorrowSensor,
     MinArbitrageMarginSensor,
     MorningSellBuyReferenceSensor,
     MorningSellWindowSensor,
@@ -119,21 +119,21 @@ def _coordinator_with_prices(
     return coordinator
 
 
-def _midday_sensor(prices_today: list[dict[str, object]], config: dict[str, object] | None = None) -> MiddaySellWindowSensor:
+def _consume_sensor(prices_today: list[dict[str, object]], config: dict[str, object] | None = None) -> ConsumeWindowSensor:
     config = config or {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
     coordinator = _coordinator_with_prices(prices_today, None, str(config[CONF_SELL_PRICE_SENSOR]))
-    sensor = MiddaySellWindowSensor(coordinator, _mock_entry(), config)
+    sensor = ConsumeWindowSensor(coordinator, _mock_entry(), config)
     sensor.hass = MagicMock()
     return sensor
 
 
-def _midday_tomorrow_sensor(
+def _consume_tomorrow_sensor(
     prices_tomorrow: list[dict[str, object]],
     config: dict[str, object] | None = None,
-) -> MiddaySellWindowTomorrowSensor:
+) -> ConsumeWindowTomorrowSensor:
     config = config or {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
     coordinator = _coordinator_with_prices(None, prices_tomorrow, str(config[CONF_SELL_PRICE_SENSOR]))
-    sensor = MiddaySellWindowTomorrowSensor(coordinator, _mock_entry(), config)
+    sensor = ConsumeWindowTomorrowSensor(coordinator, _mock_entry(), config)
     sensor.hass = MagicMock()
     return sensor
 
@@ -293,73 +293,73 @@ def test_min_arbitrage_margin_sensor_exposes_configured_value() -> None:
 
 
 @pytest.mark.unit
-def test_midday_sell_window_sensor_publishes_correct_window(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_consume_window_sensor_publishes_correct_window(monkeypatch: pytest.MonkeyPatch) -> None:
     from homeassistant.util import dt as dt_util
 
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
 
-    sensor = _midday_sensor(_payload(low_start_hour=10))
+    sensor = _consume_sensor(_payload(low_start_hour=10))
 
     assert sensor.native_value == "10:00-12:00"
     assert sensor.extra_state_attributes == {"price": 0.5, "is_active": "off"}
 
 
 @pytest.mark.unit
-def test_midday_sell_window_tomorrow_sensor_publishes_correct_window(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_consume_window_tomorrow_sensor_publishes_correct_window(monkeypatch: pytest.MonkeyPatch) -> None:
     from homeassistant.util import dt as dt_util
 
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
 
-    sensor = _midday_tomorrow_sensor(_payload_for_day(9, low_start_hour=11))
+    sensor = _consume_tomorrow_sensor(_payload_for_day(9, low_start_hour=11))
 
     assert sensor.native_value == "11:00-13:00"
     assert sensor.extra_state_attributes == {"price": 0.5}
 
 
 @pytest.mark.unit
-def test_midday_sell_window_sensor_sets_is_active_on_inside_window(
+def test_consume_window_sensor_sets_is_active_on_inside_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from homeassistant.util import dt as dt_util
 
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 10, 30, tzinfo=TZ))
 
-    sensor = _midday_sensor(_payload(low_start_hour=10))
+    sensor = _consume_sensor(_payload(low_start_hour=10))
 
     assert sensor.native_value == "10:00-12:00"
     assert sensor.extra_state_attributes == {"price": 0.5, "is_active": "on"}
 
 
 @pytest.mark.unit
-def test_midday_sell_window_sensor_sets_is_active_off_outside_window(
+def test_consume_window_sensor_sets_is_active_off_outside_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from homeassistant.util import dt as dt_util
 
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 13, 0, tzinfo=TZ))
 
-    sensor = _midday_sensor(_payload(low_start_hour=10))
+    sensor = _consume_sensor(_payload(low_start_hour=10))
 
     assert sensor.native_value == "10:00-12:00"
     assert sensor.extra_state_attributes == {"price": 0.5, "is_active": "off"}
 
 
 @pytest.mark.unit
-def test_midday_sell_window_tomorrow_sensor_does_not_publish_is_active(
+def test_consume_window_tomorrow_sensor_does_not_publish_is_active(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from homeassistant.util import dt as dt_util
 
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 10, 30, tzinfo=TZ))
 
-    sensor = _midday_tomorrow_sensor(_payload_for_day(9, low_start_hour=11))
+    sensor = _consume_tomorrow_sensor(_payload_for_day(9, low_start_hour=11))
 
     assert sensor.native_value == "11:00-13:00"
     assert "is_active" not in sensor.extra_state_attributes
 
 
 @pytest.mark.unit
-def test_midday_sell_window_sensor_ignores_buy_price_only_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_consume_window_sensor_ignores_buy_price_only_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     from homeassistant.util import dt as dt_util
 
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
@@ -374,7 +374,7 @@ def test_midday_sell_window_sensor_ignores_buy_price_only_changes(monkeypatch: p
     )
     coordinator.data["states"]["sensor.buy"] = 0.25
 
-    sensor = MiddaySellWindowSensor(coordinator, _mock_entry(), config)
+    sensor = ConsumeWindowSensor(coordinator, _mock_entry(), config)
     sensor.hass = MagicMock()
 
     first_value = sensor.native_value
@@ -386,18 +386,18 @@ def test_midday_sell_window_sensor_ignores_buy_price_only_changes(monkeypatch: p
 
 
 @pytest.mark.unit
-def test_midday_sell_window_sensor_uses_hhmm_hhmm_format(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_consume_window_sensor_uses_hhmm_hhmm_format(monkeypatch: pytest.MonkeyPatch) -> None:
     from homeassistant.util import dt as dt_util
 
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
 
-    sensor = _midday_sensor(_payload(low_start_hour=8))
+    sensor = _consume_sensor(_payload(low_start_hour=8))
 
     assert sensor.native_value == "08:00-10:00"
 
 
 @pytest.mark.unit
-def test_midday_sell_window_sensor_updates_when_shared_payload_changes(
+def test_consume_window_sensor_updates_when_shared_payload_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from homeassistant.util import dt as dt_util
@@ -405,7 +405,7 @@ def test_midday_sell_window_sensor_updates_when_shared_payload_changes(
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
 
     coordinator = _coordinator_with_prices(_payload(low_start_hour=10), None, "sensor.sell")
-    sensor = MiddaySellWindowSensor(
+    sensor = ConsumeWindowSensor(
         coordinator,
         _mock_entry(),
         {CONF_SELL_PRICE_SENSOR: "sensor.sell"},
@@ -420,38 +420,38 @@ def test_midday_sell_window_sensor_updates_when_shared_payload_changes(
 
 
 @pytest.mark.unit
-def test_midday_sell_window_sensor_unavailable_when_missing_sell_payload(
+def test_consume_window_sensor_unavailable_when_missing_sell_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from homeassistant.util import dt as dt_util
 
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
 
-    sensor = _midday_sensor([])
+    sensor = _consume_sensor([])
 
     assert sensor.native_value is None
     assert sensor.extra_state_attributes == {}
 
 
 @pytest.mark.unit
-def test_midday_sell_window_sensor_unavailable_when_fewer_than_two_hours(
+def test_consume_window_sensor_unavailable_when_fewer_than_two_hours(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from homeassistant.util import dt as dt_util
 
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
 
-    sensor = _midday_sensor([_hourly_entry(8, 0.5)])
+    sensor = _consume_sensor([_hourly_entry(8, 0.5)])
 
     assert sensor.native_value is None
 
 
 @pytest.mark.unit
-def test_midday_sell_window_sensor_has_translation_key_and_prefixed_unique_id() -> None:
-    sensor = _midday_sensor(_payload(low_start_hour=10))
+def test_consume_window_sensor_has_translation_key_and_prefixed_unique_id() -> None:
+    sensor = _consume_sensor(_payload(low_start_hour=10))
 
-    assert sensor.translation_key == "midday_sell_window"
-    assert sensor.unique_id == "entry-1_midday_sell_window"
+    assert sensor.translation_key == "consume_window"
+    assert sensor.unique_id == "entry-1_consume_window"
 
 
 @pytest.mark.unit
@@ -467,8 +467,8 @@ def test_today_and_tomorrow_sensors_are_isolated_by_payload(monkeypatch: pytest.
     )
     config = {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
 
-    today_sensor = MiddaySellWindowSensor(coordinator, _mock_entry(), config)
-    tomorrow_sensor = MiddaySellWindowTomorrowSensor(coordinator, _mock_entry(), config)
+    today_sensor = ConsumeWindowSensor(coordinator, _mock_entry(), config)
+    tomorrow_sensor = ConsumeWindowTomorrowSensor(coordinator, _mock_entry(), config)
     today_sensor.hass = MagicMock()
     tomorrow_sensor.hass = MagicMock()
 
@@ -494,8 +494,8 @@ def test_tomorrow_sensor_unavailable_omits_price_without_affecting_today(
     coordinator = _coordinator_with_prices(_payload(low_start_hour=10), [], "sensor.sell")
     config = {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
 
-    today_sensor = MiddaySellWindowSensor(coordinator, _mock_entry(), config)
-    tomorrow_sensor = MiddaySellWindowTomorrowSensor(coordinator, _mock_entry(), config)
+    today_sensor = ConsumeWindowSensor(coordinator, _mock_entry(), config)
+    tomorrow_sensor = ConsumeWindowTomorrowSensor(coordinator, _mock_entry(), config)
     today_sensor.hass = MagicMock()
     tomorrow_sensor.hass = MagicMock()
 
@@ -506,11 +506,11 @@ def test_tomorrow_sensor_unavailable_omits_price_without_affecting_today(
 
 
 @pytest.mark.unit
-def test_midday_sell_window_tomorrow_sensor_has_translation_key_and_prefixed_unique_id() -> None:
-    sensor = _midday_tomorrow_sensor(_payload_for_day(9, low_start_hour=10))
+def test_consume_window_tomorrow_sensor_has_translation_key_and_prefixed_unique_id() -> None:
+    sensor = _consume_tomorrow_sensor(_payload_for_day(9, low_start_hour=10))
 
-    assert sensor.translation_key == "midday_sell_window_tomorrow"
-    assert sensor.unique_id == "entry-1_midday_sell_window_tomorrow"
+    assert sensor.translation_key == "consume_window_tomorrow"
+    assert sensor.unique_id == "entry-1_consume_window_tomorrow"
 
 
 @pytest.mark.unit

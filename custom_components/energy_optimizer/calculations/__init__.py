@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 from .price_windows import (
-    MiddaySellWindowResult,
+    ConsumeWindowResult,
     QuarterHourPricePoint,
-    build_midday_sell_window_result,
+    build_consume_window_result,
     expand_hourly_sell_prices,
-    find_cheapest_midday_sell_window,
-    format_sell_window,
-    select_midday_window,
+    find_cheapest_consume_window,
+    format_consume_window,
+    select_consume_window,
 )
 from .battery import (
     calculate_battery_reserve,
@@ -27,13 +27,13 @@ from .utils import clamp, interpolate, is_valid_percentage, safe_float
 
 __all__ = [
     # Price windows
-    "build_midday_sell_window_result",
+    "build_consume_window_result",
     "expand_hourly_sell_prices",
-    "find_cheapest_midday_sell_window",
-    "format_sell_window",
-    "MiddaySellWindowResult",
+    "find_cheapest_consume_window",
+    "format_consume_window",
+    "ConsumeWindowResult",
     "QuarterHourPricePoint",
-    "select_midday_window",
+    "select_consume_window",
     # Battery
     "calculate_battery_reserve",
     "calculate_battery_space",

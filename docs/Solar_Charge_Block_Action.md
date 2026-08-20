@@ -30,36 +30,17 @@ akcję.
 
 ## Dane wejściowe
 
-- bieżąca cena sprzedaży z `sell_price_sensor`;
-- cena i czas początku wewnętrznego sensora Morning Sell Window;
-- czas i cena wewnętrznego sensora Midday Avoidance Window
-  (`midday_sell_window`, z dotychczasowym fallbackiem ceny);
+- czas początku wewnętrznego sensora Morning Sell Window;
+- czas wewnętrznego sensora Midday Avoidance Window (`consume_window`,
+  z dotychczasowym fallbackiem);
 - prognoza PV od bieżącej godziny do zachodu słońca;
 - prognoza PV dla bieżącej godziny;
 - wolne miejsce w baterii z `battery_space_sensor`;
 - lokalne zapotrzebowanie w bieżącej godzinie;
 - encja `max_charge_current_entity`.
 
-Brak wymaganej ceny, prognozy PV, czasu zachodu lub informacji o wolnym
-miejscu w baterii powoduje pominięcie akcji bez zmiany falownika.
-
-## Próg ceny
-
-Dynamiczny próg odblokowania jest liczony na podstawie ceny Morning Sell
-Window i ceny Midday Avoidance Window:
-
-```text
-threshold = midday_avoidance_price
-            + 0.2 * (morning_sell_price - midday_avoidance_price)
-```
-
-Reguła działa bez dodatkowych wyjątków również wtedy, gdy cena Midday
-Avoidance Window wynosi zero albo jest ujemna.
-
-- `current_sell_price < threshold` → przywróć domyślny maksymalny prąd
-  ładowania;
-- `current_sell_price >= threshold` → sprawdź guardy pojemności i bieżącej
-  nadwyżki PV.
+Brak prognozy PV, czasu zachodu lub informacji o wolnym miejscu w baterii
+powoduje pominięcie akcji bez zmiany falownika.
 
 ## Guardy PV
 
@@ -70,8 +51,8 @@ Blokada jest aktywowana tylko wtedy, gdy oba warunki są prawdziwe:
 2. prognoza PV w bieżącej godzinie przekracza lokalne zapotrzebowanie
    uwzględniające zużycie domu, pompę ciepła, straty i margines `1.1`.
 
-Jeśli którykolwiek ze znanych warunków ceny lub PV staje się fałszywy po
-rozpoczęciu Morning Sell Window, ale przed Midday Avoidance Window, akcja przywraca
+Jeśli którykolwiek ze znanych guardów PV staje się fałszywy po rozpoczęciu
+Morning Sell Window, ale przed Midday Avoidance Window, akcja przywraca
 `DEFAULT_MAX_CHARGE_CURRENT`.
 
 ## Przebieg decyzji
@@ -86,9 +67,7 @@ flowchart TD
   zero -->|No| skip_after["Skip without changes"]
   midday -->|Yes| data{"Required data available?"}
   data -->|No| skip_missing["Skip without changes"]
-  data -->|Yes| price{"Current sell price >= threshold?"}
-  price -->|No| restore
-  price -->|Yes| capacity{"PV surplus > free battery space?"}
+  data -->|Yes| capacity{"PV surplus > free battery space?"}
   capacity -->|No| restore
   capacity -->|Yes| hourly{"Current-hour PV > demand?"}
   hourly -->|No| restore
@@ -112,5 +91,5 @@ Logi rozróżniają:
 - pominięcie przed Morning Sell Window;
 - pominięcie lub przywrócenie po Midday Avoidance Window;
 - pominięcie z powodu brakujących danych;
-- przywrócenie z powodu ceny, pojemności lub bieżącego bilansu PV;
-- blokadę wraz z cenami, progiem i wartościami guardów PV.
+- przywrócenie z powodu pojemności lub bieżącego bilansu PV;
+- blokadę wraz z wartościami guardów PV.

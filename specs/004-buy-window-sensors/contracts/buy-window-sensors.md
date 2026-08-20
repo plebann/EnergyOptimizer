@@ -54,7 +54,7 @@ The payloads are consumed from coordinator-managed shared state rather than by d
 - Each sensor recalculates during the existing integration refresh/listener path when its underlying buy-price payload snapshot changes.
 - A change affecting only one day or one range must not overwrite or invalidate the other three sensors unless their own slice changes.
 - The sensors do not require user service calls or feature-specific persistence.
-- The four buy-window sensors are added beside the existing pricing sensor set; sell-window and midday sell-window sensors remain unchanged.
+- The four buy-window sensors are added beside the existing pricing sensor set; sell-window and consume-window sensors remain unchanged.
 
 ## Error Semantics
 

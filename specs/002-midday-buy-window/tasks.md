@@ -26,7 +26,7 @@
 - [X] T004 Extend shared coordinator state with `prices_today` and `prices_tomorrow` sell-price payload snapshots in `custom_components/energy_optimizer/coordinator.py`
 - [X] T005 [P] Add reusable today/tomorrow hourly payload fixtures and expected quarter-hour expansions in `tests/test_price_windows.py` and `tests/test_pricing_sensors.py`
 - [X] T006 Build the shared day-scoped window result contract and parser entry points in `custom_components/energy_optimizer/calculations/price_windows.py`
-- [X] T007 Wire base sensor-platform registration for day-scoped midday sell-window entities in `custom_components/energy_optimizer/sensor.py` and `custom_components/energy_optimizer/entities/sensors/__init__.py`
+- [X] T007 Wire base sensor-platform registration for day-scoped consume-window entities in `custom_components/energy_optimizer/sensor.py` and `custom_components/energy_optimizer/entities/sensors/__init__.py`
 
 **Checkpoint**: Foundation ready - the feature can now be delivered story by story.
 
@@ -34,7 +34,7 @@
 
 ## Phase 3: User Story 1 - Odczyt najtańszego okna sprzedaży z ceną średnią (Priority: P1) 🎯 MVP
 
-**Goal**: Keep the current-day midday sell-window sensor working while adding the `price` attribute with the rounded average selected-window price.
+**Goal**: Keep the current-day consume-window sensor working while adding the `price` attribute with the rounded average selected-window price.
 
 **Independent Test**: With complete `prices_today` sell-price data available, the existing current-day sensor publishes the same `HH:MM-HH:MM` window as before plus a rounded float `price` attribute in PLN/kWh.
 
@@ -48,7 +48,7 @@
 ### Implementation for User Story 1
 
 - [X] T010 [US1] Implement current-day window selection with average-price calculation in `custom_components/energy_optimizer/calculations/price_windows.py`
-- [X] T011 [US1] Implement the current-day midday sell-window sensor state and `price` attribute in `custom_components/energy_optimizer/entities/sensors/pricing.py`
+- [X] T011 [US1] Implement the current-day consume-window sensor state and `price` attribute in `custom_components/energy_optimizer/entities/sensors/pricing.py`
 - [X] T012 [US1] Register current-day translation-backed metadata and platform wiring in `custom_components/energy_optimizer/sensor.py` and `custom_components/energy_optimizer/translations/en.json`
 
 **Checkpoint**: User Story 1 should now publish the current-day window sensor with the new `price` attribute.
@@ -69,7 +69,7 @@
 ### Implementation for User Story 2
 
 - [X] T015 [US2] Generalize the selector for `prices_tomorrow` with the same day-scoped rules in `custom_components/energy_optimizer/calculations/price_windows.py`
-- [X] T016 [US2] Implement the tomorrow midday sell-window sensor and its translation-backed metadata in `custom_components/energy_optimizer/entities/sensors/pricing.py` and `custom_components/energy_optimizer/translations/en.json`
+- [X] T016 [US2] Implement the tomorrow consume-window sensor and its translation-backed metadata in `custom_components/energy_optimizer/entities/sensors/pricing.py` and `custom_components/energy_optimizer/translations/en.json`
 - [X] T017 [US2] Register the tomorrow sensor and isolate refresh behavior to day-scoped payload changes in `custom_components/energy_optimizer/sensor.py` and `custom_components/energy_optimizer/coordinator.py`
 
 **Checkpoint**: User Stories 1 and 2 should now expose separate today/tomorrow sensors with matching rules.
