@@ -271,7 +271,8 @@ class MorningSellStrategy(BaseSellStrategy):
             entry_id=self.entry.entry_id,
             default_hour=tariff_end_hour,
         )
-        sell_window_end_hour = (self._resolve_sell_hour() + 1) % 24
+        sell_hour = self._resolve_sell_hour()
+        sell_window_end_hour = (sell_hour + 1) % 24
         horizon_details: dict[str, object] = {
             "sell_horizon_mode": "base_daily",
             "sell_horizon_reason": "pv_sufficiency_or_day_buy_window",
@@ -316,7 +317,11 @@ class MorningSellStrategy(BaseSellStrategy):
             hours=base_hours,
         )
 
-        if base_pv_forecast is None or not base_pv_forecast.sufficiency_available:
+        if (
+            base_pv_forecast is None
+            or not base_pv_forecast.sufficiency_available
+            or sell_hour not in base_pv_forecast_hourly
+        ):
             return build_no_action_outcome(
                 scenario=self.scenario_name,
                 summary="Morning sell skipped: hourly PV forecast unavailable",
@@ -329,7 +334,6 @@ class MorningSellStrategy(BaseSellStrategy):
                 sufficiency_reached=False,
             )
 
-        sell_hour = self._resolve_sell_hour()
         hourly_demand_kwh = (
             hourly_usage[sell_hour]
             + base_heat_pump_hourly.get(sell_hour, 0.0)
