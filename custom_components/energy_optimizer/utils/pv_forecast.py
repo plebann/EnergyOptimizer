@@ -43,10 +43,47 @@ class MorningPVForecast:
     tolerance_kwh: float | None
     daylight_hours: list[int]
     sufficiency_available: bool
+    source_state: str | None = None
+    source_last_updated: str | None = None
+    source_last_changed: str | None = None
+    evaluation_time: str | None = None
+    evaluation_time_utc: str | None = None
+    evaluation_timezone: str | None = None
+    selected_attribute: str | None = None
+    hourly_payload_present: bool = False
+    hourly_payload_type: str | None = None
+    hourly_payload_length: int | None = None
+    first_period_start: str | None = None
+    last_period_start: str | None = None
+    first_period_local_date: str | None = None
+    last_period_local_date: str | None = None
+    failure_reason: str | None = None
 
     def audit_details(self) -> dict[str, object]:
         """Return PV provenance suitable for decision audit details."""
         return {
+            "source_entity": self.source_entity,
+            "source_state": self.source_state,
+            "source_last_updated": self.source_last_updated,
+            "source_last_changed": self.source_last_changed,
+            "evaluation_time": self.evaluation_time,
+            "evaluation_time_utc": self.evaluation_time_utc,
+            "evaluation_timezone": self.evaluation_timezone,
+            "selected_attribute": self.selected_attribute,
+            "hourly_payload_present": self.hourly_payload_present,
+            "hourly_payload_type": self.hourly_payload_type,
+            "hourly_payload_length": self.hourly_payload_length,
+            "first_period_start": self.first_period_start,
+            "last_period_start": self.last_period_start,
+            "first_period_local_date": self.first_period_local_date,
+            "last_period_local_date": self.last_period_local_date,
+            "aggregate_kwh": _round_or_none(self.aggregate_kwh),
+            "raw_hourly_kwh": _round_or_none(self.raw_hourly_kwh),
+            "difference_kwh": _round_or_none(self.difference_kwh),
+            "tolerance_kwh": _round_or_none(self.tolerance_kwh),
+            "final_status": self.status,
+            "final_method": self.method,
+            "failure_reason": self.failure_reason,
             "pv_data_status": self.status,
             "pv_forecast_method": self.method,
             "pv_source_entity": self.source_entity,
@@ -61,6 +98,23 @@ class MorningPVForecast:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class _HourlyForecastParseResult:
+    """Hourly payload and its validation metadata."""
+
+    hourly_kwh: dict[int, float]
+    status: str
+    failure_reason: str | None
+    selected_attribute: str | None
+    hourly_payload_present: bool
+    hourly_payload_type: str | None
+    hourly_payload_length: int | None
+    first_period_start: str | None
+    last_period_start: str | None
+    first_period_local_date: str | None
+    last_period_local_date: str | None
+
+
 def get_morning_pv_forecast(
     hass: HomeAssistant,
     config: dict[str, object],
@@ -72,13 +126,26 @@ def get_morning_pv_forecast(
     """Return validated hourly PV or a documented morning fallback."""
     source_entity = config.get(CONF_PV_FORECAST_TODAY)
     if not source_entity:
-        return _invalid_morning_forecast(source_entity=None)
+        now = dt_util.as_local(dt_util.now())
+        return _invalid_morning_forecast(
+            source_entity=None,
+            failure_reason="entity_missing",
+            **_evaluation_details(now),
+        )
 
     pv_state = hass.states.get(source_entity)
+    now = dt_util.as_local(dt_util.now())
+    snapshot_details = _snapshot_details(pv_state, now)
     if pv_state is None:
         _LOGGER.warning("Morning PV forecast sensor %s unavailable", source_entity)
-        return _invalid_morning_forecast(source_entity=str(source_entity))
+        return _invalid_morning_forecast(
+            source_entity=str(source_entity),
+            failure_reason="entity_missing",
+            **snapshot_details,
+        )
 
+    hourly_result = _collect_today_hourly_kwh(pv_state, now)
+    hourly_details = _hourly_audit_details(hourly_result)
     try:
         aggregate_kwh = float(pv_state.state)
     except (ValueError, TypeError):
@@ -87,17 +154,27 @@ def get_morning_pv_forecast(
             source_entity,
             pv_state.state,
         )
-        return _invalid_morning_forecast(source_entity=str(source_entity))
+        return _invalid_morning_forecast(
+            source_entity=str(source_entity),
+            failure_reason="aggregate_invalid",
+            **snapshot_details,
+            **hourly_details,
+        )
     if aggregate_kwh < 0:
         _LOGGER.warning(
             "Morning PV forecast sensor %s has negative aggregate value: %s",
             source_entity,
             aggregate_kwh,
         )
-        return _invalid_morning_forecast(source_entity=str(source_entity))
+        return _invalid_morning_forecast(
+            source_entity=str(source_entity),
+            failure_reason="aggregate_invalid",
+            **snapshot_details,
+            **hourly_details,
+        )
 
-    now = dt_util.as_local(dt_util.now())
-    raw_hourly, hourly_status = _collect_today_hourly_kwh(pv_state, now)
+    raw_hourly = hourly_result.hourly_kwh
+    hourly_status = hourly_result.status
     if hourly_status == "valid_hourly":
         raw_hourly_total = sum(raw_hourly.values())
         tolerance_kwh = max(0.25, aggregate_kwh * 0.1)
@@ -105,12 +182,17 @@ def get_morning_pv_forecast(
         last_updated = getattr(pv_state, "last_updated", None)
         if isinstance(last_updated, datetime) and dt_util.as_local(last_updated).date() < now.date():
             hourly_status = "stale_hourly"
+            failure_reason = "stale_sensor_update"
         elif difference_kwh > tolerance_kwh:
             hourly_status = "invalid_hourly"
+            failure_reason = "hourly_aggregate_mismatch"
+        else:
+            failure_reason = None
     else:
         raw_hourly_total = None
         tolerance_kwh = None
         difference_kwh = None
+        failure_reason = hourly_result.failure_reason
 
     hour_window = build_hour_window(start_hour, end_hour)
     if hourly_status == "valid_hourly":
@@ -121,7 +203,11 @@ def get_morning_pv_forecast(
             total_kwh=sum(hourly_kwh.values()),
             hourly_kwh=hourly_kwh,
             status=hourly_status,
-            method="hourly",
+            method=(
+                "detailed_hourly"
+                if hourly_result.selected_attribute == "detailedHourly"
+                else "detailed_forecast_fallback"
+            ),
             source_entity=str(source_entity),
             aggregate_kwh=aggregate_kwh,
             raw_hourly_kwh=raw_hourly_total,
@@ -129,6 +215,9 @@ def get_morning_pv_forecast(
             tolerance_kwh=tolerance_kwh,
             daylight_hours=[],
             sufficiency_available=True,
+            failure_reason=None,
+            **snapshot_details,
+            **hourly_details,
         )
 
     daylight_hours = _get_daylight_hours(hass, now)
@@ -159,10 +248,18 @@ def get_morning_pv_forecast(
         tolerance_kwh=tolerance_kwh,
         daylight_hours=daylight_hours,
         sufficiency_available=False,
+        failure_reason=failure_reason,
+        **snapshot_details,
+        **hourly_details,
     )
 
 
-def _invalid_morning_forecast(source_entity: str | None) -> MorningPVForecast:
+def _invalid_morning_forecast(
+    source_entity: str | None,
+    *,
+    failure_reason: str,
+    **details: object,
+) -> MorningPVForecast:
     """Return the safe fallback when the aggregate forecast is invalid."""
     return MorningPVForecast(
         total_kwh=0.0,
@@ -176,38 +273,239 @@ def _invalid_morning_forecast(source_entity: str | None) -> MorningPVForecast:
         tolerance_kwh=None,
         daylight_hours=[],
         sufficiency_available=False,
+        failure_reason=failure_reason,
+        **details,
     )
 
 
 def _collect_today_hourly_kwh(
     pv_state: object, now: datetime
-) -> tuple[dict[int, float], str]:
+) -> _HourlyForecastParseResult:
     """Return raw hourly PV for today or a data-quality status."""
     attributes = getattr(pv_state, "attributes", {})
-    detailed = attributes.get("detailedHourly")
+    selected_attribute = "detailedHourly"
+    detailed = attributes.get(selected_attribute)
+    if not isinstance(detailed, list) and "detailedForecast" in attributes:
+        selected_attribute = "detailedForecast"
+        detailed = attributes.get(selected_attribute)
+
+    payload_present = selected_attribute in attributes
+    payload_type = type(detailed).__name__ if payload_present else None
+    payload_length = len(detailed) if isinstance(detailed, list) else None
+    if not payload_present:
+        return _hourly_parse_failure(
+            "missing_hourly",
+            "hourly_attribute_missing",
+            selected_attribute=None,
+        )
     if not isinstance(detailed, list):
-        detailed = attributes.get("detailedForecast")
-    if not isinstance(detailed, list) or not detailed:
-        return {}, "missing_hourly"
+        return _hourly_parse_failure(
+            "invalid_hourly",
+            "hourly_not_list",
+            selected_attribute=selected_attribute,
+            hourly_payload_present=True,
+            hourly_payload_type=payload_type,
+        )
+    if not detailed:
+        return _hourly_parse_failure(
+            "missing_hourly",
+            "hourly_empty",
+            selected_attribute=selected_attribute,
+            hourly_payload_present=True,
+            hourly_payload_type=payload_type,
+            hourly_payload_length=0,
+        )
 
     hourly: dict[int, float] = {}
+    periods: list[tuple[datetime, str]] = []
     for item in detailed:
         if not isinstance(item, dict):
-            return {}, "invalid_hourly"
+            return _hourly_parse_failure(
+                "invalid_hourly",
+                "record_not_mapping",
+                selected_attribute=selected_attribute,
+                hourly_payload_present=True,
+                hourly_payload_type=payload_type,
+                hourly_payload_length=payload_length,
+                periods=periods,
+                now=now,
+            )
         period_start = item.get("period_start")
         estimate = item.get("pv_estimate")
+        if period_start is None:
+            return _hourly_parse_failure(
+                "invalid_hourly",
+                "period_start_missing",
+                selected_attribute=selected_attribute,
+                hourly_payload_present=True,
+                hourly_payload_type=payload_type,
+                hourly_payload_length=payload_length,
+                periods=periods,
+                now=now,
+            )
         parsed = dt_util.parse_datetime(str(period_start))
         if parsed is None:
-            return {}, "invalid_hourly"
+            return _hourly_parse_failure(
+                "invalid_hourly",
+                "period_start_invalid",
+                selected_attribute=selected_attribute,
+                hourly_payload_present=True,
+                hourly_payload_type=payload_type,
+                hourly_payload_length=payload_length,
+                periods=periods,
+                now=now,
+            )
+        periods.append((parsed, str(period_start)))
+        if estimate is None:
+            return _hourly_parse_failure(
+                "invalid_hourly",
+                "pv_estimate_missing",
+                selected_attribute=selected_attribute,
+                hourly_payload_present=True,
+                hourly_payload_type=payload_type,
+                hourly_payload_length=payload_length,
+                periods=periods,
+                now=now,
+            )
         try:
             value = float(estimate)
         except (ValueError, TypeError):
-            return {}, "invalid_hourly"
+            return _hourly_parse_failure(
+                "invalid_hourly",
+                "pv_estimate_invalid",
+                selected_attribute=selected_attribute,
+                hourly_payload_present=True,
+                hourly_payload_type=payload_type,
+                hourly_payload_length=payload_length,
+                periods=periods,
+                now=now,
+            )
         local_period = dt_util.as_local(parsed)
         if local_period.date() != now.date():
-            return {}, "invalid_hourly"
+            return _hourly_parse_failure(
+                "invalid_hourly",
+                "record_local_date_mismatch",
+                selected_attribute=selected_attribute,
+                hourly_payload_present=True,
+                hourly_payload_type=payload_type,
+                hourly_payload_length=payload_length,
+                periods=periods,
+                now=now,
+            )
         hourly[local_period.hour] = hourly.get(local_period.hour, 0.0) + value
-    return hourly, "valid_hourly"
+    return _HourlyForecastParseResult(
+        hourly_kwh=hourly,
+        status="valid_hourly",
+        failure_reason=None,
+        selected_attribute=selected_attribute,
+        hourly_payload_present=True,
+        hourly_payload_type=payload_type,
+        hourly_payload_length=payload_length,
+        **_period_audit_details(periods, now),
+    )
+
+
+def _hourly_parse_failure(
+    status: str,
+    failure_reason: str,
+    *,
+    selected_attribute: str | None,
+    hourly_payload_present: bool = False,
+    hourly_payload_type: str | None = None,
+    hourly_payload_length: int | None = None,
+    periods: list[tuple[datetime, str]] | None = None,
+    now: datetime | None = None,
+) -> _HourlyForecastParseResult:
+    """Build invalid hourly metadata without retaining payload records."""
+    period_details = _period_audit_details(periods or [], now) if now is not None else {
+        "first_period_start": None,
+        "last_period_start": None,
+        "first_period_local_date": None,
+        "last_period_local_date": None,
+    }
+    return _HourlyForecastParseResult(
+        hourly_kwh={},
+        status=status,
+        failure_reason=failure_reason,
+        selected_attribute=selected_attribute,
+        hourly_payload_present=hourly_payload_present,
+        hourly_payload_type=hourly_payload_type,
+        hourly_payload_length=hourly_payload_length,
+        **period_details,
+    )
+
+
+def _period_audit_details(
+    periods: list[tuple[datetime, str]],
+    now: datetime,
+) -> dict[str, str | None]:
+    """Return first and last source periods without storing hourly payloads."""
+    if not periods:
+        return {
+            "first_period_start": None,
+            "last_period_start": None,
+            "first_period_local_date": None,
+            "last_period_local_date": None,
+        }
+    first_period, first_source = min(periods, key=lambda period: period[0])
+    last_period, last_source = max(periods, key=lambda period: period[0])
+    return {
+        "first_period_start": first_source,
+        "last_period_start": last_source,
+        "first_period_local_date": dt_util.as_local(first_period).date().isoformat(),
+        "last_period_local_date": dt_util.as_local(last_period).date().isoformat(),
+    }
+
+
+def _snapshot_details(pv_state: object | None, now: datetime) -> dict[str, object]:
+    """Return a scalar-only snapshot of the forecast entity read."""
+    details = _evaluation_details(now)
+    if pv_state is None:
+        return details
+    source_state = getattr(pv_state, "state", None)
+    details.update(
+        {
+            "source_state": str(source_state) if source_state is not None else None,
+            "source_last_updated": _serialize_datetime(
+                getattr(pv_state, "last_updated", None)
+            ),
+            "source_last_changed": _serialize_datetime(
+                getattr(pv_state, "last_changed", None)
+            ),
+        }
+    )
+    return details
+
+
+def _evaluation_details(now: datetime) -> dict[str, str]:
+    """Serialize the optimizer's actual local evaluation instant."""
+    timezone = getattr(now.tzinfo, "key", None) or str(now.tzinfo)
+    return {
+        "evaluation_time": now.isoformat(),
+        "evaluation_time_utc": dt_util.as_utc(now).isoformat(),
+        "evaluation_timezone": timezone,
+    }
+
+
+def _serialize_datetime(value: object) -> str | None:
+    """Serialize an entity timestamp only when Home Assistant supplied one."""
+    return dt_util.as_local(value).isoformat() if isinstance(value, datetime) else None
+
+
+def _hourly_audit_details(
+    result: _HourlyForecastParseResult,
+) -> dict[str, object]:
+    """Map parser metadata to the public forecast audit model."""
+    return {
+        "selected_attribute": result.selected_attribute,
+        "hourly_payload_present": result.hourly_payload_present,
+        "hourly_payload_type": result.hourly_payload_type,
+        "hourly_payload_length": result.hourly_payload_length,
+        "first_period_start": result.first_period_start,
+        "last_period_start": result.last_period_start,
+        "first_period_local_date": result.first_period_local_date,
+        "last_period_local_date": result.last_period_local_date,
+    }
 
 
 def _get_daylight_hours(hass: HomeAssistant, now: datetime) -> list[int]:

@@ -340,6 +340,7 @@ class MorningSellStrategy(BaseSellStrategy):
                 pv_forecast_kwh=0.0,
                 sufficiency_hour=None,
                 sufficiency_reached=False,
+                details_extra=horizon_details,
             )
 
         hourly_demand_kwh = (
@@ -369,6 +370,7 @@ class MorningSellStrategy(BaseSellStrategy):
                 pv_forecast_kwh=hourly_pv_kwh,
                 sufficiency_hour=None,
                 sufficiency_reached=False,
+                details_extra=horizon_details,
             )
         if self._use_discharge_current:
             discharge_state = self.hass.states.get(
@@ -394,6 +396,7 @@ class MorningSellStrategy(BaseSellStrategy):
                     pv_forecast_kwh=hourly_pv_kwh,
                     sufficiency_hour=None,
                     sufficiency_reached=False,
+                    details_extra=horizon_details,
                 )
         self._regulator_diagnostics = {
             "sell_hour": sell_hour,

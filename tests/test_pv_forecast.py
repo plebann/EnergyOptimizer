@@ -86,6 +86,8 @@ def test_morning_pv_forecast_uses_daylight_fallback_when_hourly_data_missing(
 
     assert forecast.status == "missing_hourly"
     assert forecast.method == "daylight_uniform"
+    assert forecast.failure_reason == "hourly_attribute_missing"
+    assert forecast.audit_details()["hourly_payload_present"] is False
     assert forecast.sufficiency_available is False
     assert forecast.daylight_hours == [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
     assert forecast.total_kwh == pytest.approx(46.153846)
@@ -119,7 +121,8 @@ def test_morning_pv_forecast_accepts_zero_hourly_values_when_aggregate_is_zero(
     )
 
     assert forecast.status == "valid_hourly"
-    assert forecast.method == "hourly"
+    assert forecast.method == "detailed_forecast_fallback"
+    assert forecast.selected_attribute == "detailedForecast"
     assert forecast.sufficiency_available is True
     assert forecast.total_kwh == 0.0
 
@@ -154,7 +157,121 @@ def test_morning_pv_forecast_uses_half_aggregate_when_hourly_data_disagrees(
 
     assert forecast.status == "invalid_hourly"
     assert forecast.method == "half_aggregate"
+    assert forecast.failure_reason == "hourly_aggregate_mismatch"
     assert forecast.total_kwh == 5.0
+    assert forecast.sufficiency_available is False
+
+
+@pytest.mark.unit
+def test_morning_pv_forecast_records_valid_detailed_hourly_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Record scalar provenance for accepted detailedHourly data only."""
+    now = datetime(2026, 8, 14, 5, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
+    hass = MagicMock()
+    aggregate = MagicMock()
+    aggregate.state = "2"
+    aggregate.last_updated = now
+    aggregate.last_changed = datetime(2026, 8, 14, 4, 0, tzinfo=timezone.utc)
+    aggregate.attributes = {
+        "detailedHourly": [
+            {"period_start": "2026-08-14T07:00:00+00:00", "pv_estimate": 1.0},
+            {"period_start": "2026-08-14T10:00:00+02:00", "pv_estimate": 1.0},
+        ]
+    }
+    hass.states.get.return_value = aggregate
+
+    forecast = get_morning_pv_forecast(
+        hass,
+        {CONF_PV_FORECAST_TODAY: "sensor.pv_today"},
+        start_hour=5,
+        end_hour=12,
+        apply_efficiency=False,
+    )
+
+    details = forecast.audit_details()
+    assert forecast.status == "valid_hourly"
+    assert forecast.method == "detailed_hourly"
+    assert forecast.sufficiency_available is True
+    assert details["source_entity"] == "sensor.pv_today"
+    assert details["source_state"] == "2"
+    assert details["selected_attribute"] == "detailedHourly"
+    assert details["hourly_payload_type"] == "list"
+    assert details["hourly_payload_length"] == 2
+    assert details["first_period_start"] == "2026-08-14T07:00:00+00:00"
+    assert details["last_period_start"] == "2026-08-14T10:00:00+02:00"
+    assert details["evaluation_time_utc"] == "2026-08-14T05:00:00+00:00"
+    assert details["failure_reason"] is None
+    assert aggregate.attributes["detailedHourly"] not in details.values()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("attributes", "reason"),
+    [
+        ({"detailedHourly": []}, "hourly_empty"),
+        ({"detailedHourly": "invalid"}, "hourly_not_list"),
+        ({"detailedForecast": "invalid"}, "hourly_not_list"),
+        ({"detailedHourly": [1]}, "record_not_mapping"),
+        ({"detailedHourly": [{"pv_estimate": 1.0}]}, "period_start_missing"),
+        (
+            {"detailedHourly": [{"period_start": "not-a-date", "pv_estimate": 1.0}]},
+            "period_start_invalid",
+        ),
+        (
+            {"detailedHourly": [{"period_start": "2026-08-14T07:00:00+00:00"}]},
+            "pv_estimate_missing",
+        ),
+        (
+            {
+                "detailedHourly": [
+                    {
+                        "period_start": "2026-08-14T07:00:00+00:00",
+                        "pv_estimate": "invalid",
+                    }
+                ]
+            },
+            "pv_estimate_invalid",
+        ),
+        (
+            {
+                "detailedHourly": [
+                    {
+                        "period_start": "2026-08-13T07:00:00+00:00",
+                        "pv_estimate": 1.0,
+                    }
+                ]
+            },
+            "record_local_date_mismatch",
+        ),
+    ],
+)
+def test_morning_pv_forecast_records_hourly_validation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    attributes: dict[str, object],
+    reason: str,
+) -> None:
+    """Classify malformed hourly payloads with replay-stable reason codes."""
+    now = datetime(2026, 8, 14, 5, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
+    hass = MagicMock()
+    aggregate = MagicMock()
+    aggregate.state = "2"
+    aggregate.last_updated = now
+    aggregate.attributes = attributes
+    hass.states.get.return_value = aggregate
+
+    forecast = get_morning_pv_forecast(
+        hass,
+        {CONF_PV_FORECAST_TODAY: "sensor.pv_today"},
+        start_hour=5,
+        end_hour=12,
+        apply_efficiency=False,
+    )
+
+    assert forecast.status in {"missing_hourly", "invalid_hourly"}
+    assert forecast.failure_reason == reason
     assert forecast.sufficiency_available is False
 
 
@@ -188,6 +305,7 @@ def test_morning_pv_forecast_marks_previous_day_update_as_stale(
 
     assert forecast.status == "stale_hourly"
     assert forecast.method == "half_aggregate"
+    assert forecast.failure_reason == "stale_sensor_update"
     assert forecast.total_kwh == 0.5
 
 

@@ -25,6 +25,7 @@ from custom_components.energy_optimizer.const import (
     DEFAULT_HEAT_PUMP_FORECAST_SERVICE,
     DEFAULT_PV_EFFICIENCY,
     DOMAIN,
+    CONF_PV_FORECAST_TODAY,
 )
 from custom_components.energy_optimizer.calculations.battery import (
     calculate_charge_current,
@@ -35,6 +36,8 @@ from custom_components.energy_optimizer.decision_engine.morning_charge import (
     MorningChargeStrategy,
     async_run_morning_charge,
 )
+from custom_components.energy_optimizer.decision_engine import common as decision_common
+from custom_components.energy_optimizer.utils.pv_forecast import MorningPVForecast
 
 pytestmark = pytest.mark.enable_socket
 
@@ -110,6 +113,58 @@ def test_morning_charge_uses_uncompensated_pv_forecast(
         12,
         {"compensate": False, "use_morning_pv_fallback": True},
     )
+
+
+@pytest.mark.asyncio
+async def test_morning_charge_gathers_forecast_through_shared_morning_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the same validated morning parser as Morning Peak Sell."""
+    parser_forecast = MorningPVForecast(
+        total_kwh=2.0,
+        hourly_kwh={hour: 0.0 for hour in range(5, 12)},
+        status="valid_hourly",
+        method="detailed_hourly",
+        source_entity="sensor.pv_today",
+        aggregate_kwh=2.0,
+        raw_hourly_kwh=2.0,
+        difference_kwh=0.0,
+        tolerance_kwh=0.25,
+        daylight_hours=[],
+        sufficiency_available=True,
+    )
+    parser_calls: list[dict[str, object]] = []
+
+    def _parser(*_args: object, **kwargs: object) -> MorningPVForecast:
+        parser_calls.append(kwargs)
+        return parser_forecast
+
+    async def _heat_pump(*_args: object, **_kwargs: object) -> tuple[float, dict[int, float]]:
+        return 0.0, {}
+
+    monkeypatch.setattr(
+        decision_common,
+        "build_hourly_usage_array",
+        lambda *_args, **_kwargs: [0.0] * 24,
+    )
+    monkeypatch.setattr(decision_common, "get_heat_pump_forecast_window", _heat_pump)
+    monkeypatch.setattr(decision_common, "get_morning_pv_forecast", _parser)
+    monkeypatch.setattr(decision_common, "calculate_losses", lambda *_args, **_kwargs: (0.0, 0.0))
+
+    forecasts = await decision_common.gather_forecasts(
+        MagicMock(),
+        {CONF_PV_FORECAST_TODAY: "sensor.pv_today"},
+        start_hour=5,
+        end_hour=12,
+        margin=1.0,
+        entry_id="entry-1",
+        use_morning_pv_fallback=True,
+    )
+
+    assert parser_calls == [
+        {"start_hour": 5, "end_hour": 12, "apply_efficiency": True}
+    ]
+    assert forecasts.morning_pv_forecast is parser_forecast
 
 
 @pytest.mark.asyncio
