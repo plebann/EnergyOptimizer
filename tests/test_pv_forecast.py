@@ -211,6 +211,7 @@ def test_morning_pv_forecast_records_valid_detailed_hourly_snapshot(
     ("attributes", "reason"),
     [
         ({"detailedHourly": []}, "hourly_empty"),
+        ({"detailedHourly": "invalid"}, "hourly_not_list"),
         ({"detailedForecast": "invalid"}, "hourly_not_list"),
         ({"detailedHourly": [1]}, "record_not_mapping"),
         ({"detailedHourly": [{"pv_estimate": 1.0}]}, "period_start_missing"),

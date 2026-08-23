@@ -285,7 +285,7 @@ def _collect_today_hourly_kwh(
     attributes = getattr(pv_state, "attributes", {})
     selected_attribute = "detailedHourly"
     detailed = attributes.get(selected_attribute)
-    if not isinstance(detailed, list):
+    if not isinstance(detailed, list) and "detailedForecast" in attributes:
         selected_attribute = "detailedForecast"
         detailed = attributes.get(selected_attribute)
 
