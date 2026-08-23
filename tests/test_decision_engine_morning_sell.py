@@ -864,6 +864,63 @@ async def test_morning_sell_skips_without_valid_hourly_pv_forecast(
 
 
 @pytest.mark.asyncio
+async def test_morning_sell_skip_records_hourly_forecast_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persist parser provenance when hourly data blocks a sell decision."""
+    hass = _setup_hass(_base_config(), _base_states())
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+    monkeypatch.setattr(
+        f"{MORNING}.get_morning_pv_forecast",
+        lambda *_args, **_kwargs: MorningPVForecast(
+            total_kwh=1.0,
+            hourly_kwh={},
+            status="missing_hourly",
+            method="daylight_uniform",
+            source_entity="sensor.pv_forecast_today",
+            aggregate_kwh=2.0,
+            raw_hourly_kwh=None,
+            difference_kwh=None,
+            tolerance_kwh=None,
+            daylight_hours=[7, 8],
+            sufficiency_available=False,
+            source_state="2",
+            source_last_updated="2026-08-14T05:00:00+00:00",
+            source_last_changed="2026-08-14T04:00:00+00:00",
+            evaluation_time="2026-08-14T07:00:00+02:00",
+            evaluation_time_utc="2026-08-14T05:00:00+00:00",
+            evaluation_timezone="Europe/Warsaw",
+            selected_attribute=None,
+            hourly_payload_present=False,
+            hourly_payload_length=None,
+            first_period_start=None,
+            last_period_start=None,
+            failure_reason="hourly_attribute_missing",
+        ),
+    )
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    details = outcomes[-1].details
+    assert outcomes[-1].action_type == "no_action"
+    assert details["source_entity"] == "sensor.pv_forecast_today"
+    assert details["source_state"] == "2"
+    assert details["source_last_updated"] == "2026-08-14T05:00:00+00:00"
+    assert details["evaluation_time"] == "2026-08-14T07:00:00+02:00"
+    assert details["evaluation_time_utc"] == "2026-08-14T05:00:00+00:00"
+    assert details["evaluation_timezone"] == "Europe/Warsaw"
+    assert details["selected_attribute"] is None
+    assert details["hourly_payload_present"] is False
+    assert details["hourly_payload_length"] is None
+    assert details["first_period_start"] is None
+    assert details["last_period_start"] is None
+    assert details["failure_reason"] == "hourly_attribute_missing"
+    assert details["final_status"] == "missing_hourly"
+    assert details["final_method"] == "daylight_uniform"
+
+
+@pytest.mark.asyncio
 async def test_morning_sell_skips_when_forecast_omits_sell_hour(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
