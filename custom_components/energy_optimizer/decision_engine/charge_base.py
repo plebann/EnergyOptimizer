@@ -7,8 +7,17 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import Context
 
-from ..const import CONF_CHARGE_CURRENT_ENTITY
-from ..controllers.inverter import set_charge_current, set_program_soc
+from ..const import (
+    CONF_CHARGE_CURRENT_ENTITY,
+    CONF_MAX_CHARGE_CURRENT_ENTITY,
+    DEFAULT_MAX_CHARGE_CURRENT,
+)
+from ..controllers.inverter import (
+    set_charge_current,
+    set_max_charge_current,
+    set_program_soc,
+)
+from ..helpers import get_float_state_info
 from ..utils.logging import log_decision_unified
 from ..utils.pv_forecast import get_pv_compensation_factor
 from .common import (
@@ -171,6 +180,7 @@ class BaseChargeStrategy(ABC):
         )
 
         charge_current_entity = self.config.get(CONF_CHARGE_CURRENT_ENTITY)
+        max_charge_current_entity = self.config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
 
         await set_program_soc(
             self.hass,
@@ -180,6 +190,24 @@ class BaseChargeStrategy(ABC):
             logger=_LOGGER,
             context=self.integration_context,
         )
+        if max_charge_current_entity:
+            max_charge_current, _, max_charge_current_error = get_float_state_info(
+                self.hass,
+                str(max_charge_current_entity),
+            )
+            if (
+                max_charge_current_error is None
+                and max_charge_current is not None
+                and max_charge_current < action.charge_current
+            ):
+                await set_max_charge_current(
+                    self.hass,
+                    str(max_charge_current_entity),
+                    DEFAULT_MAX_CHARGE_CURRENT,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
         await set_charge_current(
             self.hass,
             charge_current_entity,
