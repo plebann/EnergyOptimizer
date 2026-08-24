@@ -18,6 +18,7 @@ from custom_components.energy_optimizer.const import (
     CONF_MAX_SOC,
     CONF_MIN_SOC,
     CONF_PROG2_SOC_ENTITY,
+    CONF_PROG2_TIME_START_ENTITY,
     CONF_PV_EFFICIENCY,
     CONF_PV_FORECAST_SENSOR,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
@@ -40,6 +41,17 @@ from custom_components.energy_optimizer.decision_engine import common as decisio
 from custom_components.energy_optimizer.utils.pv_forecast import MorningPVForecast
 
 pytestmark = pytest.mark.enable_socket
+
+
+@pytest.fixture(autouse=True)
+def _mock_charge_completion(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Avoid real Home Assistant storage in decision-engine unit tests."""
+    schedule = AsyncMock()
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.async_schedule_charge_completion",
+        schedule,
+    )
+    return schedule
 
 
 def _state(value: str | tuple[str, dict[str, object]]) -> MagicMock:
@@ -171,6 +183,7 @@ async def test_morning_charge_gathers_forecast_through_shared_morning_parser(
 async def test_morning_charge_no_action_when_reserve_sufficient() -> None:
     config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
         CONF_BATTERY_CAPACITY_AH: 100,
@@ -181,6 +194,7 @@ async def test_morning_charge_no_action_when_reserve_sufficient() -> None:
     }
     states = {
         "number.prog2_soc": "50",
+        "time.prog2_start": "04:00:00",
         "sensor.battery_soc": "90",
         "sensor.daily_load": "12",
     }
@@ -202,6 +216,7 @@ async def test_morning_charge_sets_program_when_deficit() -> None:
     
     config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
         CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",
@@ -214,6 +229,7 @@ async def test_morning_charge_sets_program_when_deficit() -> None:
     }
     states = {
         "number.prog2_soc": "50",
+        "time.prog2_start": "04:00:00",
         "sensor.battery_soc": "90",
         "sensor.daily_load": "48",
         "sensor.tariff_end_hour": "13",
@@ -231,6 +247,14 @@ async def test_morning_charge_sets_program_when_deficit() -> None:
     assert any(
         call.args[2]["entity_id"] == "number.prog2_soc" for call in number_calls
     )
+    control_calls = [
+        call
+        for call in hass.services.async_call.call_args_list
+        if call.args[0] in ("time", "input_datetime", "number")
+    ]
+    assert control_calls[0].args[:2] == ("time", "set_value")
+    assert control_calls[1].args[:2] == ("number", "set_value")
+    assert control_calls[1].args[2]["entity_id"] == "number.prog2_soc"
 
 
 @pytest.mark.asyncio
@@ -239,6 +263,7 @@ async def test_morning_charge_includes_pv_and_heat_pump_and_sets_current() -> No
 
     config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
         CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
@@ -267,6 +292,7 @@ async def test_morning_charge_includes_pv_and_heat_pump_and_sets_current() -> No
     )
     states = {
         "number.prog2_soc": "50",
+        "time.prog2_start": "04:00:00",
         "number.charge_current": "0",
         "sensor.battery_soc": "20",
         "sensor.daily_load": "48",
@@ -303,6 +329,7 @@ async def test_morning_charge_uses_sufficiency_deficit_when_pv_ramps_late() -> N
 
     config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
         CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
@@ -329,6 +356,7 @@ async def test_morning_charge_uses_sufficiency_deficit_when_pv_ramps_late() -> N
     )
     states = {
         "number.prog2_soc": "50",
+        "time.prog2_start": "04:00:00",
         "number.charge_current": "0",
         "sensor.battery_soc": "20",
         "sensor.daily_load": "24",
@@ -376,6 +404,7 @@ async def test_morning_charge_logs_last_optimization_attributes() -> None:
 
     config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
         CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
@@ -409,6 +438,7 @@ async def test_morning_charge_logs_last_optimization_attributes() -> None:
     )
     states = {
         "number.prog2_soc": "50",
+        "time.prog2_start": "04:00:00",
         "number.charge_current": "0",
         "sensor.battery_soc": "25",
         "sensor.daily_load": "9.4536",
@@ -504,6 +534,7 @@ async def test_morning_charge_uses_night_buy_window_duration_for_current_sizing(
 
     config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
         CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
@@ -517,6 +548,7 @@ async def test_morning_charge_uses_night_buy_window_duration_for_current_sizing(
     }
     states = {
         "number.prog2_soc": "50",
+        "time.prog2_start": "04:00:00",
         "number.charge_current": "0",
         "sensor.battery_soc": "90",
         "sensor.daily_load": "48",
@@ -576,6 +608,7 @@ async def test_morning_charge_restores_lower_max_current_before_setting_current(
 
     config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
         CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
         CONF_MAX_CHARGE_CURRENT_ENTITY: "number.max_charge_current",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
@@ -590,6 +623,7 @@ async def test_morning_charge_restores_lower_max_current_before_setting_current(
     }
     states = {
         "number.prog2_soc": "50",
+        "time.prog2_start": "04:00:00",
         "number.charge_current": "0",
         "number.max_charge_current": max_charge_current,
         "sensor.battery_soc": "90",

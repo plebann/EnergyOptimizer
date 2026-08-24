@@ -191,6 +191,7 @@
       "not_numeric": "Entity state is not numeric.",
       "not_binary_sensor": "Entity must be a binary sensor.",
       "not_number_entity": "Entity must be a number entity.",
+      "not_time_entity": "Entity must be a time or input datetime entity.",
       "not_switch_entity": "Entity must be a switch entity.",
       "buy_or_sell_price_required": "Configure at least one of Buy Price Sensor or Sell Price Sensor.",
       "min_greater_than_max": "Minimum SOC must be less than maximum SOC.",
@@ -264,6 +265,8 @@
       }
     },
     "error": {
+      "entity_not_found": "Entity not found. Please check the entity ID.",
+      "not_time_entity": "Entity must be a time or input datetime entity.",
       "min_greater_than_max": "Minimum SOC must be less than maximum SOC.",
       "min_pv_greater_than_min": "Morning sell minimum SOC must be less than or equal to minimum SOC."
     }

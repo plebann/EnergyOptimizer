@@ -83,6 +83,41 @@ _Avoid_: Emptying the battery
 The configured minimum battery state of charge that an EnergyOptimizer decision must preserve. `min_soc` is the default floor; `min_soc_pv` applies only when the decision confirms sufficient PV energy for the relevant horizon.
 _Avoid_: Program SOC safety level
 
+### Program 2 Normal SOC Target
+
+The Program 2 SOC value used after a temporary Morning Charge target ends: `min_soc`.
+_Avoid_: Restored Program 2 SOC
+
+### Morning Charge Completion
+
+The instant at the end of the resolved Night Buy Window when the temporary Morning Charge target no longer applies.
+_Avoid_: Target SOC reached
+
+### Program 2 Morning Synchronization
+
+The scheduler updates Program 2's start time only alongside an actual Morning Charge SOC change; it leaves the start time unchanged when the SOC remains unchanged.
+_Avoid_: Unconditional Program 2 start update
+
+### Program 2 Start Control
+
+A writable `time` or `input_datetime` entity that holds Program 2's start time.
+_Avoid_: Read-only program time sensor
+
+### Program SOC Update
+
+A decision outcome that records an actual write to a program's SOC control, rather than a no-action result.
+_Avoid_: SOC change reported as no action
+
+### Morning Charge Schedule Log
+
+A concise record of a Morning Charge schedule change containing Program 2 SOC and the resolved Night Buy Window start and end.
+_Avoid_: Forecast and energy diagnostic log
+
+### Afternoon Charge Completion
+
+The instant at the end of the resolved Day Buy Window when Program 4 is set to the lower of the current battery SOC and `min_soc_pv`.
+_Avoid_: Program 4 solar reset
+
 ### Night Buy Window
 
 A Buy Window within 00:00-06:00, seeded from the cheapest two consecutive hours in that range, then grown outward one

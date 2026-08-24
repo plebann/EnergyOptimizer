@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import Context
+from homeassistant.exceptions import HomeAssistantError
 
 from ..const import (
     CONF_CHARGE_CURRENT_ENTITY,
@@ -124,6 +125,76 @@ class BaseChargeStrategy(ABC):
             or self.forecasts.end_hour < self.forecasts.start_hour,
         ]]
 
+    async def _apply_charge_action(
+        self,
+        action: ChargeAction,
+    ) -> list[dict[str, float | str]] | None:
+        """Apply shared charge writes and return the entities actually written."""
+        entities_changed: list[dict[str, float | str]] = []
+        if abs(action.target_soc - self.prog_soc_value) > 0.01:
+            await set_program_soc(
+                self.hass,
+                self.prog_soc_entity,
+                action.target_soc,
+                entry=self.entry,
+                logger=_LOGGER,
+                context=self.integration_context,
+            )
+            entities_changed.append(
+                {"entity_id": self.prog_soc_entity, "value": action.target_soc}
+            )
+
+        charge_current_entity = self.config.get(CONF_CHARGE_CURRENT_ENTITY)
+        if charge_current_entity:
+            try:
+                await set_charge_current(
+                    self.hass,
+                    str(charge_current_entity),
+                    action.charge_current,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
+            except HomeAssistantError as err:
+                if any(
+                    change["entity_id"] == self.prog_soc_entity
+                    for change in entities_changed
+                ):
+                    try:
+                        await set_program_soc(
+                            self.hass,
+                            self.prog_soc_entity,
+                            self.prog_soc_value,
+                            entry=self.entry,
+                            logger=_LOGGER,
+                            context=self.integration_context,
+                        )
+                    except HomeAssistantError as rollback_err:
+                        _LOGGER.error(
+                            "%s failed to roll back program SOC after charge-current "
+                            "write failure: %s",
+                            self.scenario_name,
+                            rollback_err,
+                        )
+                _LOGGER.error(
+                    "%s charge-current write failed: %s",
+                    self.scenario_name,
+                    err,
+                )
+                return None
+            entities_changed.append(
+                {"entity_id": str(charge_current_entity), "value": action.charge_current}
+            )
+        return entities_changed
+
+    async def _after_charge_action(
+        self,
+        action: ChargeAction,
+        *,
+        program_soc_changed: bool,
+    ) -> None:
+        """Run scenario-specific work after successful charge writes."""
+
     async def run(self) -> None:
         """Execute common charge workflow and delegate strategy specifics."""
         self.integration_context = Context()
@@ -181,16 +252,8 @@ class BaseChargeStrategy(ABC):
 
         charge_current_entity = self.config.get(CONF_CHARGE_CURRENT_ENTITY)
         max_charge_current_entity = self.config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
-
-        await set_program_soc(
-            self.hass,
-            self.prog_soc_entity,
-            action.target_soc,
-            entry=self.entry,
-            logger=_LOGGER,
-            context=self.integration_context,
-        )
-        if max_charge_current_entity:
+        max_charge_current_changed = False
+        if charge_current_entity and max_charge_current_entity:
             max_charge_current, _, max_charge_current_error = get_float_state_info(
                 self.hass,
                 str(max_charge_current_entity),
@@ -208,21 +271,37 @@ class BaseChargeStrategy(ABC):
                     logger=_LOGGER,
                     context=self.integration_context,
                 )
-        await set_charge_current(
-            self.hass,
-            charge_current_entity,
-            action.charge_current,
-            entry=self.entry,
-            logger=_LOGGER,
-            context=self.integration_context,
+                max_charge_current_changed = True
+
+        entities_changed = await self._apply_charge_action(action)
+        if entities_changed is None:
+            return
+        if max_charge_current_changed:
+            entities_changed.insert(
+                0,
+                {
+                    "entity_id": str(max_charge_current_entity),
+                    "value": DEFAULT_MAX_CHARGE_CURRENT,
+                },
+            )
+
+        program_soc_changed = any(
+            change["entity_id"] == self.prog_soc_entity for change in entities_changed
+        )
+        await self._after_charge_action(
+            action,
+            program_soc_changed=program_soc_changed,
         )
 
         outcome = self._build_charge_outcome(action, balance)
+        if not entities_changed:
+            outcome.action_type = "no_action"
+            outcome.summary = "No entity changes required"
+        elif len(entities_changed) == 1 and program_soc_changed:
+            outcome.action_type = "program_soc_updated"
+            outcome.summary = f"Set program SOC to {action.target_soc:.0f}%"
         outcome.history_windows = self._history_windows()
-        outcome.entities_changed = [
-            {"entity_id": self.prog_soc_entity, "value": action.target_soc},
-            {"entity_id": charge_current_entity, "value": action.charge_current},
-        ]
+        outcome.entities_changed = entities_changed
         await log_decision_unified(
             self.hass,
             self.entry,
