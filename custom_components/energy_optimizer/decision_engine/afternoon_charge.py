@@ -1,6 +1,7 @@
 """Afternoon grid charge decision logic."""
 from __future__ import annotations
 
+from datetime import datetime
 import logging
 from typing import TYPE_CHECKING
 
@@ -32,13 +33,18 @@ from ..helpers import (
     get_internal_window_price,
     resolve_day_buy_window_end_hour,
     resolve_day_buy_window_duration_hours,
+    resolve_day_buy_window_start_hour,
     resolve_evening_max_price_hour,
     resolve_night_buy_window_tomorrow_start_hour,
     resolve_tariff_start_hour,
 )
-from ..utils.pv_forecast import get_forecast_adjusted_kwh
-from ..utils.logging import DecisionOutcome
+from ..service_handlers.charge_completion import (
+    async_schedule_charge_completion,
+    resolve_charge_window,
+)
 from ..utils.decision_dump import active_decision_audit
+from ..utils.logging import DecisionOutcome
+from ..utils.pv_forecast import get_forecast_adjusted_kwh
 from .charge_base import BaseChargeStrategy
 
 if TYPE_CHECKING:
@@ -89,6 +95,52 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             entry_id=self.entry.entry_id,
             default_hours=2.0,
         )
+
+    def _resolve_completion_window(self) -> tuple[datetime, datetime]:
+        """Resolve the concrete day buy window used by this run."""
+        tariff_start_hour = resolve_tariff_start_hour(self.hass, self.config)
+        start_hour = resolve_day_buy_window_start_hour(
+            self.hass,
+            self.config,
+            entry_id=self.entry.entry_id,
+            default_hour=(tariff_start_hour - 2) % 24,
+        )
+        end_hour = resolve_day_buy_window_end_hour(
+            self.hass,
+            self.config,
+            entry_id=self.entry.entry_id,
+            default_hour=tariff_start_hour,
+        )
+        return resolve_charge_window(
+            self.hass,
+            self.entry,
+            charge_type="afternoon",
+            fallback_start_hour=start_hour,
+            fallback_end_hour=end_hour,
+        )
+
+    async def _schedule_completion(self) -> None:
+        """Schedule Program 4 completion at the day buy window end."""
+        window_start, window_end = self._resolve_completion_window()
+        await async_schedule_charge_completion(
+            self.hass,
+            self.entry,
+            charge_type="afternoon",
+            complete_at=window_end,
+            window_start=window_start,
+            window_end=window_end,
+        )
+
+    async def _after_charge_action(
+        self,
+        action: ChargeAction,
+        *,
+        program_soc_changed: bool,
+    ) -> None:
+        """Schedule completion only after an actual Program 4 SOC write."""
+        del action
+        if program_soc_changed:
+            await self._schedule_completion()
 
     def _history_window_kinds(self) -> tuple[str, str]:
         """Return source codes for the afternoon charge forecast horizon."""
@@ -156,7 +208,7 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
         balance: EnergyBalance,
     ) -> DecisionOutcome:
         """Build afternoon charge outcome payload."""
-        return build_afternoon_charge_outcome(
+        outcome = build_afternoon_charge_outcome(
             scenario=self.scenario_name,
             action=action,
             balance=balance,
@@ -167,6 +219,15 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             efficiency=self.bc.efficiency,
             pv_compensation_factor=self.pv_compensation_factor,
         )
+        window_start, window_end = self._resolve_completion_window()
+        outcome.details.update(
+            {
+                "program_soc": action.target_soc,
+                "window_start": window_start.isoformat(),
+                "window_end": window_end.isoformat(),
+            }
+        )
+        return outcome
 
     async def _handle_no_action(self, balance: EnergyBalance) -> None:
         """Handle afternoon no-action path."""
@@ -203,7 +264,15 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             },
         )
         outcome.history_windows = self._history_windows()
-        await handle_no_action_soc_update(
+        window_start, window_end = self._resolve_completion_window()
+        outcome.details.update(
+            {
+                "program_soc": target_soc,
+                "window_start": window_start.isoformat(),
+                "window_end": window_end.isoformat(),
+            }
+        )
+        program_soc_changed = await handle_no_action_soc_update(
             self.hass,
             self.entry,
             integration_context=self.integration_context,
@@ -212,6 +281,8 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             target_soc=target_soc,
             outcome=outcome,
         )
+        if program_soc_changed:
+            await self._schedule_completion()
 
 
 async def async_run_afternoon_charge(

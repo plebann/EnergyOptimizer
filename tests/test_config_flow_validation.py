@@ -6,12 +6,22 @@ import asyncio
 from unittest.mock import MagicMock
 
 from custom_components.energy_optimizer.config_flow import EnergyOptimizerConfigFlow
+from custom_components.energy_optimizer.const import (
+    CONF_PROG2_SOC_ENTITY,
+    CONF_PROG2_TIME_START_ENTITY,
+)
 
 
-def _mock_state(*, domain: str, state: str) -> MagicMock:
+def _mock_state(
+    *,
+    domain: str,
+    state: str,
+    attributes: dict[str, object] | None = None,
+) -> MagicMock:
     mocked = MagicMock()
     mocked.domain = domain
     mocked.state = state
+    mocked.attributes = attributes or {}
     return mocked
 
 
@@ -163,3 +173,67 @@ def test_validate_price_entities_rejects_non_numeric_buy_source() -> None:
     )
 
     assert result == {"buy_price_sensor": "not_numeric"}
+
+
+def test_program2_requires_start_time_control() -> None:
+    """Program 2 SOC configuration requires its writable start-time control."""
+    flow = EnergyOptimizerConfigFlow()
+    flow.hass = _mock_hass_with_states(
+        {"number.program2_soc": _mock_state(domain="number", state="50")}
+    )
+
+    result = asyncio.run(
+        flow._validate_program_entities(
+            {CONF_PROG2_SOC_ENTITY: "number.program2_soc"}
+        )
+    )
+
+    assert result == {CONF_PROG2_TIME_START_ENTITY: "entity_not_found"}
+
+
+def test_program2_rejects_read_only_start_time_sensor() -> None:
+    """Program 2 start time must be a writable time helper/control."""
+    flow = EnergyOptimizerConfigFlow()
+    flow.hass = _mock_hass_with_states(
+        {
+            "number.program2_soc": _mock_state(domain="number", state="50"),
+            "sensor.program2_start": _mock_state(domain="sensor", state="04:00"),
+        }
+    )
+
+    result = asyncio.run(
+        flow._validate_program_entities(
+            {
+                CONF_PROG2_SOC_ENTITY: "number.program2_soc",
+                CONF_PROG2_TIME_START_ENTITY: "sensor.program2_start",
+            }
+        )
+    )
+
+    assert result == {CONF_PROG2_TIME_START_ENTITY: "not_time_entity"}
+
+
+def test_program2_rejects_date_only_input_datetime() -> None:
+    """Program 2 requires an input_datetime helper with a time component."""
+    flow = EnergyOptimizerConfigFlow()
+    flow.hass = _mock_hass_with_states(
+        {
+            "number.program2_soc": _mock_state(domain="number", state="50"),
+            "input_datetime.program2_start": _mock_state(
+                domain="input_datetime",
+                state="2026-08-24",
+                attributes={"has_time": False},
+            ),
+        }
+    )
+
+    result = asyncio.run(
+        flow._validate_program_entities(
+            {
+                CONF_PROG2_SOC_ENTITY: "number.program2_soc",
+                CONF_PROG2_TIME_START_ENTITY: "input_datetime.program2_start",
+            }
+        )
+    )
+
+    assert result == {CONF_PROG2_TIME_START_ENTITY: "not_time_entity"}

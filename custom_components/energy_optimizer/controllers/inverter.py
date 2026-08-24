@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import time
 from math import ceil
 from typing import TYPE_CHECKING
 
@@ -79,6 +80,54 @@ async def set_program_soc(
         logger.debug("Set %s to %s%%", entity_id, value)
     else:
         _LOGGER.debug("Set %s to %s%%", entity_id, value)
+
+
+async def set_program_start_time(
+    hass: HomeAssistant,
+    entity_id: str,
+    value: time,
+    *,
+    entry: ConfigEntry | None = None,
+    logger: logging.Logger | None = None,
+    context: Context | None = None,
+) -> None:
+    """Set a writable program start-time entity."""
+    if entry is not None and is_test_mode(hass, entry):
+        record_action(
+            "set_program_start_time",
+            entity_id=entity_id,
+            requested=value.isoformat(),
+            status="skipped_test_mode",
+        )
+        return
+
+    domain = entity_id.split(".", 1)[0]
+    formatted = value.replace(second=0, microsecond=0).isoformat()
+    if domain == "time":
+        service = "set_value"
+        service_data = {"entity_id": entity_id, "time": formatted}
+    elif domain == "input_datetime":
+        service = "set_datetime"
+        service_data = {"entity_id": entity_id, "time": formatted}
+    else:
+        raise ValueError(
+            f"Program start-time entity {entity_id} must be time or input_datetime"
+        )
+
+    await _call_service(
+        hass,
+        domain,
+        service,
+        service_data,
+        context=context,
+    )
+    record_action(
+        "set_program_start_time",
+        entity_id=entity_id,
+        requested=formatted,
+        status="executed",
+    )
+    (logger or _LOGGER).debug("Set %s to %s", entity_id, formatted)
 
 
 async def set_max_charge_current(

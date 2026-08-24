@@ -1,8 +1,12 @@
 """Morning grid charge decision logic."""
 from __future__ import annotations
 
+from datetime import datetime, time
 import logging
 from typing import TYPE_CHECKING
+
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.util import dt as dt_util
 
 from ..calculations.battery import (
     calculate_battery_reserve,
@@ -12,9 +16,16 @@ from ..calculations.energy import (
     calculate_needed_reserve_sufficiency,
 )
 from ..const import (
+    CONF_CHARGE_CURRENT_ENTITY,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MORNING_MAX_PRICE_SENSOR,
+    CONF_PROG2_TIME_START_ENTITY,
     CONF_PV_FORECAST_REMAINING,
+)
+from ..controllers.inverter import (
+    set_charge_current,
+    set_program_soc,
+    set_program_start_time,
 )
 from ..decision_engine.common import (
     BatteryConfig,
@@ -28,7 +39,6 @@ from ..decision_engine.common import (
     calculate_target_soc_from_needed_reserve,
     compute_sufficiency,
     get_required_prog2_soc_state,
-    handle_no_action_soc_update,
     resolve_arbitrage_margin_gate,
     resolve_entry,
 )
@@ -39,18 +49,24 @@ from ..helpers import (
     resolve_morning_max_price_hour,
     resolve_night_buy_window_end_hour,
     resolve_night_buy_window_duration_hours,
+    resolve_night_buy_window_start_hour,
     resolve_tariff_end_hour,
     set_balancing_ongoing,
 )
-from .charge_base import BaseChargeStrategy
-from ..utils.logging import DecisionOutcome, log_decision_unified
+from ..service_handlers.charge_completion import (
+    async_schedule_charge_completion,
+    resolve_charge_window,
+)
 from ..utils.decision_dump import active_decision_audit
+from ..utils.logging import DecisionOutcome, log_decision_unified
 from ..utils.time_window import build_hour_window
+from .charge_base import BaseChargeStrategy
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
 
 class MorningChargeStrategy(BaseChargeStrategy):
     """Morning charge strategy using BaseChargeStrategy template flow."""
@@ -135,6 +151,214 @@ class MorningChargeStrategy(BaseChargeStrategy):
             default_hours=2.0,
         )
 
+    def _resolve_completion_window(self) -> tuple[datetime, datetime]:
+        """Resolve the concrete night buy window used by this run."""
+        start_hour = resolve_night_buy_window_start_hour(
+            self.hass,
+            self.config,
+            entry_id=self.entry.entry_id,
+            default_hour=4,
+        )
+        end_hour = resolve_night_buy_window_end_hour(
+            self.hass,
+            self.config,
+            entry_id=self.entry.entry_id,
+            default_hour=6,
+        )
+        return resolve_charge_window(
+            self.hass,
+            self.entry,
+            charge_type="morning",
+            fallback_start_hour=start_hour,
+            fallback_end_hour=end_hour,
+        )
+
+    def _current_program_start_time(self, entity_id: str) -> time | None:
+        """Read the configured Program 2 start-time control."""
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return None
+        parsed = dt_util.parse_time(str(state.state))
+        if parsed is not None:
+            return parsed.replace(microsecond=0)
+        parsed_dt = dt_util.parse_datetime(str(state.state))
+        return parsed_dt.time().replace(microsecond=0) if parsed_dt is not None else None
+
+    async def _write_temporary_program_soc(
+        self,
+        target_soc: float,
+    ) -> list[dict[str, float | str]] | None:
+        """Write Program 2 start time then SOC, rolling time back on SOC failure."""
+        self._temporary_start_entity: str | None = None
+        self._temporary_previous_start: time | None = None
+        self._temporary_soc_changed = False
+        if abs(target_soc - self.prog_soc_value) <= 0.01:
+            return []
+
+        start_entity = self.config.get(CONF_PROG2_TIME_START_ENTITY)
+        start_entity_id = str(start_entity) if start_entity else ""
+        previous_start = self._current_program_start_time(start_entity_id)
+        window_start, _ = self._resolve_completion_window()
+        if previous_start is None:
+            await self._log_write_failure(
+                "Program 2 start-time control unavailable or invalid"
+            )
+            return None
+
+        try:
+            await set_program_start_time(
+                self.hass,
+                start_entity_id,
+                window_start.time(),
+                entry=self.entry,
+                logger=_LOGGER,
+                context=self.integration_context,
+            )
+        except (HomeAssistantError, ValueError) as err:
+            await self._log_write_failure(str(err))
+            return None
+
+        try:
+            await set_program_soc(
+                self.hass,
+                self.prog_soc_entity,
+                target_soc,
+                entry=self.entry,
+                logger=_LOGGER,
+                context=self.integration_context,
+            )
+        except HomeAssistantError as err:
+            try:
+                await set_program_start_time(
+                    self.hass,
+                    start_entity_id,
+                    previous_start,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
+            except (HomeAssistantError, ValueError) as rollback_err:
+                _LOGGER.error(
+                    "Morning charge failed to restore Program 2 start time: %s",
+                    rollback_err,
+                )
+            await self._log_write_failure(str(err))
+            return None
+
+        self._temporary_start_entity = start_entity_id
+        self._temporary_previous_start = previous_start
+        self._temporary_soc_changed = True
+        return [
+            {"entity_id": start_entity_id, "value": window_start.time().isoformat()},
+            {"entity_id": self.prog_soc_entity, "value": target_soc},
+        ]
+
+    async def _rollback_temporary_program_soc(self) -> None:
+        """Restore Program 2 controls after a later Morning Charge write fails."""
+        if not self._temporary_soc_changed:
+            return
+
+        try:
+            await set_program_soc(
+                self.hass,
+                self.prog_soc_entity,
+                self.prog_soc_value,
+                entry=self.entry,
+                logger=_LOGGER,
+                context=self.integration_context,
+            )
+            if (
+                self._temporary_start_entity is not None
+                and self._temporary_previous_start is not None
+            ):
+                await set_program_start_time(
+                    self.hass,
+                    self._temporary_start_entity,
+                    self._temporary_previous_start,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
+        except (HomeAssistantError, ValueError) as err:
+            _LOGGER.error(
+                "Morning charge failed to roll back Program 2 controls: %s",
+                err,
+            )
+
+    async def _log_write_failure(self, reason: str) -> None:
+        """Emit an explicit morning charge write failure."""
+        window_start, window_end = self._resolve_completion_window()
+        outcome = DecisionOutcome(
+            scenario=self.scenario_name,
+            action_type="charge_failed",
+            summary="Morning charge inverter write failed",
+            reason=reason,
+            details={
+                "program_soc": self.prog_soc_value,
+                "window_start": window_start.isoformat(),
+                "window_end": window_end.isoformat(),
+            },
+        )
+        await log_decision_unified(
+            self.hass,
+            self.entry,
+            outcome,
+            context=self.integration_context,
+            logger=_LOGGER,
+        )
+
+    async def _schedule_completion(self, target_soc: float) -> None:
+        """Schedule restoration of a temporary Program 2 target."""
+        if abs(target_soc - self.bc.min_soc) <= 0.01:
+            return
+        window_start, window_end = self._resolve_completion_window()
+        await async_schedule_charge_completion(
+            self.hass,
+            self.entry,
+            charge_type="morning",
+            complete_at=window_end,
+            window_start=window_start,
+            window_end=window_end,
+        )
+
+    async def _apply_charge_action(
+        self,
+        action: ChargeAction,
+    ) -> list[dict[str, float | str]] | None:
+        """Apply transactional Program 2 writes and shared charge current."""
+        entities_changed = await self._write_temporary_program_soc(action.target_soc)
+        if entities_changed is None:
+            return None
+        charge_current_entity = self.config.get(CONF_CHARGE_CURRENT_ENTITY)
+        if charge_current_entity:
+            try:
+                await set_charge_current(
+                    self.hass,
+                    str(charge_current_entity),
+                    action.charge_current,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
+            except HomeAssistantError as err:
+                await self._rollback_temporary_program_soc()
+                await self._log_write_failure(str(err))
+                return None
+            entities_changed.append(
+                {"entity_id": str(charge_current_entity), "value": action.charge_current}
+            )
+        return entities_changed
+
+    async def _after_charge_action(
+        self,
+        action: ChargeAction,
+        *,
+        program_soc_changed: bool,
+    ) -> None:
+        """Schedule completion for every temporary morning target."""
+        del program_soc_changed
+        await self._schedule_completion(action.target_soc)
+
     def _history_window_kinds(self) -> tuple[str, str]:
         """Return source codes for the morning charge forecast horizon."""
         return "nb_e", "db_s"
@@ -178,6 +402,14 @@ class MorningChargeStrategy(BaseChargeStrategy):
             arbitrage_details=self._arbitrage_details,
         )
         outcome.details["gap_required_kwh"] = round(self._base_gap_kwh, 2)
+        window_start, window_end = self._resolve_completion_window()
+        outcome.details.update(
+            {
+                "program_soc": action.target_soc,
+                "window_start": window_start.isoformat(),
+                "window_end": window_end.isoformat(),
+            }
+        )
         return outcome
 
     async def _handle_no_action(self, balance: EnergyBalance) -> None:
@@ -252,14 +484,28 @@ class MorningChargeStrategy(BaseChargeStrategy):
             },
         )
         outcome.history_windows = self._history_windows()
-        await handle_no_action_soc_update(
+        window_start, window_end = self._resolve_completion_window()
+        outcome.details.update(
+            {
+                "program_soc": target_soc,
+                "window_start": window_start.isoformat(),
+                "window_end": window_end.isoformat(),
+            }
+        )
+        entities_changed = await self._write_temporary_program_soc(target_soc)
+        if entities_changed is None:
+            return
+        if entities_changed:
+            outcome.action_type = "program_soc_updated"
+            outcome.summary = f"Set Program 2 SOC to {target_soc:.0f}%"
+            outcome.entities_changed = entities_changed
+        await self._schedule_completion(target_soc)
+        await log_decision_unified(
             self.hass,
             self.entry,
-            integration_context=self.integration_context,
-            prog_soc_entity=self.prog_soc_entity,
-            current_prog_soc=self.prog_soc_value,
-            target_soc=target_soc,
-            outcome=outcome,
+            outcome,
+            context=self.integration_context,
+            logger=_LOGGER,
         )
 
 async def async_run_morning_charge(

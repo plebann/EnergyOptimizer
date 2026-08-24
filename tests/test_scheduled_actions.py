@@ -307,6 +307,7 @@ def test_start_registers_single_evening_sell_window_listener(
     """Scheduler should only register one listener for the shared evening sell sensor."""
     hass = MagicMock()
     hass.data = {DOMAIN: {"entry-1": {}}}
+    hass.async_create_task.side_effect = lambda coro: coro.close()
     entry = _mock_entry(data={})
     registered_entities: list[tuple[str, ...]] = []
 
@@ -356,6 +357,7 @@ def test_start_registers_bev_charging_listener(
     """Scheduler re-evaluates export control when BEV charging changes."""
     hass = MagicMock()
     hass.data = {DOMAIN: {"entry-1": {}}}
+    hass.async_create_task.side_effect = lambda coro: coro.close()
     entry = _mock_entry(
         data={CONF_BEV_CHARGING_BINARY_SENSOR: "binary_sensor.bev_charging"}
     )

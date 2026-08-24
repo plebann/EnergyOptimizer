@@ -18,6 +18,7 @@ from custom_components.energy_optimizer.const import (
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_PROG2_SOC_ENTITY,
+    CONF_PROG2_TIME_START_ENTITY,
     CONF_PV_FORECAST_REMAINING,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
     CONF_TEST_MODE,
@@ -497,10 +498,18 @@ def test_morning_arbitrage_enabled(_mock_internal):
 
 @pytest.mark.asyncio
 @patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
-async def test_morning_charge_arbitrage_increases_gap(_mock_internal) -> None:
+async def test_morning_charge_arbitrage_increases_gap(
+    _mock_internal,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Morning charge logs higher gap_kwh when arbitrage is active."""
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.async_schedule_charge_completion",
+        AsyncMock(),
+    )
     base_config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
         CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",
@@ -513,6 +522,7 @@ async def test_morning_charge_arbitrage_increases_gap(_mock_internal) -> None:
     }
     base_states = {
         "number.prog2_soc": "50",
+        "time.prog2_start": "04:00:00",
         "sensor.battery_soc": "50",
         "sensor.daily_load": "3",
         "sensor.tariff_end_hour": "13",
