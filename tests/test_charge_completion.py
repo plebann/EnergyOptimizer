@@ -31,6 +31,7 @@ from custom_components.energy_optimizer.decision_engine.afternoon_charge import 
 )
 from custom_components.energy_optimizer.decision_engine.common import BatteryConfig
 from custom_components.energy_optimizer.service_handlers import charge_completion
+from custom_components.energy_optimizer.decision_engine import charge_base
 
 pytestmark = pytest.mark.enable_socket
 
@@ -286,6 +287,51 @@ async def test_afternoon_schedules_completion_only_after_program_soc_write() -> 
     strategy._schedule_completion.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_afternoon_current_failure_rolls_back_program_soc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A charge-current failure does not leave Program 4 at a temporary target."""
+    entry = _entry({})
+    strategy = AfternoonChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
+    strategy.entry = entry
+    strategy.config = {"charge_current_entity": "number.charge_current"}
+    strategy.prog_soc_entity = "number.program4_soc"
+    strategy.prog_soc_value = 20
+    strategy.integration_context = Context()
+    set_soc = AsyncMock()
+    monkeypatch.setattr(charge_base, "set_program_soc", set_soc)
+    monkeypatch.setattr(
+        charge_base,
+        "set_charge_current",
+        AsyncMock(side_effect=HomeAssistantError("current write failed")),
+    )
+
+    changed = await strategy._apply_charge_action(
+        MagicMock(target_soc=60, charge_current=10)
+    )
+
+    assert changed is None
+    assert set_soc.await_args_list == [
+        call(
+            strategy.hass,
+            "number.program4_soc",
+            60,
+            entry=entry,
+            logger=ANY,
+            context=strategy.integration_context,
+        ),
+        call(
+            strategy.hass,
+            "number.program4_soc",
+            20,
+            entry=entry,
+            logger=ANY,
+            context=strategy.integration_context,
+        ),
+    ]
+
+
 def test_resolve_charge_window_uses_sensor_start_and_dynamic_duration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -326,6 +372,10 @@ async def test_schedule_completion_persists_and_tracks_window_end(
     hass = _hass({})
     store = _Store()
     tracked: dict[str, object] = {}
+    snapshot_callback = MagicMock()
+    hass.data[DOMAIN]["entry-1"]["charge_completion_snapshot_callback"] = (
+        snapshot_callback
+    )
     monkeypatch.setattr(charge_completion, "_store", lambda *_args: store)
     monkeypatch.setattr(
         charge_completion,
@@ -350,6 +400,7 @@ async def test_schedule_completion_persists_and_tracks_window_end(
 
     assert store.saved["complete_at"] == end.isoformat()
     assert tracked["when"] == end
+    snapshot_callback.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -504,6 +555,38 @@ async def test_completion_write_failure_keeps_and_reschedules_plan(
     assert store.removed is False
     reschedule.assert_awaited_once()
     assert reschedule.await_args.kwargs["charge_type"] == "morning"
+
+
+@pytest.mark.asyncio
+async def test_program_soc_unavailable_completion_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transient Program SOC read failure retains and reschedules the plan."""
+    entry = _entry({CONF_PROG2_SOC_ENTITY: "number.program2_soc", CONF_MIN_SOC: 15})
+    hass = _hass({})
+    now = dt_util.now()
+    store = _Store(
+        {
+            "charge_type": "morning",
+            "complete_at": now.isoformat(),
+            "window_start": (now - timedelta(hours=2)).isoformat(),
+            "window_end": now.isoformat(),
+        }
+    )
+    reschedule = AsyncMock()
+    monkeypatch.setattr(charge_completion, "_store", lambda *_args: store)
+    monkeypatch.setattr(charge_completion, "log_decision_unified", AsyncMock())
+    monkeypatch.setattr(charge_completion, "active_decision_audit", _audit)
+    monkeypatch.setattr(
+        charge_completion,
+        "async_schedule_charge_completion",
+        reschedule,
+    )
+
+    await charge_completion.async_handle_charge_completion(hass, entry, "morning")
+
+    assert store.removed is False
+    reschedule.assert_awaited_once()
 
 
 @pytest.mark.asyncio

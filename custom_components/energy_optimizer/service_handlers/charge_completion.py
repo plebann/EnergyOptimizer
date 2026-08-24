@@ -34,6 +34,7 @@ ChargeType = Literal["morning", "afternoon"]
 _LOGGER = logging.getLogger(__name__)
 _RUNTIME_KEY = "charge_completion_listeners"
 _PLANS_KEY = "charge_completion_plans"
+_SNAPSHOT_CALLBACK_KEY = "charge_completion_snapshot_callback"
 
 
 def resolve_charge_window(
@@ -118,6 +119,14 @@ def _plans(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
     return entry_data.setdefault(_PLANS_KEY, {})
 
 
+def _publish_schedule_snapshot(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Refresh the schedule snapshot after a completion plan changes."""
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    callback = entry_data.get(_SNAPSHOT_CALLBACK_KEY)
+    if callable(callback):
+        callback()
+
+
 def _cancel_listener(hass: HomeAssistant, entry: ConfigEntry, charge_type: str) -> None:
     """Cancel a pending runtime listener."""
     remove_listener = _listeners(hass, entry).pop(charge_type, None)
@@ -144,6 +153,7 @@ async def async_schedule_charge_completion(
     await _store(hass, entry, charge_type).async_save(plan)
     _plans(hass, entry)[charge_type] = plan
     _cancel_listener(hass, entry, charge_type)
+    _publish_schedule_snapshot(hass, entry)
 
     async def _complete(_now: datetime) -> None:
         await async_handle_charge_completion(hass, entry, charge_type)
@@ -183,9 +193,11 @@ async def async_handle_charge_completion(
 
     target_soc: float | None = None
     failure_reason: str | None = None
+    retry_after_state_failure = False
     retry_after_write_failure = False
     if prog_error is not None or current_prog_soc is None:
         failure_reason = "Program SOC unavailable or invalid at completion"
+        retry_after_state_failure = True
     elif charge_type == "morning":
         target_soc = float(config.get(CONF_MIN_SOC, 15))
     else:
@@ -266,7 +278,7 @@ async def async_handle_charge_completion(
             context=context,
             logger=_LOGGER,
         )
-        if retry_after_write_failure:
+        if retry_after_write_failure or retry_after_state_failure:
             window_start = dt_util.parse_datetime(str(plan["window_start"]))
             window_end = dt_util.parse_datetime(str(plan["window_end"]))
             if window_start is None or window_end is None:
@@ -276,6 +288,7 @@ async def async_handle_charge_completion(
                 )
                 await store.async_remove()
                 _plans(hass, entry).pop(charge_type, None)
+                _publish_schedule_snapshot(hass, entry)
                 return
             await async_schedule_charge_completion(
                 hass,
@@ -289,6 +302,7 @@ async def async_handle_charge_completion(
 
         await store.async_remove()
         _plans(hass, entry).pop(charge_type, None)
+        _publish_schedule_snapshot(hass, entry)
 
 
 async def async_restore_charge_completions(
@@ -308,6 +322,8 @@ async def async_restore_charge_completions(
         if complete_at is None or window_start is None or window_end is None:
             _LOGGER.error("Invalid persisted %s charge completion plan", charge_type)
             await store.async_remove()
+            _plans(hass, entry).pop(charge_type, None)
+            _publish_schedule_snapshot(hass, entry)
             continue
         complete_at = dt_util.as_local(complete_at)
         window_start = dt_util.as_local(window_start)

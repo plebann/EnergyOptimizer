@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import Context
+from homeassistant.exceptions import HomeAssistantError
 
 from ..const import CONF_CHARGE_CURRENT_ENTITY
 from ..controllers.inverter import set_charge_current, set_program_soc
@@ -136,14 +137,42 @@ class BaseChargeStrategy(ABC):
 
         charge_current_entity = self.config.get(CONF_CHARGE_CURRENT_ENTITY)
         if charge_current_entity:
-            await set_charge_current(
-                self.hass,
-                str(charge_current_entity),
-                action.charge_current,
-                entry=self.entry,
-                logger=_LOGGER,
-                context=self.integration_context,
-            )
+            try:
+                await set_charge_current(
+                    self.hass,
+                    str(charge_current_entity),
+                    action.charge_current,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
+            except HomeAssistantError as err:
+                if any(
+                    change["entity_id"] == self.prog_soc_entity
+                    for change in entities_changed
+                ):
+                    try:
+                        await set_program_soc(
+                            self.hass,
+                            self.prog_soc_entity,
+                            self.prog_soc_value,
+                            entry=self.entry,
+                            logger=_LOGGER,
+                            context=self.integration_context,
+                        )
+                    except HomeAssistantError as rollback_err:
+                        _LOGGER.error(
+                            "%s failed to roll back program SOC after charge-current "
+                            "write failure: %s",
+                            self.scenario_name,
+                            rollback_err,
+                        )
+                _LOGGER.error(
+                    "%s charge-current write failed: %s",
+                    self.scenario_name,
+                    err,
+                )
+                return None
             entities_changed.append(
                 {"entity_id": str(charge_current_entity), "value": action.charge_current}
             )

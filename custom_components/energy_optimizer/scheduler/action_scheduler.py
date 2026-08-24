@@ -83,6 +83,7 @@ class ActionScheduler:
         self._price_hourly_listener: Callable[[], None] | None = None
         self._sunrise_listener: Callable[[], None] | None = None
         self._sunset_listener: Callable[[], None] | None = None
+        self._charge_completion_restore_task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
         """Start scheduling fixed actions."""
@@ -107,6 +108,16 @@ class ActionScheduler:
         self._schedule_evening_sell()
         self._schedule_sell_restores()
         self._schedule_daytime_min_price_restore()
+        entry_data = self.hass.data.setdefault(DOMAIN, {}).setdefault(
+            self.entry.entry_id,
+            {},
+        )
+        entry_data["charge_completion_snapshot_callback"] = (
+            self._publish_schedule_snapshot
+        )
+        self._charge_completion_restore_task = self.hass.async_create_task(
+            async_restore_charge_completions(self.hass, self.entry)
+        )
 
         self._sunrise_listener = async_track_sunrise(
             self.hass,
@@ -265,6 +276,12 @@ class ActionScheduler:
         if self._sunset_listener is not None:
             self._sunset_listener()
             self._sunset_listener = None
+        if self._charge_completion_restore_task is not None:
+            self._charge_completion_restore_task.cancel()
+            self._charge_completion_restore_task = None
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {})
+        if isinstance(entry_data, dict):
+            entry_data.pop("charge_completion_snapshot_callback", None)
         cancel_charge_completion_listeners(self.hass, self.entry)
         self._clear_schedule_snapshot()
 
@@ -712,9 +729,6 @@ class ActionScheduler:
 
         self.hass.async_create_task(
             async_check_pending_sell_restore(self.hass, self.entry)
-        )
-        self.hass.async_create_task(
-            async_restore_charge_completions(self.hass, self.entry)
         )
 
     def _get_scheduled_actions_sensor(self) -> Any | None:
