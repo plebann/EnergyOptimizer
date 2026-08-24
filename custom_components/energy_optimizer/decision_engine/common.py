@@ -436,7 +436,7 @@ async def handle_no_action_soc_update(
     current_prog_soc: float,
     target_soc: float,
     outcome: DecisionOutcome,
-) -> None:
+) -> bool:
     """Handle no-action path: conditionally update program SOC and log outcome."""
     entities_changed: list[dict[str, float | str]] = []
     if abs(target_soc - current_prog_soc) > 0.01:
@@ -451,11 +451,14 @@ async def handle_no_action_soc_update(
         entities_changed.append({"entity_id": prog_soc_entity, "value": target_soc})
 
     if entities_changed:
+        outcome.action_type = "program_soc_updated"
+        outcome.summary = f"Set program SOC to {target_soc:.0f}%"
         outcome.entities_changed = entities_changed
 
     await log_decision_unified(
         hass, entry, outcome, context=integration_context, logger=_LOGGER
     )
+    return bool(entities_changed)
 
 
 def resolve_entry(hass: HomeAssistant, entry_id: str | None) -> ConfigEntry | None:

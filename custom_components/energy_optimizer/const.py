@@ -139,6 +139,10 @@ WORK_MODE_ZERO_EXPORT_TO_LOAD = "Zero Export To Load"
 STORAGE_KEY_SELL_RESTORE = f"{DOMAIN}.sell_restore"
 STORAGE_VERSION_SELL_RESTORE = 1
 
+# Charge completion persistence
+STORAGE_KEY_CHARGE_COMPLETION = f"{DOMAIN}.charge_completion"
+STORAGE_VERSION_CHARGE_COMPLETION = 1
+
 # Update intervals (seconds)
 UPDATE_INTERVAL_FAST = 60  # For battery-related sensors
 UPDATE_INTERVAL_SLOW = 3600  # For daily forecasts

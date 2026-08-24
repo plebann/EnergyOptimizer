@@ -345,7 +345,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG2_TIME_START_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "time"])
                 ),
                 vol.Optional(CONF_PROG3_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
@@ -740,10 +740,28 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 # Warn if start time not configured (optional but recommended)
                 if not start_time:
-                    _LOGGER.warning(
-                        "%s configured without start time - will be used for manual control only",
-                        soc_key
-                    )
+                    if soc_key == CONF_PROG2_SOC_ENTITY:
+                        errors[start_key] = "entity_not_found"
+                    else:
+                        _LOGGER.warning(
+                            "%s configured without start time - will be used for manual control only",
+                            soc_key
+                        )
+
+            if start_time and start_key == CONF_PROG2_TIME_START_ENTITY:
+                state = self._validate_entity(
+                    entity_id=start_time,
+                    field=start_key,
+                    errors=errors,
+                )
+                if state is not None and state.domain not in ("input_datetime", "time"):
+                    errors[start_key] = "not_time_entity"
+                elif (
+                    state is not None
+                    and state.domain == "input_datetime"
+                    and not state.attributes.get("has_time", False)
+                ):
+                    errors[start_key] = "not_time_entity"
 
         # Ensure at least one targeting method is configured
         if not has_programs:
@@ -1030,8 +1048,27 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
     ) -> config_entries.FlowResult:
         """Handle time program options."""
         if user_input is not None:
-            self._data.update(user_input)
-            return await self.async_step_pv_load_config()
+            errors = {}
+            prog2_soc = user_input.get(CONF_PROG2_SOC_ENTITY)
+            prog2_start = user_input.get(CONF_PROG2_TIME_START_ENTITY)
+            if prog2_soc and not prog2_start:
+                errors[CONF_PROG2_TIME_START_ENTITY] = "entity_not_found"
+            elif prog2_start:
+                state = self.hass.states.get(prog2_start)
+                if state is None:
+                    errors[CONF_PROG2_TIME_START_ENTITY] = "entity_not_found"
+                elif state.domain not in ("input_datetime", "time"):
+                    errors[CONF_PROG2_TIME_START_ENTITY] = "not_time_entity"
+                elif (
+                    state.domain == "input_datetime"
+                    and not state.attributes.get("has_time", False)
+                ):
+                    errors[CONF_PROG2_TIME_START_ENTITY] = "not_time_entity"
+            if not errors:
+                self._data.update(user_input)
+                return await self.async_step_pv_load_config()
+        else:
+            errors = {}
 
         schema = vol.Schema(
             {
@@ -1057,7 +1094,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     CONF_PROG2_TIME_START_ENTITY,
                     default=self._config_entry.data.get(CONF_PROG2_TIME_START_ENTITY),
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "time"])
                 ),
                 vol.Optional(
                     CONF_PROG3_SOC_ENTITY,
@@ -1110,7 +1147,9 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
             }
         )
 
-        return self.async_show_form(step_id="time_programs", data_schema=schema)
+        return self.async_show_form(
+            step_id="time_programs", data_schema=schema, errors=errors
+        )
 
     async def async_step_pv_load_config(
         self, user_input: dict[str, Any] | None = None

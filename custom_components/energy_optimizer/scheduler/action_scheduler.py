@@ -40,6 +40,10 @@ from ..service_handlers.sell_restore import (
     async_check_pending_sell_restore,
     async_handle_sell_restore,
 )
+from ..service_handlers.charge_completion import (
+    async_restore_charge_completions,
+    cancel_charge_completion_listeners,
+)
 from ..helpers import (
     get_internal_sensor_entity_id,
     resolve_day_buy_window_start_hour,
@@ -261,6 +265,7 @@ class ActionScheduler:
         if self._sunset_listener is not None:
             self._sunset_listener()
             self._sunset_listener = None
+        cancel_charge_completion_listeners(self.hass, self.entry)
         self._clear_schedule_snapshot()
 
     async def _handle_morning_charge(self, now: datetime) -> None:
@@ -708,6 +713,9 @@ class ActionScheduler:
         self.hass.async_create_task(
             async_check_pending_sell_restore(self.hass, self.entry)
         )
+        self.hass.async_create_task(
+            async_restore_charge_completions(self.hass, self.entry)
+        )
 
     def _get_scheduled_actions_sensor(self) -> Any | None:
         """Return the scheduled actions sensor stored for this entry."""
@@ -964,6 +972,30 @@ class ActionScheduler:
                 )
             )
 
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {})
+        completion_plans = (
+            entry_data.get("charge_completion_plans", {})
+            if isinstance(entry_data, dict)
+            else {}
+        )
+        if isinstance(completion_plans, dict):
+            for charge_type, plan in completion_plans.items():
+                if not isinstance(plan, dict):
+                    continue
+                scheduled_for = dt_util.parse_datetime(str(plan.get("complete_at")))
+                if scheduled_for is None:
+                    continue
+                actions.append(
+                    self._build_action_entry(
+                        key=f"{charge_type}_charge_completion",
+                        label=f"{str(charge_type).title()} charge completion",
+                        scheduled_for=dt_util.as_local(scheduled_for),
+                        kind="dynamic",
+                        source=f"{charge_type}_buy_window_end",
+                        order=105 if charge_type == "morning" else 106,
+                    )
+                )
+
         actions.sort(
             key=lambda item: (
                 item["time"] is None,
@@ -987,7 +1019,6 @@ class ActionScheduler:
             "dynamic_count": sum(1 for action in actions if action["kind"] in {"dynamic", "derived_restore"}),
             "event_driven_count": sum(1 for action in actions if action["kind"] == "event_driven"),
         }
-        entry_data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {})
 
         return {
             "date": now.date().isoformat(),

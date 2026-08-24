@@ -127,10 +127,17 @@ Ten algorytm zapewnia:
 
 ## Efekty sterowania (koncepcyjne)
 
-- Ustaw docelowy SOC programu 2 (ładowanie z sieci) na obliczoną wartość
+- Przy rzeczywistej zmianie SOC najpierw ustaw start programu 2 na początek
+  rozstrzygniętego `night_buy_window`, a następnie ustaw docelowy SOC programu 2.
+- Jeśli zapis SOC nie powiedzie się po zmianie czasu, przywróć poprzedni czas
+  programu 2 i nie planuj zakończenia.
 - Ustaw prąd ładowania z sieci na obliczoną wartość (2h okno ładowania)
 - Falownik automatycznie rozpocznie ładowanie do osiągnięcia docelowego SOC
-- W ścieżce „no action” możliwa jest korekta `prog2_soc` do wyliczonego `target_soc` (gdy różni się od bieżącej wartości)
+- Tymczasowy cel różny od `min_soc` jest trwale resetowany do `min_soc` na końcu
+  `night_buy_window`; reset przetrwa restart Home Assistant i wykona się po
+  starcie, jeśli termin już minął.
+- W ścieżce bez deficytu rzeczywista korekta `prog2_soc` ma wynik
+  `program_soc_updated`; `no_action` oznacza, że nie zmieniono żadnej encji.
 
 ## Obsługa błędów
 
