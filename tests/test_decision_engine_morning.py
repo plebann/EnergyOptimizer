@@ -577,3 +577,88 @@ async def test_morning_charge_uses_night_buy_window_duration_for_current_sizing(
     await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
 
     assert captured["target_charge_time_hours"] == pytest.approx(4.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("max_charge_current", "expected_current_calls"),
+    [
+        (
+            "1",
+            [
+                ("number.max_charge_current", 23),
+                ("number.charge_current", 2.0),
+            ],
+        ),
+        ("2", [("number.charge_current", 2.0)]),
+        ("3", [("number.charge_current", 2.0)]),
+    ],
+)
+async def test_morning_charge_restores_lower_max_current_before_setting_current(
+    monkeypatch: pytest.MonkeyPatch,
+    max_charge_current: str,
+    expected_current_calls: list[tuple[str, float]],
+) -> None:
+    from custom_components.energy_optimizer.const import (
+        CONF_MAX_CHARGE_CURRENT_ENTITY,
+        CONF_TEST_MODE,
+        DEFAULT_MAX_CHARGE_CURRENT,
+    )
+    from custom_components.energy_optimizer.decision_engine.common import ChargeAction
+
+    config = {
+        CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
+        CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+        CONF_MAX_CHARGE_CURRENT_ENTITY: "number.max_charge_current",
+        CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
+        CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
+        CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",
+        CONF_BATTERY_CAPACITY_AH: 100,
+        CONF_BATTERY_VOLTAGE: 50,
+        CONF_MIN_SOC: 10,
+        CONF_MAX_SOC: 100,
+        CONF_BATTERY_EFFICIENCY: 100,
+        CONF_TEST_MODE: False,
+    }
+    states = {
+        "number.prog2_soc": "50",
+        "time.prog2_start": "04:00:00",
+        "number.charge_current": "0",
+        "number.max_charge_current": max_charge_current,
+        "sensor.battery_soc": "90",
+        "sensor.daily_load": "48",
+        "sensor.tariff_end_hour": "13",
+    }
+    hass = _setup_hass(config, states)
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.charge_base.calculate_charge_action",
+        lambda *_args, **_kwargs: ChargeAction(
+            gap_to_charge_kwh=1.0,
+            soc_delta=1.0,
+            target_soc=60.0,
+            charge_current=2.0,
+        ),
+    )
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    current_calls = [
+        (call.args[2]["entity_id"], call.args[2]["value"])
+        for call in hass.services.async_call.call_args_list
+        if call.args[0] == "number"
+        and call.args[1] == "set_value"
+        and call.args[2]["entity_id"]
+        in {"number.max_charge_current", "number.charge_current"}
+    ]
+
+    assert current_calls == [
+        (
+            entity_id,
+            DEFAULT_MAX_CHARGE_CURRENT
+            if entity_id == "number.max_charge_current"
+            else value,
+        )
+        for entity_id, value in expected_current_calls
+    ]

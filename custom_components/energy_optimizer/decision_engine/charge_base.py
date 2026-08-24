@@ -8,8 +8,17 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import Context
 from homeassistant.exceptions import HomeAssistantError
 
-from ..const import CONF_CHARGE_CURRENT_ENTITY
-from ..controllers.inverter import set_charge_current, set_program_soc
+from ..const import (
+    CONF_CHARGE_CURRENT_ENTITY,
+    CONF_MAX_CHARGE_CURRENT_ENTITY,
+    DEFAULT_MAX_CHARGE_CURRENT,
+)
+from ..controllers.inverter import (
+    set_charge_current,
+    set_max_charge_current,
+    set_program_soc,
+)
+from ..helpers import get_float_state_info
 from ..utils.logging import log_decision_unified
 from ..utils.pv_forecast import get_pv_compensation_factor
 from .common import (
@@ -241,9 +250,40 @@ class BaseChargeStrategy(ABC):
             target_charge_time_hours=self._resolve_charge_time_hours(),
         )
 
+        charge_current_entity = self.config.get(CONF_CHARGE_CURRENT_ENTITY)
+        max_charge_current_entity = self.config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
+        max_charge_current_changed = False
+        if charge_current_entity and max_charge_current_entity:
+            max_charge_current, _, max_charge_current_error = get_float_state_info(
+                self.hass,
+                str(max_charge_current_entity),
+            )
+            if (
+                max_charge_current_error is None
+                and max_charge_current is not None
+                and max_charge_current < action.charge_current
+            ):
+                await set_max_charge_current(
+                    self.hass,
+                    str(max_charge_current_entity),
+                    DEFAULT_MAX_CHARGE_CURRENT,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
+                )
+                max_charge_current_changed = True
+
         entities_changed = await self._apply_charge_action(action)
         if entities_changed is None:
             return
+        if max_charge_current_changed:
+            entities_changed.insert(
+                0,
+                {
+                    "entity_id": str(max_charge_current_entity),
+                    "value": DEFAULT_MAX_CHARGE_CURRENT,
+                },
+            )
 
         program_soc_changed = any(
             change["entity_id"] == self.prog_soc_entity for change in entities_changed
