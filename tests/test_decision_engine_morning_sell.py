@@ -944,7 +944,7 @@ async def test_morning_sell_skips_when_forecast_omits_sell_hour(
         f"{MORNING}.get_morning_pv_forecast",
         lambda *_args, **_kwargs: MorningPVForecast(
             total_kwh=2.0,
-            hourly_kwh={hour: 0.0 for hour in range(24) if hour != 7},
+            hourly_kwh={hour: 0.0 for hour in range(24)},
             status="valid_hourly",
             method="hourly",
             source_entity="sensor.pv_forecast_today",
@@ -954,15 +954,18 @@ async def test_morning_sell_skips_when_forecast_omits_sell_hour(
             tolerance_kwh=0.25,
             daylight_hours=[],
             sufficiency_available=True,
+            recorded_hours=tuple(hour for hour in range(24) if hour != 7),
         ),
     )
 
     await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
 
     assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].summary == "Morning sell skipped: PV forecast missing sell hour"
     assert outcomes[-1].reason == (
-        "A valid hourly PV forecast is required to select the sell regulator"
+        "The hourly PV forecast does not contain the configured sell hour"
     )
+    assert outcomes[-1].details["sell_hour"] == 7
     assert resolve_count == 2
 
 

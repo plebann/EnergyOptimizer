@@ -58,6 +58,7 @@ class MorningPVForecast:
     first_period_local_date: str | None = None
     last_period_local_date: str | None = None
     failure_reason: str | None = None
+    recorded_hours: tuple[int, ...] = ()
 
     def audit_details(self) -> dict[str, object]:
         """Return PV provenance suitable for decision audit details."""
@@ -95,6 +96,7 @@ class MorningPVForecast:
             "pv_sufficiency_status": (
                 "available" if self.sufficiency_available else "unavailable"
             ),
+            "pv_recorded_hours": list(self.recorded_hours),
         }
 
 
@@ -216,6 +218,7 @@ def get_morning_pv_forecast(
             daylight_hours=[],
             sufficiency_available=True,
             failure_reason=None,
+            recorded_hours=tuple(sorted(raw_hourly)),
             **snapshot_details,
             **hourly_details,
         )

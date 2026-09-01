@@ -299,26 +299,36 @@ class MorningSellStrategy(BaseSellStrategy):
         base_window = build_hour_window(start_hour, base_end_hour)
         base_hours = max(len(base_window), 1)
         base_usage_kwh = sum(hourly_usage[hour] for hour in base_window)
-        base_heat_pump_kwh, base_heat_pump_hourly = await get_heat_pump_forecast_window(
+        _, sell_and_base_heat_pump_hourly = await get_heat_pump_forecast_window(
             self.hass,
             self.config,
-            start_hour=start_hour,
+            start_hour=sell_hour,
             end_hour=base_end_hour,
         )
         (
-            base_pv_forecast_kwh,
-            base_pv_forecast_hourly,
-            base_pv_forecast,
+            _,
+            sell_and_base_pv_forecast_hourly,
+            sell_and_base_pv_forecast,
         ) = _get_morning_pv_window(
             self.hass,
             self.config,
-            start_hour=start_hour,
+            start_hour=sell_hour,
             end_hour=base_end_hour,
             apply_efficiency=True,
             entry_id=self.entry.entry_id,
         )
-        if base_pv_forecast is not None:
-            horizon_details.update(base_pv_forecast.audit_details())
+        if sell_and_base_pv_forecast is not None:
+            horizon_details.update(sell_and_base_pv_forecast.audit_details())
+        base_heat_pump_hourly = {
+            hour: sell_and_base_heat_pump_hourly.get(hour, 0.0)
+            for hour in base_window
+        }
+        base_heat_pump_kwh = sum(base_heat_pump_hourly.values())
+        base_pv_forecast_hourly = {
+            hour: sell_and_base_pv_forecast_hourly.get(hour, 0.0)
+            for hour in base_window
+        }
+        base_pv_forecast_kwh = sum(base_pv_forecast_hourly.values())
         base_losses_hourly, _ = calculate_losses(
             self.hass,
             self.config,
@@ -326,9 +336,8 @@ class MorningSellStrategy(BaseSellStrategy):
         )
 
         if (
-            base_pv_forecast is None
-            or not base_pv_forecast.sufficiency_available
-            or sell_hour not in base_pv_forecast_hourly
+            sell_and_base_pv_forecast is None
+            or not sell_and_base_pv_forecast.sufficiency_available
         ):
             return build_no_action_outcome(
                 scenario=self.scenario_name,
@@ -343,12 +352,35 @@ class MorningSellStrategy(BaseSellStrategy):
                 details_extra=horizon_details,
             )
 
+        if (
+            sell_hour not in sell_and_base_pv_forecast_hourly
+            or (
+                sell_and_base_pv_forecast.recorded_hours
+                and sell_hour not in sell_and_base_pv_forecast.recorded_hours
+            )
+        ):
+            horizon_details["sell_hour"] = sell_hour
+            return build_no_action_outcome(
+                scenario=self.scenario_name,
+                summary="Morning sell skipped: PV forecast missing sell hour",
+                reason=(
+                    "The hourly PV forecast does not contain the configured sell hour"
+                ),
+                current_soc=self.current_soc,
+                reserve_kwh=0.0,
+                required_kwh=0.0,
+                pv_forecast_kwh=0.0,
+                sufficiency_hour=None,
+                sufficiency_reached=False,
+                details_extra=horizon_details,
+            )
+
         hourly_demand_kwh = (
             hourly_usage[sell_hour]
-            + base_heat_pump_hourly.get(sell_hour, 0.0)
+            + sell_and_base_heat_pump_hourly.get(sell_hour, 0.0)
             + base_losses_hourly
         ) * self.margin
-        hourly_pv_kwh = base_pv_forecast_hourly[sell_hour]
+        hourly_pv_kwh = sell_and_base_pv_forecast_hourly[sell_hour]
         coverage_margin = float(
             self.config.get(
                 CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
@@ -467,7 +499,7 @@ class MorningSellStrategy(BaseSellStrategy):
             losses_hourly=base_losses_hourly,
             losses_kwh=base_losses_hourly * base_hours,
             margin=self.margin,
-            morning_pv_forecast=base_pv_forecast,
+            morning_pv_forecast=sell_and_base_pv_forecast,
         )
 
         sufficiency = _resolve_sufficiency(base_forecasts)
