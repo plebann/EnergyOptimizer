@@ -944,7 +944,7 @@ async def test_morning_sell_skips_when_forecast_omits_sell_hour(
         f"{MORNING}.get_morning_pv_forecast",
         lambda *_args, **_kwargs: MorningPVForecast(
             total_kwh=2.0,
-            hourly_kwh={hour: 0.0 for hour in range(24) if hour != 7},
+            hourly_kwh={hour: 0.0 for hour in range(24)},
             status="valid_hourly",
             method="hourly",
             source_entity="sensor.pv_forecast_today",
