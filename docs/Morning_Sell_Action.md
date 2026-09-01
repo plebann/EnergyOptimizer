@@ -120,6 +120,15 @@ ale traktuje te metryki jako diagnostykę i kontekst bezpieczeństwa:
 Cel modelu: pokazać moment samowystarczalności PV oraz kontekst bezpieczeństwa,
 bez zaniżania metryk sprzedażowych pełnego horyzontu.
 
+**Wybór regulatora w godzinie sprzedaży:**
+- Prognoza PV i Pompy Ciepła jest odczytywana od `sell_hour` do końca horyzontu
+  bazowego, a następnie rozdzielana na godzinę sprzedaży i okres po sprzedaży.
+- Wartości z `sell_hour` określają regulator: gdy PV pokrywa godzinowe
+  zapotrzebowanie z marginesem, używany jest `discharge_current`; w przeciwnym
+  razie `export_power`.
+- Brak rekordu prognozy PV dla `sell_hour` powoduje `no_action`; jawna prognoza
+  `0.0 kWh` jest poprawną wartością i wybiera `export_power`.
+
 **Nadwyżka energii:**
 - Formula: `surplus_kwh = max(reserve_kwh + pv_forecast_kwh - required_kwh, 0)`
 - `reserve_kwh = (current_soc - min_soc) / 100 × capacity_ah × voltage / 1000 × efficiency`
