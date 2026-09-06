@@ -825,8 +825,8 @@ def test_morning_sell_discharge_current_honors_zero_entity_maximum() -> None:
     assert regulator.value == 0.0
 
 
-def test_morning_sell_export_power_rounds_up_to_hundreds() -> None:
-    """Export regulator rounds the final sell energy up to 100 W."""
+def test_morning_sell_export_power_rounds_up_to_tens() -> None:
+    """Export regulator rounds the final sell power up to 10 W."""
     state = MagicMock()
     state.state = "1200"
     state.attributes = {}
@@ -841,7 +841,7 @@ def test_morning_sell_export_power_rounds_up_to_hundreds() -> None:
 
     assert regulator.kind == "export_power"
     assert regulator.previous_value == 1200.0
-    assert regulator.value == 2301.0
+    assert regulator.value == 2310.0
 
 
 @pytest.mark.asyncio

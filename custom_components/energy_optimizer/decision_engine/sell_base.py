@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 import logging
-from math import floor
+from math import ceil, floor
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import Context, HomeAssistantError
@@ -234,9 +234,10 @@ class BaseSellStrategy(ABC):
             self.config.get(CONF_MAX_EXPORT_POWER, DEFAULT_MAX_EXPORT_POWER)
             or DEFAULT_MAX_EXPORT_POWER
         )
+        max_export_power = max(max_export_power, 0.0)
         export_power_w = min(
-            (surplus_kwh / duration_hours) * 1000.0,
-            max(max_export_power, 0.0),
+            ceil((surplus_kwh / duration_hours) * 100.0) * 10.0,
+            max_export_power,
         )
         return SellRegulator(
             kind="export_power",
