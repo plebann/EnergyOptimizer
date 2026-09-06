@@ -160,6 +160,7 @@ class LastOptimizationSensor(EnergyOptimizerSensor, RestoreSensor):
     _attr_icon = "mdi:calendar-clock"
     _attr_native_value: datetime | None = None
     _attr_extra_state_attributes: dict[str, Any] = {}
+    _unrecorded_attributes = frozenset({"hourly_trace"})
 
     async def async_added_to_hass(self) -> None:
         """Restore last state on startup."""

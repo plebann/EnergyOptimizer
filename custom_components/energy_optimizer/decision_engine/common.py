@@ -694,37 +694,6 @@ def build_morning_charge_outcome(
     )
 
 
-def build_afternoon_charge_outcome(
-    *,
-    scenario: str,
-    action: ChargeAction,
-    balance: EnergyBalance,
-    forecasts: ForecastData,
-    arbitrage_kwh: float,
-    arbitrage_details: dict[str, float | str] | None,
-    current_soc: float,
-    efficiency: float,
-    pv_compensation_factor: float | None,
-) -> DecisionOutcome:
-    """Build an afternoon charge decision outcome."""
-    details_extra = {
-        "window_start_hour": forecasts.start_hour,
-        "window_end_hour": forecasts.end_hour,
-        **(arbitrage_details or {}),
-    }
-    return build_charge_outcome_base(
-        scenario=scenario,
-        action=action,
-        balance=balance,
-        forecasts=forecasts,
-        current_soc=current_soc,
-        efficiency=efficiency,
-        pv_compensation_factor=pv_compensation_factor,
-        arbitrage_kwh=arbitrage_kwh,
-        details_extra=details_extra,
-    )
-
-
 def _compute_arbitrage_from_cap(
     *,
     bc: BatteryConfig,
