@@ -31,6 +31,9 @@ class DecisionOutcome:
     # Unified data payload (for history sensor + last optimization + events)
     details: dict[str, Any] = field(default_factory=dict)
 
+    # Verbose diagnostics published to current/event outputs but not history.
+    diagnostic_details: dict[str, Any] = field(default_factory=dict)
+
     # Entity changes (for custom events)
     entities_changed: list[dict[str, Any]] = field(default_factory=list)
 
@@ -129,6 +132,7 @@ async def log_decision_unified(
                     "summary": outcome.summary,
                     "reason": outcome.reason,
                     "details": outcome.details,
+                    "diagnostic_details": outcome.diagnostic_details,
                     "entities_changed": outcome.entities_changed,
                     "history_windows": outcome.history_windows,
                 },
@@ -138,7 +142,10 @@ async def log_decision_unified(
 
     opt_sensor, hist_sensor = get_logging_sensors(hass, entry.entry_id)
     if opt_sensor:
-        opt_sensor.log_optimization(outcome.scenario, outcome.details)
+        opt_sensor.log_optimization(
+            outcome.scenario,
+            {**outcome.details, **outcome.diagnostic_details},
+        )
 
     if hist_sensor:
         history_entry = {**outcome.details}
@@ -159,6 +166,7 @@ async def log_decision_unified(
             "scenario": outcome.scenario,
             "entry_id": entry.entry_id,
             **outcome.details,
+            **outcome.diagnostic_details,
         }
         if outcome.entities_changed:
             event_data["entities_changed"] = outcome.entities_changed

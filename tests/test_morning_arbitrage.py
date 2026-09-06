@@ -12,7 +12,6 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
     CONF_DAILY_LOAD_SENSOR,
-    CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
     CONF_MIN_ARBITRAGE_PRICE,
@@ -29,10 +28,6 @@ from custom_components.energy_optimizer.decision_engine.common import (
     ForecastData,
     _compute_arbitrage_from_cap,
     resolve_arbitrage_margin_gate,
-)
-from custom_components.energy_optimizer.decision_engine.afternoon_charge import (
-    AfternoonChargeStrategy,
-    _calculate_arbitrage_kwh,
 )
 from custom_components.energy_optimizer.decision_engine.morning_charge import (
     _calculate_morning_arbitrage_kwh,
@@ -150,86 +145,6 @@ def test_compute_arbitrage_from_cap_basic():
     assert metrics["sell_window_start_hour"] == 10
 
 
-def test_afternoon_charge_uses_day_buy_window_duration_for_current_sizing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Day buy-window duration controls afternoon charge-current sizing."""
-    strategy = AfternoonChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
-    strategy.entry = MagicMock(entry_id="entry-1")
-    strategy.config = {}
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_day_buy_window_duration_hours",
-        lambda *args, **kwargs: 3.0,
-    )
-
-    assert strategy._resolve_charge_time_hours() == pytest.approx(3.0)
-
-
-def test_afternoon_charge_ends_at_midnight_without_tomorrow_night_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Afternoon forecast ends today when tomorrow night prices are unavailable."""
-    strategy = AfternoonChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
-    strategy.entry = MagicMock(entry_id="entry-1")
-    strategy.config = {}
-    captured: dict[str, int | None] = {}
-
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_tariff_start_hour",
-        lambda *args, **kwargs: 14,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_day_buy_window_end_hour",
-        lambda *args, **kwargs: 14,
-    )
-
-    def _resolve_tomorrow_night(
-        *_args,
-        default_hour: int | None,
-        **_kwargs,
-    ) -> int | None:
-        captured["default_hour"] = default_hour
-        return default_hour
-
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_night_buy_window_tomorrow_start_hour",
-        _resolve_tomorrow_night,
-    )
-
-    start_hour, end_hour, _ = strategy._resolve_forecast_params()
-
-    assert captured["default_hour"] is None
-    assert (start_hour, end_hour) == (14, 24)
-    assert strategy._history_window_kinds() == ("db_e", "day_e")
-
-
-def test_afternoon_charge_uses_available_tomorrow_night_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Afternoon forecast continues to the resolved tomorrow night window."""
-    strategy = AfternoonChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
-    strategy.entry = MagicMock(entry_id="entry-1")
-    strategy.config = {}
-
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_tariff_start_hour",
-        lambda *args, **kwargs: 14,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_day_buy_window_end_hour",
-        lambda *args, **kwargs: 14,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.afternoon_charge.resolve_night_buy_window_tomorrow_start_hour",
-        lambda *args, **kwargs: 4,
-    )
-
-    start_hour, end_hour, _ = strategy._resolve_forecast_params()
-
-    assert (start_hour, end_hour) == (14, 4)
-    assert strategy._history_window_kinds() == ("db_e", "nb_t_s")
-
-
 def test_compute_arbitrage_from_cap_limited_by_arb_limit():
     """arbitrage_kwh is capped to arb_limit when cap_kwh > arb_limit."""
     bc = _bc(capacity_ah=100, voltage=50)  # 5 kWh
@@ -310,16 +225,6 @@ def _arb_config(
     return {
         CONF_MORNING_MAX_PRICE_SENSOR: sell_price_entity,
         CONF_PV_FORECAST_REMAINING: remaining_entity,
-        CONF_MIN_ARBITRAGE_PRICE: min_price,
-    }
-
-
-def _afternoon_arb_config(
-    sell_price_entity: str = "sensor.evening_price",
-    min_price: float = 0.5,
-) -> dict:
-    return {
-        CONF_EVENING_MAX_PRICE_SENSOR: sell_price_entity,
         CONF_MIN_ARBITRAGE_PRICE: min_price,
     }
 
@@ -598,22 +503,3 @@ def test_resolve_arbitrage_margin_gate_rounds_price_details(_mock_internal):
     assert details["sell_price"] == 1.2
     assert details["buy_reference_price"] == 0.47
     assert details["arbitrage_margin"] == 0.73
-
-
-@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
-def test_afternoon_arbitrage_fails_closed_without_buy_reference(_mock_internal):
-    """Afternoon arbitrage should fail closed when the day buy window is unavailable."""
-    hass = _arb_hass(day_buy_price=None)
-    kwh, details = _calculate_arbitrage_kwh(
-        hass,
-        _afternoon_arb_config(min_price=0.2),
-        forecasts=_forecasts(start_hour=15, end_hour=22),
-        bc=_bc(),
-        sell_start_hour=18,
-        current_soc=50.0,
-        required_kwh=0.5,
-        entry_id="entry-1",
-    )
-
-    assert kwh == 0.0
-    assert details["arbitrage_reason"] == "missing_buy_reference_price"

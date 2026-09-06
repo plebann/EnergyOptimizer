@@ -108,6 +108,21 @@ class BaseChargeStrategy(ABC):
         """Return the charging window duration used for current sizing."""
         return 2.0
 
+    def _calculate_charge_action(
+        self,
+        *,
+        total_gap: float,
+        balance: EnergyBalance,
+    ) -> ChargeAction:
+        """Calculate the scenario's charge action."""
+        del balance
+        return calculate_charge_action(
+            self.bc,
+            gap_kwh=total_gap,
+            current_soc=self.current_soc,
+            target_charge_time_hours=self._resolve_charge_time_hours(),
+        )
+
     def _history_window_kinds(self) -> tuple[str, str]:
         """Return compact source codes for the forecast window boundaries."""
         return "fc_s", "fc_e"
@@ -243,11 +258,9 @@ class BaseChargeStrategy(ABC):
             await self._handle_no_action(balance)
             return
 
-        action = calculate_charge_action(
-            self.bc,
-            gap_kwh=total_gap,
-            current_soc=self.current_soc,
-            target_charge_time_hours=self._resolve_charge_time_hours(),
+        action = self._calculate_charge_action(
+            total_gap=total_gap,
+            balance=balance,
         )
 
         charge_current_entity = self.config.get(CONF_CHARGE_CURRENT_ENTITY)
