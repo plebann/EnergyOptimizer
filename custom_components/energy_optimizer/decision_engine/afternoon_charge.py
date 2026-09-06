@@ -66,6 +66,7 @@ class _SimulationResult:
     virtual_sale_kwh: float
     unserved_virtual_sale_kwh: float
     charge_window_peak_soc: float
+    planned_charge_current_a: float
     pv_stored_by_hour: list[float]
     hourly_trace: list[dict[str, float | int]]
 
@@ -227,24 +228,6 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
         """Use the simulator's exact source-side grid plan."""
         del total_gap, balance
         simulation = self._plan.simulation
-        charge_hours = max(
-            len(
-                build_hour_window(
-                    self._day_buy_start_hour,
-                    self._day_buy_end_hour,
-                )
-            ),
-            1,
-        )
-        efficiency = max(self.bc.efficiency / 100.0, 0.0)
-        stored_rate_kwh = (
-            self._plan.planned_grid_charge_kwh * efficiency / charge_hours
-        )
-        charge_current = (
-            ceil(stored_rate_kwh * 1000.0 / self.bc.voltage)
-            if self.bc.voltage > 0 and stored_rate_kwh > _EPSILON_KWH
-            else 0
-        )
         total_capacity_kwh = soc_to_kwh(
             100.0,
             self.bc.capacity_ah,
@@ -261,7 +244,7 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             target_soc=float(
                 min(ceil(simulation.charge_window_peak_soc), self.bc.max_soc)
             ),
-            charge_current=float(charge_current),
+            charge_current=simulation.planned_charge_current_a,
         )
 
     def _build_charge_outcome(
@@ -407,6 +390,20 @@ def _simulate_afternoon(
     efficiency = bc.efficiency / 100.0
     if capacity_kwh <= 0 or efficiency <= 0:
         efficiency = 0.0
+    planned_charge_current_a = (
+        min(
+            ceil(
+                (protection_rate_kwh + arbitrage_rate_kwh)
+                * efficiency
+                * 1000.0
+                / bc.voltage
+            ),
+            DEFAULT_MAX_CHARGE_CURRENT,
+        )
+        if bc.voltage > 0
+        and protection_rate_kwh + arbitrage_rate_kwh > _EPSILON_KWH
+        else 0
+    )
 
     horizon_hours = build_hour_window(forecasts.start_hour, forecasts.end_hour)
     charge_hours = set(build_hour_window(day_buy_start_hour, day_buy_end_hour))
@@ -446,7 +443,7 @@ def _simulate_afternoon(
                 bc.max_soc,
                 bc.capacity_ah,
                 bc.voltage,
-                max_current_a=DEFAULT_MAX_CHARGE_CURRENT,
+                max_current_a=planned_charge_current_a,
             )
             protection_requested_stored = protection_rate_kwh * efficiency
             protection_stored_kwh = min(
@@ -560,6 +557,7 @@ def _simulate_afternoon(
             0.0,
         ),
         charge_window_peak_soc=charge_window_peak_soc,
+        planned_charge_current_a=float(planned_charge_current_a),
         pv_stored_by_hour=pv_stored_by_hour,
         hourly_trace=trace,
     )
@@ -591,18 +589,36 @@ def _max_uniform_rate(
     *,
     simulate: Callable[[float], _SimulationResult],
     upper_rate_kwh: float,
+    current_rate_step_kwh: float,
     accepted: Callable[[_SimulationResult, float], bool],
 ) -> float:
-    """Find the largest uniform hourly rate satisfying a physical predicate."""
-    low = 0.0
-    high = max(upper_rate_kwh, 0.0)
-    for _ in range(_SEARCH_ITERATIONS):
-        midpoint = (low + high) / 2.0
-        if accepted(simulate(midpoint), midpoint):
-            low = midpoint
+    """Find the largest acceptable rate across discrete charge-current bands."""
+    if current_rate_step_kwh <= 0:
+        return 0.0
+
+    best_rate_kwh = 0.0
+    band_count = ceil(upper_rate_kwh / current_rate_step_kwh)
+    for current_a in range(1, band_count + 1):
+        lower_rate_kwh = (current_a - 1) * current_rate_step_kwh
+        high_rate_kwh = min(
+            current_a * current_rate_step_kwh,
+            upper_rate_kwh,
+        )
+        accepted_rate_kwh: float | None = None
+        if accepted(simulate(high_rate_kwh), high_rate_kwh):
+            accepted_rate_kwh = high_rate_kwh
         else:
-            high = midpoint
-    return low
+            low_rate_kwh = lower_rate_kwh
+            for _ in range(_SEARCH_ITERATIONS):
+                midpoint = (low_rate_kwh + high_rate_kwh) / 2.0
+                if accepted(simulate(midpoint), midpoint):
+                    accepted_rate_kwh = midpoint
+                    low_rate_kwh = midpoint
+                else:
+                    high_rate_kwh = midpoint
+        if accepted_rate_kwh is not None:
+            best_rate_kwh = max(best_rate_kwh, accepted_rate_kwh)
+    return best_rate_kwh
 
 
 def _build_afternoon_plan(
@@ -625,6 +641,9 @@ def _build_afternoon_plan(
         DEFAULT_MAX_CHARGE_CURRENT * bc.voltage / 1000.0 / efficiency
         if efficiency > 0
         else 0.0
+    )
+    current_rate_step_kwh = (
+        bc.voltage / 1000.0 / efficiency if efficiency > 0 else 0.0
     )
 
     def simulate_protection(rate_kwh: float) -> _SimulationResult:
@@ -671,6 +690,7 @@ def _build_afternoon_plan(
         max_protection_rate = _max_uniform_rate(
             simulate=simulate_protection,
             upper_rate_kwh=max_source_rate_kwh,
+            current_rate_step_kwh=current_rate_step_kwh,
             accepted=lambda result, rate: _requested_grid_was_accepted(
                 result,
                 protection_rate_kwh=rate,
@@ -810,6 +830,7 @@ def _build_afternoon_plan(
                 arbitrage_rate_kwh = _max_uniform_rate(
                     simulate=simulate_arbitrage,
                     upper_rate_kwh=max_source_rate_kwh,
+                    current_rate_step_kwh=current_rate_step_kwh,
                     accepted=arbitrage_is_feasible,
                 )
                 final_simulation = simulate_arbitrage(arbitrage_rate_kwh)

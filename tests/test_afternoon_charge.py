@@ -134,6 +134,7 @@ async def _run(
     *,
     arbitrage_enabled: bool,
     tomorrow_start_hour: int | None = 4,
+    day_buy_end_hour: int = 14,
 ) -> dict[str, object]:
     """Run the public afternoon entry point with deterministic windows."""
     gate = (
@@ -180,7 +181,7 @@ async def _run(
         stack.enter_context(
             patch(
                 f"{_AFTERNOON_MODULE}.resolve_day_buy_window_end_hour",
-                return_value=14,
+                return_value=day_buy_end_hour,
             )
         )
         stack.enter_context(
@@ -362,11 +363,27 @@ async def test_infeasible_protection_disables_arbitrage_and_reports_deficit() ->
         arbitrage_enabled=True,
     )
 
-    assert details["protection_grid_charge_kwh"] == pytest.approx(2.02, abs=0.02)
+    assert details["protection_grid_charge_kwh"] == pytest.approx(1.91, abs=0.02)
     assert details["arbitrage_grid_charge_kwh"] == pytest.approx(0.0)
-    assert details["uncovered_reserve_deficit_kwh"] == pytest.approx(2.98, abs=0.02)
+    assert details["uncovered_reserve_deficit_kwh"] == pytest.approx(3.09, abs=0.02)
     assert details["arbitrage_reason"] == "protection_infeasible"
     assist.set_assist.assert_called_once_with(True)
+
+
+@pytest.mark.asyncio
+async def test_tapered_charge_current_does_not_overstate_protection_capacity() -> None:
+    """Protection reports the taper-boundary deficit at the programmed current."""
+    hass, _ = _hass(current_soc=69.0)
+    details = await _run(
+        hass,
+        _forecast(usage={14: 2.925}),
+        arbitrage_enabled=True,
+        day_buy_end_hour=13,
+    )
+
+    assert details["charge_current_a"] == 10.0
+    assert details["uncovered_reserve_deficit_kwh"] == pytest.approx(0.02, abs=0.01)
+    assert details["arbitrage_reason"] == "protection_infeasible"
 
 
 @pytest.mark.asyncio
