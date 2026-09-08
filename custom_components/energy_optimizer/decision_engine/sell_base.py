@@ -488,46 +488,44 @@ class BaseSellStrategy(ABC):
             if wm_state is not None:
                 original_work_mode = wm_state.state
 
-        await set_work_mode(
-            self.hass,
-            str(work_mode_entity) if work_mode_entity else None,
-            WORK_MODE_EXPORT_FIRST,
-            entry=self.entry,
-            logger=_LOGGER,
-            context=self.integration_context,
-        )
-
-        if not skip_restore:
-            existing_restore = await self._get_existing_restore_payload()
-            if existing_restore is None or existing_restore.get("sell_type") != self.sell_type:
-                restore_data: dict[str, Any] = {
-                    "work_mode": original_work_mode,
-                    "prog_soc_entity": self.prog_soc_entity,
-                    "prog_soc_value": self.original_prog_soc,
-                    "restore_hour": self.restore_hour,
-                    "sell_type": self.sell_type,
-                    "timestamp": dt_util.utcnow().isoformat(),
-                }
-                if regulator.entity_id and regulator.previous_value is not None:
-                    restore_data["regulator"] = {
-                        "kind": regulator.kind,
-                        "entity_id": regulator.entity_id,
-                        "value": regulator.previous_value,
-                    }
-                self.hass.data[DOMAIN][self.entry.entry_id]["sell_restore"] = restore_data
-                store = Store(
-                    self.hass,
-                    STORAGE_VERSION_SELL_RESTORE,
-                    f"{STORAGE_KEY_SELL_RESTORE}.{self.entry.entry_id}",
-                )
-                await store.async_save(restore_data)
-            else:
-                _LOGGER.debug(
-                    "Preserving existing %s sell restore baseline; skip overwrite",
-                    self.sell_type,
-                )
-
         try:
+            await set_work_mode(
+                self.hass,
+                str(work_mode_entity) if work_mode_entity else None,
+                WORK_MODE_EXPORT_FIRST,
+                entry=self.entry,
+                logger=_LOGGER,
+                context=self.integration_context,
+            )
+            if not skip_restore:
+                existing_restore = await self._get_existing_restore_payload()
+                if existing_restore is None or existing_restore.get("sell_type") != self.sell_type:
+                    restore_data: dict[str, Any] = {
+                        "work_mode": original_work_mode,
+                        "prog_soc_entity": self.prog_soc_entity,
+                        "prog_soc_value": self.original_prog_soc,
+                        "restore_hour": self.restore_hour,
+                        "sell_type": self.sell_type,
+                        "timestamp": dt_util.utcnow().isoformat(),
+                    }
+                    if regulator.entity_id and regulator.previous_value is not None:
+                        restore_data["regulator"] = {
+                            "kind": regulator.kind,
+                            "entity_id": regulator.entity_id,
+                            "value": regulator.previous_value,
+                        }
+                    self.hass.data[DOMAIN][self.entry.entry_id]["sell_restore"] = restore_data
+                    store = Store(
+                        self.hass,
+                        STORAGE_VERSION_SELL_RESTORE,
+                        f"{STORAGE_KEY_SELL_RESTORE}.{self.entry.entry_id}",
+                    )
+                    await store.async_save(restore_data)
+                else:
+                    _LOGGER.debug(
+                        "Preserving existing %s sell restore baseline; skip overwrite",
+                        self.sell_type,
+                    )
             await set_program_soc(
                 self.hass,
                 self.prog_soc_entity,

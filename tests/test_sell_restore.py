@@ -559,10 +559,10 @@ async def test_restore_callback_restores_previous_discharge_current(
 
 
 @pytest.mark.asyncio
-async def test_execute_sell_rolls_back_after_regulator_write_failure(
+async def test_execute_sell_logs_failure_after_work_mode_write_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A regulator write error is logged as sell_failed after rollback attempts."""
+    """A work-mode write error is logged as sell_failed after rollback attempts."""
     hass = MagicMock()
     work_mode_state = MagicMock()
     work_mode_state.state = "Zero Export to Load"
@@ -571,9 +571,9 @@ async def test_execute_sell_rolls_back_after_regulator_write_failure(
     entry = MagicMock()
     entry.entry_id = "entry-1"
     outcomes = []
-    set_work_mode_mock = AsyncMock()
+    set_work_mode_mock = AsyncMock(side_effect=HomeAssistantError("write failed"))
     set_program_soc_mock = AsyncMock()
-    set_export_power_mock = AsyncMock(side_effect=HomeAssistantError("write failed"))
+    set_export_power_mock = AsyncMock()
 
     async def _capture_log(_hass, _entry, outcome, **_kwargs) -> None:
         outcomes.append(outcome)
@@ -626,7 +626,7 @@ async def test_execute_sell_rolls_back_after_regulator_write_failure(
 
     assert outcomes[-1].action_type == "sell_failed"
     assert set_work_mode_mock.await_count == 2
-    assert set_program_soc_mock.await_count == 2
+    assert set_program_soc_mock.await_count == 1
 
 
 @pytest.mark.asyncio
