@@ -93,11 +93,18 @@ async def test_execute_sell_clamps_target_to_safety_soc_floor(
         efficiency=90.0,
     )
     strategy.current_soc = 40.0
+    strategy.prog_soc_entity = "number.prog5_soc"
+    strategy.original_prog_soc = 40.0
+    strategy.restore_hour = 18
     strategy.integration_context = SimpleNamespace()
 
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
-        lambda _hass, _entry: True,
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_program_soc",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_export_power",
+        AsyncMock(),
     )
     monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
@@ -115,7 +122,8 @@ async def test_execute_sell_clamps_target_to_safety_soc_floor(
                 captured.update(target=target) or outcome
             ),
             build_no_action_fn=lambda _surplus: outcome,
-        )
+        ),
+        skip_restore=True,
     )
 
     assert captured["target"] == 20.0
@@ -142,11 +150,18 @@ async def test_execute_sell_uses_ac_export_and_consumption_for_dc_target(
         efficiency=0.9,
     )
     strategy.current_soc = 98.0
+    strategy.prog_soc_entity = "number.prog5_soc"
+    strategy.original_prog_soc = 98.0
+    strategy.restore_hour = 18
     strategy.integration_context = SimpleNamespace()
 
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
-        lambda _hass, _entry: True,
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_program_soc",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_export_power",
+        AsyncMock(),
     )
     monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
@@ -169,7 +184,8 @@ async def test_execute_sell_uses_ac_export_and_consumption_for_dc_target(
                 or outcome
             ),
             build_no_action_fn=lambda _surplus: outcome,
-        )
+        ),
+        skip_restore=True,
     )
 
     assert captured == {"target": 49.0, "surplus": 9.91, "export": 9910.0}
@@ -209,10 +225,6 @@ async def test_execute_sell_saves_restore_data(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
         AsyncMock(),
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
-        lambda _hass, _entry: False,
     )
 
     _FakeStore.saved_data = None
@@ -301,10 +313,6 @@ async def test_execute_sell_preserves_existing_restore_baseline_in_memory(
         "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
         AsyncMock(),
     )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
-        lambda _hass, _entry: False,
-    )
 
     _FakeStore.saved_data = None
     _FakeStore.load_data = None
@@ -385,10 +393,6 @@ async def test_execute_sell_preserves_existing_restore_baseline_from_store(
     monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
         AsyncMock(),
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
-        lambda _hass, _entry: False,
     )
 
     _FakeStore.saved_data = None
@@ -593,10 +597,6 @@ async def test_execute_sell_rolls_back_after_regulator_write_failure(
     monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
         _capture_log,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.is_test_sell_mode",
-        lambda _hass, _entry: False,
     )
 
     strategy = _TestSellStrategy(hass, entry_id="entry-1", margin=1.0)

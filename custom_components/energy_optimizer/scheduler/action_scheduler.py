@@ -15,6 +15,13 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from ..const import (
+    AUTOMATION_AFTERNOON_CHARGE,
+    AUTOMATION_EVENING_BEHAVIOR,
+    AUTOMATION_EVENING_SELL,
+    AUTOMATION_EXPORT_BLOCK_CONTROL,
+    AUTOMATION_MORNING_CHARGE,
+    AUTOMATION_MORNING_SELL,
+    AUTOMATION_SOLAR_CHARGE_BLOCK,
     CONF_BEV_CHARGING_BINARY_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     CONF_PRICE_SENSOR,
@@ -285,8 +292,24 @@ class ActionScheduler:
         cancel_charge_completion_listeners(self.hass, self.entry)
         self._clear_schedule_snapshot()
 
+    def _automation_enabled(self, key: str) -> bool:
+        """Return whether a scheduler-only automation is enabled."""
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {})
+        switches = entry_data.get("automation_switches", {}) if isinstance(entry_data, dict) else {}
+        switch = switches.get(key) if isinstance(switches, dict) else None
+        return switch is None or bool(switch.is_on)
+
+    def _skip_if_automation_disabled(self, key: str) -> bool:
+        """Log and signal that a disabled automation must not run."""
+        if self._automation_enabled(key):
+            return False
+        _LOGGER.debug("Scheduler skipping disabled automation: %s", key)
+        return True
+
     async def _handle_morning_charge(self, now: datetime) -> None:
         """Run morning charge routine at the resolved night buy window start."""
+        if self._skip_if_automation_disabled(AUTOMATION_MORNING_CHARGE):
+            return
         _LOGGER.info("Scheduler triggering morning grid charge")
         await async_run_morning_charge(
             self.hass,
@@ -297,6 +320,8 @@ class ActionScheduler:
 
     async def _handle_evening_behavior(self, now: datetime) -> None:
         """Run evening behavior routine at 22:00."""
+        if self._skip_if_automation_disabled(AUTOMATION_EVENING_BEHAVIOR):
+            return
         _LOGGER.info("Scheduler triggering evening behavior")
         await async_run_evening_behavior(
             self.hass,
@@ -307,6 +332,8 @@ class ActionScheduler:
 
     async def _handle_afternoon_charge(self, now: datetime) -> None:
         """Run afternoon charge routine at tariff end hour."""
+        if self._skip_if_automation_disabled(AUTOMATION_AFTERNOON_CHARGE):
+            return
         _LOGGER.info("Scheduler triggering afternoon charge")
         await async_run_afternoon_charge(
             self.hass,
@@ -344,6 +371,8 @@ class ActionScheduler:
 
     async def _handle_evening_sell(self, now: datetime) -> None:
         """Run the primary (`A`) evening sell window."""
+        if self._skip_if_automation_disabled(AUTOMATION_EVENING_SELL):
+            return
         _LOGGER.info("Scheduler triggering evening primary sell window")
         await async_run_evening_sell(
             self.hass,
@@ -356,6 +385,8 @@ class ActionScheduler:
 
     async def _handle_morning_sell(self, now: datetime) -> None:
         """Run morning peak sell routine at configured peak hour."""
+        if self._skip_if_automation_disabled(AUTOMATION_MORNING_SELL):
+            return
         _LOGGER.info("Scheduler triggering morning peak sell")
         await async_run_morning_sell(
             self.hass,
@@ -366,6 +397,8 @@ class ActionScheduler:
 
     async def _handle_evening_sell_second(self, now: datetime) -> None:
         """Run the secondary (`B`) evening sell window."""
+        if self._skip_if_automation_disabled(AUTOMATION_EVENING_SELL):
+            return
         _LOGGER.info("Scheduler triggering evening secondary sell window")
         await async_run_evening_sell(
             self.hass,
@@ -450,22 +483,26 @@ class ActionScheduler:
 
     async def _handle_price_change(self, event_or_now: Any) -> None:
         """Run daytime price-driven controls."""
-        await async_run_solar_charge_block(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            trigger="scheduler:price_change_solar_charge_block",
-        )
-        await asyncio.sleep(5)
-        decision = await async_run_export_block_control(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            trigger="scheduler:price_change_export_block_control",
-        )
-        self._store_export_block_decision(decision)
+        if not self._skip_if_automation_disabled(AUTOMATION_SOLAR_CHARGE_BLOCK):
+            await async_run_solar_charge_block(
+                self.hass,
+                entry_id=self.entry.entry_id,
+                trigger="scheduler:price_change_solar_charge_block",
+            )
+        if not self._skip_if_automation_disabled(AUTOMATION_EXPORT_BLOCK_CONTROL):
+            await asyncio.sleep(5)
+            decision = await async_run_export_block_control(
+                self.hass,
+                entry_id=self.entry.entry_id,
+                trigger="scheduler:price_change_export_block_control",
+            )
+            self._store_export_block_decision(decision)
         self._publish_schedule_snapshot()
 
     async def _handle_bev_charging_change(self, event) -> None:
         """Re-evaluate export control immediately when BEV charging changes."""
+        if self._skip_if_automation_disabled(AUTOMATION_EXPORT_BLOCK_CONTROL):
+            return
         decision = await async_run_export_block_control(
             self.hass,
             entry_id=self.entry.entry_id,
@@ -1073,9 +1110,11 @@ class ActionScheduler:
             ),
             "kind": kind,
             "source": source,
-            "enabled": True,
+            "enabled": self._automation_enabled(key),
             "order": order,
         }
+        if not entry["enabled"]:
+            entry["status"] = "disabled"
         if trigger is not None:
             entry["trigger"] = trigger
         return entry
