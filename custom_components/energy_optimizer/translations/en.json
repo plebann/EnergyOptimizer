@@ -339,8 +339,26 @@
       "test_mode": {
         "name": "Test mode"
       },
-      "test_sell_mode": {
-        "name": "Test sell mode"
+      "morning_charge_automation": {
+        "name": "Morning charge automation"
+      },
+      "afternoon_charge_automation": {
+        "name": "Afternoon charge automation"
+      },
+      "morning_sell_automation": {
+        "name": "Morning sell automation"
+      },
+      "evening_sell_automation": {
+        "name": "Evening sell automation"
+      },
+      "solar_charge_block_automation": {
+        "name": "Solar charge block automation"
+      },
+      "export_block_control_automation": {
+        "name": "Export block/off-grid automation"
+      },
+      "night_management_automation": {
+        "name": "Night management automation"
       },
       "pv_forecast_compensation_usage": {
         "name": "PV forecast compensation usage"

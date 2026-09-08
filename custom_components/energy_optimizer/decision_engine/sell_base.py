@@ -31,7 +31,7 @@ from ..controllers.inverter import (
     set_program_soc,
     set_work_mode,
 )
-from ..helpers import get_float_state_info, is_test_sell_mode
+from ..helpers import get_float_state_info
 from ..utils.decision_dump import record_input, record_step
 from ..utils.logging import DecisionOutcome, log_decision_unified
 from ..utils.time_window import build_hour_window
@@ -482,17 +482,13 @@ class BaseSellStrategy(ABC):
             duration_hours=duration_hours,
         )
         work_mode_entity = self.config.get(CONF_WORK_MODE_ENTITY)
-        sell_test_mode = is_test_sell_mode(self.hass, self.entry)
-
         original_work_mode: str | None = None
         if work_mode_entity:
             wm_state = self.hass.states.get(str(work_mode_entity))
             if wm_state is not None:
                 original_work_mode = wm_state.state
 
-        if sell_test_mode:
-            _LOGGER.info("Test sell mode enabled - skipping %s sell inverter writes", self.sell_type)
-        else:
+        try:
             await set_work_mode(
                 self.hass,
                 str(work_mode_entity) if work_mode_entity else None,
@@ -501,7 +497,6 @@ class BaseSellStrategy(ABC):
                 logger=_LOGGER,
                 context=self.integration_context,
             )
-
             if not skip_restore:
                 existing_restore = await self._get_existing_restore_payload()
                 if existing_restore is None or existing_restore.get("sell_type") != self.sell_type:
@@ -531,47 +526,45 @@ class BaseSellStrategy(ABC):
                         "Preserving existing %s sell restore baseline; skip overwrite",
                         self.sell_type,
                     )
-
-            try:
-                await set_program_soc(
+            await set_program_soc(
+                self.hass,
+                self.prog_soc_entity,
+                target_soc,
+                entry=self.entry,
+                logger=_LOGGER,
+                context=self.integration_context,
+            )
+            if regulator.kind == "discharge_current":
+                await set_discharge_current(
                     self.hass,
-                    self.prog_soc_entity,
-                    target_soc,
+                    regulator.entity_id,
+                    regulator.value,
                     entry=self.entry,
                     logger=_LOGGER,
                     context=self.integration_context,
                 )
-                if regulator.kind == "discharge_current":
-                    await set_discharge_current(
-                        self.hass,
-                        regulator.entity_id,
-                        regulator.value,
-                        entry=self.entry,
-                        logger=_LOGGER,
-                        context=self.integration_context,
-                    )
-                else:
-                    await set_export_power(
-                        self.hass,
-                        regulator.entity_id,
-                        regulator.value,
-                        entry=self.entry,
-                        logger=_LOGGER,
-                        context=self.integration_context,
-                    )
-            except HomeAssistantError as err:
-                _LOGGER.error("%s sell write failed: %s", self.sell_type, err)
-                await self._rollback_sell_write(
-                    original_work_mode=original_work_mode,
-                    original_prog_soc=self.original_prog_soc,
-                    regulator=regulator,
+            else:
+                await set_export_power(
+                    self.hass,
+                    regulator.entity_id,
+                    regulator.value,
+                    entry=self.entry,
+                    logger=_LOGGER,
+                    context=self.integration_context,
                 )
-                outcome = request.build_no_action_fn(executable_export_kwh)
-                outcome.action_type = "sell_failed"
-                outcome.summary = f"{self.scenario_name} skipped after inverter write failure"
-                outcome.reason = str(err)
-                await self._log_outcome(outcome)
-                return
+        except HomeAssistantError as err:
+            _LOGGER.error("%s sell write failed: %s", self.sell_type, err)
+            await self._rollback_sell_write(
+                original_work_mode=original_work_mode,
+                original_prog_soc=self.original_prog_soc,
+                regulator=regulator,
+            )
+            outcome = request.build_no_action_fn(executable_export_kwh)
+            outcome.action_type = "sell_failed"
+            outcome.summary = f"{self.scenario_name} skipped after inverter write failure"
+            outcome.reason = str(err)
+            await self._log_outcome(outcome)
+            return
 
         export_power_w = regulator.value if regulator.kind == "export_power" else 0.0
         outcome = request.build_outcome_fn(
@@ -580,22 +573,20 @@ class BaseSellStrategy(ABC):
             export_power_w,
         )
         outcome.details.update(target_diagnostics)
-        outcome.details["test_sell_mode"] = sell_test_mode
         if regulator.kind == "discharge_current":
             outcome.details.pop("export_power_w", None)
 
-        if not sell_test_mode:
-            outcome.entities_changed = [
-                {"entity_id": self.prog_soc_entity, "value": target_soc}
-            ]
-            if work_mode_entity:
-                outcome.entities_changed.append(
-                    {"entity_id": str(work_mode_entity), "option": WORK_MODE_EXPORT_FIRST}
-                )
-            if regulator.entity_id:
-                outcome.entities_changed.append(
-                    {"entity_id": regulator.entity_id, "value": regulator.value}
-                )
+        outcome.entities_changed = [
+            {"entity_id": self.prog_soc_entity, "value": target_soc}
+        ]
+        if work_mode_entity:
+            outcome.entities_changed.append(
+                {"entity_id": str(work_mode_entity), "option": WORK_MODE_EXPORT_FIRST}
+            )
+        if regulator.entity_id:
+            outcome.entities_changed.append(
+                {"entity_id": regulator.entity_id, "value": regulator.value}
+            )
 
         await self._log_outcome(outcome)
 

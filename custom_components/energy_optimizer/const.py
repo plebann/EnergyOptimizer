@@ -97,7 +97,13 @@ CONF_MAX_CHARGE_CURRENT_ENTITY = "max_charge_current_entity"
 CONF_MAX_SELL_ENERGY_ENTITY = "max_sell_energy_entity"
 CONF_MORNING_SELL_PV_COVERAGE_MARGIN = "morning_sell_pv_coverage_margin"
 CONF_TEST_MODE = "test_mode"
-CONF_TEST_SELL_MODE = "test_sell_mode"
+AUTOMATION_MORNING_CHARGE = "morning_charge"
+AUTOMATION_AFTERNOON_CHARGE = "afternoon_charge"
+AUTOMATION_MORNING_SELL = "morning_sell"
+AUTOMATION_EVENING_SELL = "evening_sell"
+AUTOMATION_SOLAR_CHARGE_BLOCK = "solar_charge_block"
+AUTOMATION_EXPORT_BLOCK_CONTROL = "export_block_control"
+AUTOMATION_EVENING_BEHAVIOR = "evening_behavior"
 
 # Default values
 DEFAULT_BATTERY_CAPACITY_AH = 37

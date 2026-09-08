@@ -59,21 +59,6 @@ def is_test_mode(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return bool(entry.options.get(CONF_TEST_MODE, False))
 
 
-def is_test_sell_mode(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Return True when test sell mode is enabled for the config entry."""
-    from .const import CONF_TEST_SELL_MODE, DOMAIN
-
-    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    if isinstance(entry_data, dict):
-        test_sell_mode_switch = entry_data.get("test_sell_mode_switch")
-        if test_sell_mode_switch is not None:
-            return bool(test_sell_mode_switch.is_on)
-
-    if CONF_TEST_SELL_MODE in entry.data:
-        return bool(entry.data.get(CONF_TEST_SELL_MODE))
-    return bool(entry.options.get(CONF_TEST_SELL_MODE, False))
-
-
 def is_pv_forecast_compensation_enabled(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> bool:
