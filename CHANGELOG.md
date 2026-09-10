@@ -12,9 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Breaking change: renamed config keys `tariff_start_hour_sensor` and `tariff_end_hour_sensor` to `high_tariff_start_hour_sensor` and `high_tariff_end_hour_sensor`.
 - Updated config flow translations, scheduler diagnostics, tests, and action documentation to use the new high-tariff naming.
 
+- Breaking change: replaced the `max_sell_energy_entity` entity selector with a static numeric option `max_sell_energy` (kWh) in the Control Entities step of both setup and options flows. Leave empty for no cap; values greater than 0 clamp the computed sell surplus before target SOC and export power are derived.
+
 ### For Users
 
 - Existing Energy Optimizer entries using the old tariff hour sensor fields must be reconfigured in the UI because this rename is intentionally not migrated automatically.
+- Existing entries configured with `max_sell_energy_entity` must re-enter the limit as `max_sell_energy` in the options flow; the leftover entity field is ignored, not migrated.
 
 ## [1.0.0] - 2024-12-21
 
