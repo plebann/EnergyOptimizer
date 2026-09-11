@@ -1,6 +1,7 @@
 """Tests for evening sell decision engine logic."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -19,7 +20,7 @@ from custom_components.energy_optimizer.const import (
     CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
     CONF_EXPORT_POWER_ENTITY,
     CONF_MAX_EXPORT_POWER,
-    CONF_MAX_SELL_ENERGY_ENTITY,
+    CONF_MAX_SELL_ENERGY,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_PROG5_SOC_ENTITY,
     CONF_PV_PRODUCTION_SENSOR,
@@ -643,10 +644,8 @@ async def test_evening_sell_max_sell_energy_clamp_and_fail_open(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     config = _base_config()
-    config[CONF_MAX_SELL_ENERGY_ENTITY] = "sensor.max_sell_energy"
-    states = _base_states()
-    states["sensor.max_sell_energy"] = "3.0"
-    hass = _setup_hass(config, states)
+    config[CONF_MAX_SELL_ENERGY] = 3.0
+    hass = _setup_hass(config, _base_states())
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -665,11 +664,31 @@ async def test_evening_sell_max_sell_energy_clamp_and_fail_open(
     assert outcomes[-1].details["executable_export_ac_kwh"] == 3.0
 
     caplog.clear()
-    del states["sensor.max_sell_energy"]
+    del config[CONF_MAX_SELL_ENERGY]
 
     await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
 
     assert outcomes[-1].details["executable_export_ac_kwh"] == 7.0
+
+    caplog.clear()
+    assert not [
+        record
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+        and "max_sell" in record.getMessage().lower()
+    ]
+
+    config[CONF_MAX_SELL_ENERGY] = 0.0
+    caplog.clear()
+
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes[-1].details["executable_export_ac_kwh"] == 7.0
+    assert any(
+        record.levelno == logging.WARNING
+        and "max_sell" in record.getMessage().lower()
+        for record in caplog.records
+    )
 
 
 @pytest.mark.asyncio
