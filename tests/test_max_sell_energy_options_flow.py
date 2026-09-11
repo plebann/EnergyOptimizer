@@ -3,11 +3,15 @@
 Issue #40 replaced ``max_sell_energy_entity`` with a NumberSelector boxed as
 an optional field. The HA frontend submits an empty box as explicit ``null``,
 and a bare selector validates as float only -- so ``null`` raised
-``expected float`` on save. The schema must therefore accept ``None``.
+``expected float`` on save. Fixing that with ``vol.Any(None, ...)`` made the
+field disappear from the modern (2026.x) frontend entirely, because the
+wrapper injects a foreign ``allow_none`` key into the serialized selector.
 
-These tests render the real ``control_entities`` step of both flows and
-validate submissions shaped like what the frontend actually posts, which is
-exactly the layer that previously failed.
+The field is therefore a small ``NumberSelector`` subclass whose validator
+accepts empty/None input as None while serializing to the exact plain-number
+selector JSON the frontend knows how to render. These tests pin both sides:
+the serialized shape (no ``allow_none`` anywhere) and save-time validation of
+submissions shaped like what the frontend actually posts.
 """
 
 from __future__ import annotations
@@ -107,3 +111,50 @@ async def test_setup_flow_scheme_accepts_null_box() -> None:
     schema = await _render_setup_step()
     validated = schema(_submission(None))
     assert validated.get(CONF_MAX_SELL_ENERGY) is None
+
+
+@pytest.mark.asyncio
+async def test_fields_serialize_to_known_number_selector_shape() -> None:
+    """Pin the exact selector JSON the HA frontend receives for this field.
+
+    The 2026.x frontend rendered flows only show fields whose serialized
+    variant it recognizes; a plain number box (mode/step/min/unit) is that
+    shape, and no extra keys (no ``allow_none`` etc.) may be allowed in.
+    """
+    import voluptuous_serialize
+    from homeassistant.helpers import config_validation as cv
+
+    async def _field(result):
+        out = voluptuous_serialize.convert(
+            result["data_schema"], custom_serializer=cv.custom_serializer
+        )
+        return next(f for f in out if f.get("name") == CONF_MAX_SELL_ENERGY)
+
+    opts_result = await EnergyOptimizerOptionsFlow(
+        _mock_config_entry({CONF_MAX_SELL_ENERGY: 2.7})
+    ).async_step_control_entities(None)
+    setup_result = await EnergyOptimizerConfigFlow().async_step_control_entities(
+        None
+    )
+
+    for result, expect_default in ((opts_result, 2.7), (setup_result, None)):
+        field = await _field(result)
+        assert field["selector"] == {
+            "number": {
+                "mode": "box",
+                "min": 0.0,
+                "step": 0.1,
+                "unit_of_measurement": "kWh",
+            }
+        }, f"unexpected serialized selector for {'options' if expect_default else 'setup'} flow: {field['selector']}"
+        assert field["optional"] is True
+        assert field["default"] == expect_default
+
+
+@pytest.mark.asyncio
+async def test_empty_string_submission_saves_none_both_flows() -> None:
+    """The frontend may echo an empty box back as null or ''; both stay None."""
+    schema_opts = await _render_options_step({CONF_MAX_SELL_ENERGY: 1.0})
+    schema_setup = await _render_setup_step()
+    for schema in (schema_opts, schema_setup):
+        assert schema(_submission(""))[CONF_MAX_SELL_ENERGY] is None

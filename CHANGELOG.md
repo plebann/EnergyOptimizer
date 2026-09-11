@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Options/setup flow control entities step crashed on save ("expected float") when `max_sell_energy` was left empty, and failed to render on HA versions where number-selector slider mode requires a max. The field is now an explicit box-mode selector that accepts an empty value (no cap).
+- `max_sell_energy` in the Control Entities options/setup step disappeared from the form on recent Home Assistant frontends. Wrapping plain selectors with `vol.Any(None, ...)` injected an unknown `allow_none` key into the serialized selector JSON, which modern frontends don't render. The field is now a `NumberSelector` subclass that serializes byte-for-byte to the plain box-mode number selector JSON while its validator also accepts an empty value (save as no-cap). Fixes both the missing-field regression and the earlier "expected float" crash on empty save.
 
 ### For Users
 
