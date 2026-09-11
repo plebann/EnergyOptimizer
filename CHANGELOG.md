@@ -12,11 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Breaking change: renamed config keys `tariff_start_hour_sensor` and `tariff_end_hour_sensor` to `high_tariff_start_hour_sensor` and `high_tariff_end_hour_sensor`.
 - Updated config flow translations, scheduler diagnostics, tests, and action documentation to use the new high-tariff naming.
 
-- Breaking change: replaced the `max_sell_energy_entity` entity selector with a static numeric option `max_sell_energy` (kWh) in the Control Entities step of both setup and options flows. Leave empty for no cap; values greater than 0 clamp the computed sell surplus before target SOC and export power are derived.
+- Breaking change: replaced the `max_sell_energy_entity` entity selector with a static numeric option `max_sell_energy` (kWh), required in both setup and options flows. Values greater than 0 clamp the computed sell surplus before target SOC and export power are derived; `0` means no cap.
 
 ### Fixed
 
-- `max_sell_energy` in the Control Entities options/setup step disappeared from the form on recent Home Assistant frontends. Wrapping plain selectors with `vol.Any(None, ...)` injected an unknown `allow_none` key into the serialized selector JSON, which modern frontends don't render. The field is now a `NumberSelector` subclass that serializes byte-for-byte to the plain box-mode number selector JSON while its validator also accepts an empty value (save as no-cap). Fixes both the missing-field regression and the earlier "expected float" crash on empty save.
+- `max_sell_energy` in the Control Entities options/setup step disappeared from the form on recent Home Assistant frontends. Wrapping plain selectors with `vol.Any(None, ...)` injected an unrecognized `allow_none` key into the serialized selector JSON, which modern frontends don't render. The field is back to a plain in-place box-mode number selector (matching every other numeric field in the component), so the frontend renders it again and empty submissions produce a clean form error instead of crashing.
 
 ### For Users
 

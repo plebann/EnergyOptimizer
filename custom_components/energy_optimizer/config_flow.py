@@ -108,27 +108,6 @@ def _price_margin_selector() -> selector.NumberSelector:
     )
 
 
-class NullableNumberSelector(selector.NumberSelector):
-    """Number selector that also accepts empty/None input as None."""
-
-    def __call__(self, data: Any) -> float | None:
-        if data is None or data == "":
-            return None
-        return super().__call__(data)  # type: ignore[no-any-return]
-
-
-def _max_sell_energy_selector() -> NullableNumberSelector:
-    """Build the optional max sell energy (kWh) selector."""
-    return NullableNumberSelector(
-        selector.NumberSelectorConfig(
-            mode=selector.NumberSelectorMode.BOX,
-            min=0.0,
-            step=0.1,
-            unit_of_measurement="kWh",
-        )
-    )
-
-
 class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Energy Optimizer."""
 
@@ -329,9 +308,14 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_MAX_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(
-                    CONF_MAX_SELL_ENERGY, default=None
-                ): _max_sell_energy_selector(),
+                vol.Required(CONF_MAX_SELL_ENERGY, default=0.0): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        mode=selector.NumberSelectorMode.BOX,
+                        min=0.0,
+                        step=0.1,
+                        unit_of_measurement="kWh",
+                    )
+                ),
                 vol.Optional(CONF_GRID_CHARGE_SWITCH): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="switch")
                 ),
@@ -1047,10 +1031,19 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(
+                vol.Required(
                     CONF_MAX_SELL_ENERGY,
-                    default=self._config_entry.data.get(CONF_MAX_SELL_ENERGY),
-                ): _max_sell_energy_selector(),
+                    default=float(
+                        self._config_entry.data.get(CONF_MAX_SELL_ENERGY) or 0.0
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        mode=selector.NumberSelectorMode.BOX,
+                        min=0.0,
+                        step=0.1,
+                        unit_of_measurement="kWh",
+                    )
+                ),
                 vol.Optional(
                     CONF_GRID_CHARGE_SWITCH,
                     default=self._config_entry.data.get(CONF_GRID_CHARGE_SWITCH),
