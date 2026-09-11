@@ -308,10 +308,18 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_MAX_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(CONF_MAX_SELL_ENERGY): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0.0, step=0.1, unit_of_measurement="kWh"
-                    )
+                vol.Optional(
+                    CONF_MAX_SELL_ENERGY, default=None
+                ): vol.Any(
+                    None,
+                    selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            mode=selector.NumberSelectorMode.BOX,
+                            min=0.0,
+                            step=0.1,
+                            unit_of_measurement="kWh",
+                        )
+                    ),
                 ),
                 vol.Optional(CONF_GRID_CHARGE_SWITCH): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="switch")
@@ -1031,10 +1039,16 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_MAX_SELL_ENERGY,
                     default=self._config_entry.data.get(CONF_MAX_SELL_ENERGY),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0.0, step=0.1, unit_of_measurement="kWh"
-                    )
+                ): vol.Any(
+                    None,
+                    selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            mode=selector.NumberSelectorMode.BOX,
+                            min=0.0,
+                            step=0.1,
+                            unit_of_measurement="kWh",
+                        )
+                    ),
                 ),
                 vol.Optional(
                     CONF_GRID_CHARGE_SWITCH,
