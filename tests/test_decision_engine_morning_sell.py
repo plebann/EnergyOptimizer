@@ -788,7 +788,7 @@ def test_morning_sell_discharge_current_uses_ceiling_and_entity_max() -> None:
         CONF_DISCHARGE_CURRENT_ENTITY: "number.discharge_current",
         CONF_BATTERY_VOLTAGE_SENSOR: "sensor.battery_voltage",
     }
-    strategy.battery_config = SimpleNamespace(voltage=640.0)
+    strategy.battery_config = SimpleNamespace(voltage=640.0, efficiency=100.0)
     strategy._use_discharge_current = True
     strategy._regulator_diagnostics = {}
 
@@ -816,7 +816,7 @@ def test_morning_sell_discharge_current_honors_zero_entity_maximum() -> None:
     hass.states.get.return_value = state
     strategy = MorningSellStrategy(hass, entry_id="entry-1", margin=None)
     strategy.config = {CONF_DISCHARGE_CURRENT_ENTITY: "number.discharge_current"}
-    strategy.battery_config = SimpleNamespace(voltage=640.0)
+    strategy.battery_config = SimpleNamespace(voltage=640.0, efficiency=100.0)
     strategy._use_discharge_current = True
     strategy._regulator_diagnostics = {}
 

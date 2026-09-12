@@ -219,11 +219,21 @@ class BaseSellStrategy(ABC):
         """Build an optional outcome when the required SOC input is unavailable."""
         return None
 
+    def _discharge_efficiency(self) -> float:
+        """Return battery discharge efficiency normalized to a 0..1 fraction."""
+        configured_efficiency = self.battery_config.efficiency
+        return (
+            configured_efficiency
+            if 0.0 < configured_efficiency <= 1.0
+            else configured_efficiency / 100.0
+        )
+
     def _resolve_sell_regulator(
         self,
         surplus_kwh: float,
         *,
         duration_hours: float = 1.0,
+        demand_kwh: float = 0.0,
     ) -> SellRegulator:
         """Return the regulator used to control this sell execution."""
         entity_id = self.config.get(CONF_EXPORT_POWER_ENTITY)
@@ -365,25 +375,6 @@ class BaseSellStrategy(ABC):
                         )
                     surplus_kwh = min(surplus_kwh, pv_value)
 
-        max_discharge_raw = self.config.get("max_discharge_power")
-        if max_discharge_raw is None:
-            max_discharge_raw = self.config.get("max_sell_energy")
-        if max_discharge_raw is not None:
-            max_discharge_value = float(max_discharge_raw or 0.0)
-            if max_discharge_value > 0:
-                if surplus_kwh > max_discharge_value:
-                    _LOGGER.info(
-                        "Clamping surplus from %.2f kWh to max_discharge_power %.2f kWh",
-                        surplus_kwh,
-                        max_discharge_value,
-                    )
-                surplus_kwh = min(surplus_kwh, max_discharge_value)
-            else:
-                _LOGGER.warning(
-                    "max_discharge_power %.2f kWh is not greater than zero — no cap applied",
-                    max_discharge_value,
-                )
-
         duration_hours = request.sell_window_duration_hours
         if duration_hours <= 0.0:
             _LOGGER.error(
@@ -395,27 +386,55 @@ class BaseSellStrategy(ABC):
             await self._log_outcome(outcome)
             return
 
-        max_export_power = float(
-            self.config.get(CONF_MAX_EXPORT_POWER, DEFAULT_MAX_EXPORT_POWER)
-            or DEFAULT_MAX_EXPORT_POWER
-        )
-        export_limit_kwh = max(max_export_power, 0.0) * duration_hours / 1000.0
-        executable_export_kwh = min(surplus_kwh, export_limit_kwh)
-        configured_efficiency = self.battery_config.efficiency
-        efficiency = (
-            configured_efficiency
-            if 0.0 < configured_efficiency <= 1.0
-            else configured_efficiency / 100.0
-        )
+        efficiency = self._discharge_efficiency()
         if efficiency <= 0.0:
             _LOGGER.error(
                 "%s sell has invalid discharge efficiency %.3f",
                 self.sell_type,
                 efficiency,
             )
-            outcome = request.build_no_action_fn(executable_export_kwh)
+            outcome = request.build_no_action_fn(surplus_kwh)
             await self._log_outcome(outcome)
             return
+
+        max_discharge_kw = self.config.get(CONF_MAX_DISCHARGE_POWER)
+        if max_discharge_kw is not None:
+            max_discharge_kw = float(max_discharge_kw or 0.0)
+            if max_discharge_kw > 0:
+                window_demand_kwh = max(0.0, request.sell_window_consumption_kwh)
+                dc_energy_kwh = max(
+                    0.0, max_discharge_kw * efficiency * duration_hours
+                )
+                max_sell_kwh = max(0.0, dc_energy_kwh - window_demand_kwh)
+                if max_sell_kwh <= 0.0:
+                    _LOGGER.info(
+                        "%s sell skipped: DC limit %.2f kW leaves no sellable energy "
+                        "(window demand %.3f kWh, DC energy %.3f kWh)",
+                        self.sell_type,
+                        max_discharge_kw,
+                        request.sell_window_consumption_kwh,
+                        dc_energy_kwh,
+                    )
+                    outcome = request.build_no_action_fn(surplus_kwh)
+                    await self._log_outcome(outcome)
+                    return
+                if surplus_kwh > max_sell_kwh:
+                    _LOGGER.info(
+                        "%s sell clamped from %.2f kWh to %.2f kWh by DC discharge "
+                        "power limit %.2f kW",
+                        self.sell_type,
+                        surplus_kwh,
+                        max_sell_kwh,
+                        max_discharge_kw,
+                    )
+                surplus_kwh = min(surplus_kwh, max_sell_kwh)
+
+        max_export_power = float(
+            self.config.get(CONF_MAX_EXPORT_POWER, DEFAULT_MAX_EXPORT_POWER)
+            or DEFAULT_MAX_EXPORT_POWER
+        )
+        export_limit_kwh = max(max_export_power, 0.0) * duration_hours / 1000.0
+        executable_export_kwh = min(surplus_kwh, export_limit_kwh)
 
         sell_window_demand_kwh = request.sell_window_consumption_kwh
         required_battery_energy_kwh = (
@@ -478,6 +497,7 @@ class BaseSellStrategy(ABC):
         regulator = self._resolve_sell_regulator(
             executable_export_kwh,
             duration_hours=duration_hours,
+            demand_kwh=sell_window_demand_kwh,
         )
         work_mode_entity = self.config.get(CONF_WORK_MODE_ENTITY)
         original_work_mode: str | None = None
