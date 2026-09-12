@@ -20,7 +20,6 @@ from custom_components.energy_optimizer.const import (
     CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
     CONF_EXPORT_POWER_ENTITY,
     CONF_MAX_EXPORT_POWER,
-    CONF_MAX_SELL_ENERGY,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_PROG5_SOC_ENTITY,
     CONF_PV_PRODUCTION_SENSOR,
@@ -28,6 +27,7 @@ from custom_components.energy_optimizer.const import (
     CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
     CONF_WORK_MODE_ENTITY,
     DOMAIN,
+    CONF_MAX_DISCHARGE_POWER,
 )
 from custom_components.energy_optimizer.decision_engine.evening_sell import (
     async_run_evening_sell,
@@ -639,18 +639,19 @@ async def test_evening_sell_surplus_no_action_required_uses_sufficiency_window(
 
 
 @pytest.mark.asyncio
-async def test_evening_sell_max_sell_energy_clamp_and_fail_open(
+async def test_evening_sell_max_discharge_power_clamp(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """DC power limit caps sellable AC at max(0, P_dc * eta * duration - window_demand)."""
+    # eta = 0.9, duration = 1.0h, window demand forced to 0 (heat pump forecast 0).
     config = _base_config()
-    config[CONF_MAX_SELL_ENERGY] = 3.0
     hass = _setup_hass(config, _base_states())
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
     async def _hp(*args, **kwargs):
-        return 1.0, {}
+        return 0.0, {}
 
     monkeypatch.setattr(f"{EVENING}.get_heat_pump_forecast_window", _hp)
     monkeypatch.setattr(f"{EVENING}.get_pv_forecast_window", lambda *args, **kwargs: (2.0, {}))
@@ -658,37 +659,54 @@ async def test_evening_sell_max_sell_energy_clamp_and_fail_open(
     monkeypatch.setattr(f"{EVENING}.calculate_battery_reserve", lambda *args, **kwargs: 10.0)
     monkeypatch.setattr(f"{EVENING}.calculate_surplus_energy", lambda reserve, required, pv: 7.0)
 
+    # P_dc = 3.0 kW => max_sell = 3.0 * 0.9 * 1.0 - 0 = 2.7 kWh (surplus 7.0 clamped)
+    config[CONF_MAX_DISCHARGE_POWER] = 3.0
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
+    assert outcomes
+    assert outcomes[-1].details["executable_export_ac_kwh"] == pytest.approx(2.7)
+
+    # P_dc = 10.0 kW => max_sell = 9.0 kWh; surplus 7.0 is below the cap
+    config[CONF_MAX_DISCHARGE_POWER] = 10.0
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
+    assert outcomes[-1].details["executable_export_ac_kwh"] == pytest.approx(7.0)
+
+    # No key => no DC cap
+    del config[CONF_MAX_DISCHARGE_POWER]
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
+    assert outcomes[-1].details["executable_export_ac_kwh"] == pytest.approx(7.0)
+
+    # P_dc = 0 => no cap (0 means off)
+    config[CONF_MAX_DISCHARGE_POWER] = 0.0
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
+    assert outcomes[-1].details["executable_export_ac_kwh"] == pytest.approx(7.0)
+
+
+@pytest.mark.asyncio
+async def test_evening_sell_dc_limit_insufficient_no_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Window AC demand at or above the DC energy cap yields no_action."""
+    # eta = 0.9, duration = 1.0h. P_dc = 1.0 kW => DC energy = 0.9 kWh.
+    # Heat pump window demand = 2.0 kWh (>= 0.9) => no sellable energy.
+    config = _base_config()
+    hass = _setup_hass(config, _base_states())
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    async def _hp(*args, **kwargs):
+        return 2.0, {}
+
+    monkeypatch.setattr(f"{EVENING}.get_heat_pump_forecast_window", _hp)
+    monkeypatch.setattr(f"{EVENING}.get_pv_forecast_window", lambda *args, **kwargs: (2.0, {}))
+    monkeypatch.setattr(f"{EVENING}.calculate_losses", lambda *args, **kwargs: (0.0, 0.0))
+    monkeypatch.setattr(f"{EVENING}.calculate_battery_reserve", lambda *args, **kwargs: 10.0)
+    monkeypatch.setattr(f"{EVENING}.calculate_surplus_energy", lambda reserve, required, pv: 7.0)
+
+    config[CONF_MAX_DISCHARGE_POWER] = 1.0
     await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
 
     assert outcomes
-    assert outcomes[-1].details["executable_export_ac_kwh"] == 3.0
-
-    caplog.clear()
-    del config[CONF_MAX_SELL_ENERGY]
-
-    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
-
-    assert outcomes[-1].details["executable_export_ac_kwh"] == 7.0
-
-    caplog.clear()
-    assert not [
-        record
-        for record in caplog.records
-        if record.levelno >= logging.WARNING
-        and "max_sell" in record.getMessage().lower()
-    ]
-
-    config[CONF_MAX_SELL_ENERGY] = 0.0
-    caplog.clear()
-
-    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
-
-    assert outcomes[-1].details["executable_export_ac_kwh"] == 7.0
-    assert any(
-        record.levelno == logging.WARNING
-        and "max_sell" in record.getMessage().lower()
-        for record in caplog.records
-    )
+    assert outcomes[-1].action_type == "no_action"
 
 
 @pytest.mark.asyncio

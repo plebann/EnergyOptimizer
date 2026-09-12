@@ -21,6 +21,7 @@ from ..const import (
     CONF_BUY_PRICE_SENSOR,
     CONF_BATTERY_VOLTAGE_SENSOR,
     CONF_DISCHARGE_CURRENT_ENTITY,
+    CONF_MAX_DISCHARGE_POWER,
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
@@ -179,12 +180,14 @@ class MorningSellStrategy(BaseSellStrategy):
         surplus_kwh: float,
         *,
         duration_hours: float = 1.0,
+        demand_kwh: float = 0.0,
     ) -> SellRegulator:
         """Select the configured regulator for the evaluated morning sell."""
         if not self._use_discharge_current:
             regulator = super()._resolve_sell_regulator(
                 surplus_kwh,
                 duration_hours=duration_hours,
+                demand_kwh=demand_kwh,
             )
             export_power_w = regulator.value
             self._regulator_diagnostics.update(
@@ -236,7 +239,26 @@ class MorningSellStrategy(BaseSellStrategy):
         if voltage is None:
             voltage = self.battery_config.voltage
 
-        calculated_current = ceil((surplus_kwh * 1000.0) / voltage)
+        efficiency = self._discharge_efficiency()
+        if efficiency <= 0.0:
+            efficiency = 1.0
+        if duration_hours <= 0.0:
+            duration_hours = 1.0
+
+        discharge_dc_kwh = (surplus_kwh + max(0.0, demand_kwh)) / efficiency
+        calculated_current = ceil(
+            (discharge_dc_kwh * 1000.0) / (duration_hours * voltage)
+        )
+
+        max_discharge_kw = self.config.get(CONF_MAX_DISCHARGE_POWER)
+        if max_discharge_kw is not None:
+            max_discharge_kw = float(max_discharge_kw or 0.0)
+            if max_discharge_kw > 0.0:
+                calculated_current = min(
+                    calculated_current,
+                    ceil((max_discharge_kw * 1000.0) / voltage),
+                )
+
         current = (
             min(float(calculated_current), max_current)
             if max_current is not None
@@ -249,6 +271,9 @@ class MorningSellStrategy(BaseSellStrategy):
                 "surplus_kwh": surplus_kwh,
                 "voltage_v": voltage,
                 "voltage_source": voltage_source,
+                "efficiency": efficiency,
+                "discharge_dc_kwh": discharge_dc_kwh,
+                "duration_hours": duration_hours,
                 "calculated_current_a": calculated_current,
                 "max_current_a": max_current,
                 "requested_current_a": current,

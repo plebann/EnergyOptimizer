@@ -33,10 +33,16 @@ def _migration_context(
     registry.async_generate_entity_id.side_effect = generate_entity_id
 
     hass = MagicMock()
-    entry = SimpleNamespace(entry_id="entry-1", version=version)
-    hass.config_entries.async_update_entry.side_effect = (
-        lambda config_entry, *, version: setattr(config_entry, "version", version)
-    )
+    entry_data: dict = {}
+    entry = SimpleNamespace(entry_id="entry-1", version=version, data=entry_data)
+
+    def update_entry(config_entry, *, data: dict | None = None, version: int | None = None):
+        if version is not None:
+            config_entry.version = version
+        if data is not None:
+            config_entry.data = data
+
+    hass.config_entries.async_update_entry.side_effect = update_entry
     return hass, entry, registry
 
 
@@ -78,7 +84,8 @@ async def test_migrate_consume_window_entities_with_legacy_default_ids(
             new_unique_id="entry-1_consume_window_tomorrow",
         ),
     ]
-    hass.config_entries.async_update_entry.assert_called_once_with(entry, version=3)
+    hass.config_entries.async_update_entry.assert_any_call(entry, version=3)
+    hass.config_entries.async_update_entry.assert_any_call(entry, version=4)
 
 
 @pytest.mark.asyncio
@@ -180,7 +187,9 @@ async def test_migration_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async_get.assert_called_once_with(hass)
     registry.async_update_entity.assert_called_once()
-    hass.config_entries.async_update_entry.assert_called_once_with(entry, version=3)
+    hass.config_entries.async_update_entry.assert_any_call(entry, version=3)
+    hass.config_entries.async_update_entry.assert_any_call(entry, version=4)
+    assert entry.version == 4
 
 
 @pytest.mark.asyncio
@@ -196,14 +205,34 @@ async def test_migration_tolerates_entry_without_old_entities(
     assert await async_migrate_entry(hass, entry)
 
     registry.async_update_entity.assert_not_called()
-    hass.config_entries.async_update_entry.assert_called_once_with(entry, version=3)
+    hass.config_entries.async_update_entry.assert_any_call(entry, version=3)
+    hass.config_entries.async_update_entry.assert_any_call(entry, version=4)
+    assert entry.version == 4
 
 
 @pytest.mark.asyncio
-async def test_new_entry_does_not_run_migration(
+async def test_max_sell_energy_key_removed_on_migration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    hass, entry, _ = _migration_context(version=3)
+    hass, entry, registry = _migration_context(version=3)
+    entry.data["max_sell_energy"] = 3.5
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.er.async_get",
+        lambda _: registry,
+    )
+
+    assert await async_migrate_entry(hass, entry)
+
+    assert entry.version == 4
+    assert "max_sell_energy" not in entry.data
+    registry.async_update_entity.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_new_entry_v4_does_not_run_migration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass, entry, _ = _migration_context(version=4)
     async_get = MagicMock()
     monkeypatch.setattr(
         "custom_components.energy_optimizer.er.async_get",
