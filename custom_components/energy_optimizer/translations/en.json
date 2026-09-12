@@ -92,6 +92,7 @@
           "discharge_current_entity": "Discharge Current Control (Optional)",
           "export_power_entity": "Export Power Control (Optional)",
           "max_charge_current_entity": "Max Charge Current (Optional)",
+          "max_sell_energy": "Max Sell Energy (kWh)",
           "grid_charge_switch": "Grid Charge Switch (Optional)"
         },
         "data_description": {
@@ -104,6 +105,7 @@
           "discharge_current_entity": "Entity to control discharge current limit",
           "export_power_entity": "Entity to control export power limit during selling",
           "max_charge_current_entity": "Entity to cap charge current (set to default 23A during balancing)",
+          "max_sell_energy": "Static maximum sell energy per sell run (kWh). Clamps computed surplus before the target SOC and export power are derived. Use 0 for no cap.",
           "grid_charge_switch": "Switch to enable/disable grid charging"
         }
       },

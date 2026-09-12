@@ -41,7 +41,7 @@ from .const import (
     CONF_LOAD_USAGE_16_20,
     CONF_LOAD_USAGE_20_24,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
-    CONF_MAX_SELL_ENERGY_ENTITY,
+    CONF_MAX_SELL_ENERGY,
     CONF_MAX_EXPORT_POWER,
     CONF_MAX_SOC,
     CONF_MIN_ARBITRAGE_PRICE,
@@ -308,8 +308,13 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_MAX_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(CONF_MAX_SELL_ENERGY_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["number", "input_number", "sensor"])
+                vol.Required(CONF_MAX_SELL_ENERGY, default=0.0): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        mode=selector.NumberSelectorMode.BOX,
+                        min=0.0,
+                        step=0.1,
+                        unit_of_measurement="kWh",
+                    )
                 ),
                 vol.Optional(CONF_GRID_CHARGE_SWITCH): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="switch")
@@ -1026,11 +1031,18 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(
-                    CONF_MAX_SELL_ENERGY_ENTITY,
-                    default=self._config_entry.data.get(CONF_MAX_SELL_ENERGY_ENTITY),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["number", "input_number", "sensor"])
+                vol.Required(
+                    CONF_MAX_SELL_ENERGY,
+                    default=float(
+                        self._config_entry.data.get(CONF_MAX_SELL_ENERGY) or 0.0
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        mode=selector.NumberSelectorMode.BOX,
+                        min=0.0,
+                        step=0.1,
+                        unit_of_measurement="kWh",
+                    )
                 ),
                 vol.Optional(
                     CONF_GRID_CHARGE_SWITCH,
