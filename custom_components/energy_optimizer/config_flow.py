@@ -233,6 +233,15 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_MAX_EXPORT_POWER, default=DEFAULT_MAX_EXPORT_POWER
                 ): vol.All(vol.Coerce(float), vol.Range(min=1, max=200000)),
+                vol.Optional(CONF_MAX_DISCHARGE_POWER, default=0.0): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        mode=selector.NumberSelectorMode.BOX,
+                        min=0.0,
+                        max=50.0,
+                        step=0.1,
+                        unit_of_measurement="kW",
+                    )
+                ),
                 vol.Required(
                     CONF_BATTERY_CAPACITY_AH, default=DEFAULT_BATTERY_CAPACITY_AH
                 ): vol.All(vol.Coerce(float), vol.Range(min=1, max=1000)),
@@ -308,12 +317,12 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_MAX_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Required(CONF_MAX_SELL_ENERGY, default=0.0): selector.NumberSelector(
+                vol.Required(CONF_MAX_DISCHARGE_POWER, default=0.0): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         mode=selector.NumberSelectorMode.BOX,
                         min=0.0,
                         step=0.1,
-                        unit_of_measurement="kWh",
+                        unit_of_measurement="kW",
                     )
                 ),
                 vol.Optional(CONF_GRID_CHARGE_SWITCH): selector.EntitySelector(
@@ -324,6 +333,39 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="control_entities", data_schema=schema, errors=errors
+        )
+                vol.Required(
+                    CONF_BATTERY_CAPACITY_AH, default=DEFAULT_BATTERY_CAPACITY_AH
+                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=1000)),
+                vol.Required(
+                    CONF_BATTERY_VOLTAGE, default=DEFAULT_BATTERY_VOLTAGE
+                ): vol.All(vol.Coerce(float), vol.Range(min=12, max=600)),
+                vol.Required(
+                    CONF_BATTERY_EFFICIENCY, default=DEFAULT_BATTERY_EFFICIENCY
+                ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
+                vol.Required(CONF_MIN_SOC, default=DEFAULT_MIN_SOC): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=100)
+                ),
+                vol.Required(CONF_MIN_SOC_PV, default=DEFAULT_MIN_SOC_PV): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=100)
+                ),
+                vol.Required(CONF_MAX_SOC, default=DEFAULT_MAX_SOC): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=100)
+                ),
+                vol.Optional(CONF_BATTERY_CAPACITY_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="number")
+                ),
+                vol.Optional(
+                    CONF_BALANCING_INTERVAL_DAYS, default=DEFAULT_BALANCING_INTERVAL_DAYS
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
+                vol.Optional(
+                    CONF_BALANCING_PV_THRESHOLD, default=DEFAULT_BALANCING_PV_THRESHOLD
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=200)),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="battery_params", data_schema=schema, errors=errors
         )
 
     async def async_step_time_programs(
@@ -911,6 +953,22 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     ),
                 ): vol.All(vol.Coerce(float), vol.Range(min=1, max=200000)),
                 vol.Optional(
+                    CONF_MAX_DISCHARGE_POWER,
+                    default=float(
+                        self._config_entry.data.get(CONF_MAX_DISCHARGE_POWER)
+                        or self._config_entry.data.get("max_sell_energy")
+                        or 0.0
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        mode=selector.NumberSelectorMode.BOX,
+                        min=0.0,
+                        max=50.0,
+                        step=0.1,
+                        unit_of_measurement="kW",
+                    )
+                ),
+                vol.Optional(
                     CONF_BATTERY_CAPACITY_AH,
                     default=self._config_entry.data.get(
                         CONF_BATTERY_CAPACITY_AH, DEFAULT_BATTERY_CAPACITY_AH
@@ -1032,7 +1090,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Required(
-                    CONF_MAX_SELL_ENERGY,
+    CONF_MAX_DISCHARGE_POWER,
                     default=float(
                         self._config_entry.data.get(CONF_MAX_SELL_ENERGY) or 0.0
                     ),

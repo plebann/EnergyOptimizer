@@ -14,8 +14,8 @@ from homeassistant.util import dt as dt_util
 
 from ..const import (
     CONF_EXPORT_POWER_ENTITY,
+    CONF_MAX_DISCHARGE_POWER,
     CONF_MAX_EXPORT_POWER,
-    CONF_MAX_SELL_ENERGY,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_PV_PRODUCTION_SENSOR,
     DEFAULT_MAX_EXPORT_POWER,
@@ -365,21 +365,23 @@ class BaseSellStrategy(ABC):
                         )
                     surplus_kwh = min(surplus_kwh, pv_value)
 
-        max_sell_raw = self.config.get(CONF_MAX_SELL_ENERGY)
-        if max_sell_raw is not None:
-            max_sell_value = float(max_sell_raw or 0.0)
-            if max_sell_value > 0:
-                if surplus_kwh > max_sell_value:
+        max_discharge_raw = self.config.get("max_discharge_power")
+        if max_discharge_raw is None:
+            max_discharge_raw = self.config.get("max_sell_energy")
+        if max_discharge_raw is not None:
+            max_discharge_value = float(max_discharge_raw or 0.0)
+            if max_discharge_value > 0:
+                if surplus_kwh > max_discharge_value:
                     _LOGGER.info(
-                        "Clamping surplus from %.2f kWh to max_sell_energy %.2f kWh",
+                        "Clamping surplus from %.2f kWh to max_discharge_power %.2f kWh",
                         surplus_kwh,
-                        max_sell_value,
+                        max_discharge_value,
                     )
-                surplus_kwh = min(surplus_kwh, max_sell_value)
+                surplus_kwh = min(surplus_kwh, max_discharge_value)
             else:
                 _LOGGER.warning(
-                    "max_sell_energy %.2f kWh is not greater than zero — no cap applied",
-                    max_sell_value,
+                    "max_discharge_power %.2f kWh is not greater than zero — no cap applied",
+                    max_discharge_value,
                 )
 
         duration_hours = request.sell_window_duration_hours
