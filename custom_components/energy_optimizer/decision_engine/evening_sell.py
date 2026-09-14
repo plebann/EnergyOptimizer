@@ -367,7 +367,7 @@ class EveningSellStrategy(BaseSellStrategy):
         if getattr(self, "_price_unavailable", False):
             # Price unknown - skip tomorrow comparison and proceed to surplus sell.
             return None
-        if self.config.get(CONF_BUY_PRICE_SENSOR):
+        if not self.config.get(CONF_BUY_PRICE_SENSOR):
             return None
         self._tomorrow_morning_price = get_internal_window_price(
             self.hass,

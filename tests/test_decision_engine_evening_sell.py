@@ -475,6 +475,7 @@ async def test_evening_sell_skips_when_tomorrow_morning_price_is_higher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _base_config()
+    config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
     config[CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR] = "sensor.tomorrow_morning_price"
     states = _base_states()
     states["sensor.evening_price"] = "700"
@@ -814,6 +815,7 @@ async def test_evening_sell_second_window_early_exit_restores_active_sell(
     config[CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_second_hour"
     config[CONF_EVENING_SECOND_MAX_PRICE_SENSOR] = "sensor.evening_second_price"
     config[CONF_MAX_EXPORT_POWER] = 9000
+    config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
     states = _base_states()
     states["sensor.evening_hour"] = "18"
     states["sensor.evening_second_hour"] = "19"
