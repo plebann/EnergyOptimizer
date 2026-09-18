@@ -11,7 +11,6 @@ from homeassistant.exceptions import HomeAssistantError
 from ..const import (
     CONF_CHARGE_CURRENT_ENTITY,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
-    DEFAULT_MAX_CHARGE_CURRENT,
 )
 from ..controllers.inverter import (
     set_charge_current,
@@ -279,7 +278,7 @@ class BaseChargeStrategy(ABC):
                 await set_max_charge_current(
                     self.hass,
                     str(max_charge_current_entity),
-                    DEFAULT_MAX_CHARGE_CURRENT,
+                    int(self.bc.max_charge_current),
                     entry=self.entry,
                     logger=_LOGGER,
                     context=self.integration_context,
@@ -294,7 +293,7 @@ class BaseChargeStrategy(ABC):
                 0,
                 {
                     "entity_id": str(max_charge_current_entity),
-                    "value": DEFAULT_MAX_CHARGE_CURRENT,
+                    "value": int(self.bc.max_charge_current),
                 },
             )
 

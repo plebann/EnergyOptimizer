@@ -22,6 +22,7 @@ from ..calculations.utils import build_hourly_usage_array
 from ..const import (
     CONF_BALANCING_INTERVAL_DAYS,
     CONF_BALANCING_PV_THRESHOLD,
+    CONF_MAX_CHARGE_CURRENT,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_PROG1_SOC_ENTITY,
     CONF_PROG2_SOC_ENTITY,
@@ -31,7 +32,6 @@ from ..const import (
     CONF_PV_PRODUCTION_SENSOR,
     DEFAULT_BALANCING_INTERVAL_DAYS,
     DEFAULT_BALANCING_PV_THRESHOLD,
-    DEFAULT_MAX_CHARGE_CURRENT,
 )
 from ..controllers.inverter import set_max_charge_current, set_program_soc
 from ..decision_engine.common import (
@@ -174,6 +174,7 @@ async def _handle_balancing(
     prog6_soc: str | None,
     max_soc: float,
     max_charge_current_entity: str | None,
+    max_charge_current: int,
     pv_compensation_details: dict[str, float | None],
 ) -> bool:
     """Handle balancing scenario and return whether it was activated."""
@@ -199,7 +200,6 @@ async def _handle_balancing(
         balancing_pv_threshold,
     )
 
-    max_charge_current = DEFAULT_MAX_CHARGE_CURRENT
     await set_program_soc(
         hass,
         prog1_soc,
@@ -907,6 +907,7 @@ async def _async_run_evening_behavior(
         prog6_soc=prog6_soc,
         max_soc=bc.max_soc,
         max_charge_current_entity=max_charge_current_entity,
+        max_charge_current=int(bc.max_charge_current),
         pv_compensation_details=pv_compensation_details,
     ):
         return

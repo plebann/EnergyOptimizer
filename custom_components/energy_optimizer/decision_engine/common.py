@@ -27,6 +27,7 @@ from ..const import (
     CONF_BATTERY_EFFICIENCY,
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
+    CONF_MAX_CHARGE_CURRENT,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
     CONF_MIN_SOC_PV,
@@ -38,6 +39,7 @@ from ..const import (
     DEFAULT_BATTERY_CAPACITY_AH,
     DEFAULT_BATTERY_EFFICIENCY,
     DEFAULT_BATTERY_VOLTAGE,
+    DEFAULT_MAX_CHARGE_CURRENT,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_SOC,
     DEFAULT_MIN_SOC_PV,
@@ -67,6 +69,7 @@ class BatteryConfig:
     min_soc_pv: float
     max_soc: float
     efficiency: float
+    max_charge_current: int = DEFAULT_MAX_CHARGE_CURRENT
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -129,6 +132,9 @@ def get_battery_config(config: dict[str, Any]) -> BatteryConfig:
         min_soc_pv=config.get(CONF_MIN_SOC_PV, DEFAULT_MIN_SOC_PV),
         max_soc=config.get(CONF_MAX_SOC, DEFAULT_MAX_SOC),
         efficiency=config.get(CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY),
+        max_charge_current=config.get(
+            CONF_MAX_CHARGE_CURRENT, DEFAULT_MAX_CHARGE_CURRENT
+        ),
     )
 
 
