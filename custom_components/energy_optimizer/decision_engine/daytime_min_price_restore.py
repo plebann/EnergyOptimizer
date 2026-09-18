@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING
 from homeassistant.core import Context
 
 from ..const import (
+    CONF_MAX_CHARGE_CURRENT,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_WORK_MODE_ENTITY,
-    DEFAULT_MAX_CHARGE_CURRENT,
     WORK_MODE_ZERO_EXPORT_TO_LOAD,
 )
 from ..controllers.inverter import set_max_charge_current, set_work_mode
@@ -74,16 +74,12 @@ async def _async_run_daytime_min_price_restore(
         )
 
     max_charge_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
+    max_charge_current = config.get(CONF_MAX_CHARGE_CURRENT, 23)
     max_charge_current_restored = bool(max_charge_entity)
     if not max_charge_entity:
         _LOGGER.warning(
             "Daytime min price restore: max charge current entity not configured — skip charge current restore"
-        )
-    else:
-        await set_max_charge_current(
-            hass,
-            max_charge_entity,
-            DEFAULT_MAX_CHARGE_CURRENT,
+        )_MAX_CHARGE_CURRENT,
             entry=entry,
             logger=_LOGGER,
             context=integration_context,

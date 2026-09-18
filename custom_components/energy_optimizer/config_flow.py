@@ -10,6 +10,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_MAX_CHARGE_CURRENT,
     CONF_BALANCING_INTERVAL_DAYS,
     CONF_BALANCING_PV_THRESHOLD,
     CONF_BATTERY_CAPACITY_AH,
@@ -164,6 +165,10 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_MIN_ARBITRAGE_PRICE,
                     default=DEFAULT_MIN_ARBITRAGE_PRICE,
                 ): _price_margin_selector(),
+                vol.Required(
+                    CONF_MAX_CHARGE_CURRENT,
+                    description={"suggested_value": 0},
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=50)),
             }
         )
 
@@ -1048,6 +1053,10 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
+                vol.Required(
+                    CONF_MAX_CHARGE_CURRENT,
+                    description={"suggested_value": 0},
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=50)),
                 vol.Optional(
                     CONF_GRID_CHARGE_SWITCH,
                     default=self._config_entry.data.get(CONF_GRID_CHARGE_SWITCH),
