@@ -1,4 +1,4 @@
-﻿"""Solar charge blocking decision logic."""
+"""Solar charge blocking decision logic."""
 from __future__ import annotations
 
 import logging
@@ -12,7 +12,6 @@ from ..calculations.utils import build_hourly_usage_array
 from ..const import (
     CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_PV_FORECAST_TODAY,
-    DEFAULT_MAX_CHARGE_CURRENT,
     SUN_ABOVE_HORIZON,
     SUN_ENTITY,
 )
@@ -24,7 +23,7 @@ from ..helpers import (
 )
 from ..utils.decision_dump import active_decision_audit, emit_decision_dump
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
-from .common import get_entry_data, resolve_entry
+from .common import get_battery_config, get_entry_data, resolve_entry
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -41,6 +40,7 @@ async def _async_run_solar_charge_block(
     if entry is None:
         return
     config = entry.data
+    bc = get_battery_config(config)
 
     max_charge_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
     if not max_charge_entity:
@@ -89,7 +89,7 @@ async def _async_run_solar_charge_block(
         await set_max_charge_current(
             hass,
             max_charge_entity,
-            DEFAULT_MAX_CHARGE_CURRENT,
+            int(bc.max_charge_current),
             entry=entry,
             logger=_LOGGER,
             context=Context(),
@@ -171,7 +171,7 @@ async def _async_run_solar_charge_block(
         await set_max_charge_current(
             hass,
             max_charge_entity,
-            DEFAULT_MAX_CHARGE_CURRENT,
+            int(bc.max_charge_current),
             entry=entry,
             logger=_LOGGER,
             context=Context(),
@@ -214,7 +214,7 @@ async def _async_run_solar_charge_block(
         await set_max_charge_current(
             hass,
             max_charge_entity,
-            DEFAULT_MAX_CHARGE_CURRENT,
+            int(bc.max_charge_current),
             entry=entry,
             logger=_LOGGER,
             context=Context(),

@@ -12,7 +12,6 @@ from ..calculations.energy import hourly_demand
 from ..const import (
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_MIN_ARBITRAGE_PRICE,
-    DEFAULT_MAX_CHARGE_CURRENT,
 )
 from ..decision_engine.common import (
     BatteryConfig,
@@ -398,7 +397,7 @@ def _simulate_afternoon(
                 * 1000.0
                 / bc.voltage
             ),
-            DEFAULT_MAX_CHARGE_CURRENT,
+            int(bc.max_charge_current),
         )
         if bc.voltage > 0
         and protection_rate_kwh + arbitrage_rate_kwh > _EPSILON_KWH
@@ -638,7 +637,7 @@ def _build_afternoon_plan(
     charge_hour_count = len(charge_hours)
     efficiency = bc.efficiency / 100.0
     max_source_rate_kwh = (
-        DEFAULT_MAX_CHARGE_CURRENT * bc.voltage / 1000.0 / efficiency
+        bc.max_charge_current * bc.voltage / 1000.0 / efficiency
         if efficiency > 0
         else 0.0
     )
