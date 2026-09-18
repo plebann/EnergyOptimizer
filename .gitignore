@@ -208,6 +208,8 @@ __marimo__/
 
 .copilot-tracking/
 .venv-wsl/
+.venv-win/
+.cache-uv/
 
 # Workspace / OS
 .DS_Store
