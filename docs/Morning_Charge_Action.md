@@ -133,11 +133,34 @@ Ten algorytm zapewnia:
   programu 2 i nie planuj zakończenia.
 - Ustaw prąd ładowania z sieci na obliczoną wartość (2h okno ładowania)
 - Falownik automatycznie rozpocznie ładowanie do osiągnięcia docelowego SOC
-- Tymczasowy cel różny od `min_soc` jest trwale resetowany do `min_soc` na końcu
+- Zgłoszone zakończenie akcji zeruje prąd ładowania (`charge_current_entity`)
+  na **0 A** i trwale resetuje tymczasowy cel Programu 2 do `min_soc` na końcu
   `night_buy_window`; reset przetrwa restart Home Assistant i wykona się po
   starcie, jeśli termin już minął.
 - W ścieżce bez deficytu rzeczywista korekta `prog2_soc` ma wynik
   `program_soc_updated`; `no_action` oznacza, że nie zmieniono żadnej encji.
+
+## Zakończenie akcji (reset)
+
+Po osiągnięciu zakończenia rozstrzygniętego okna `night_buy_window`
+zakończona akcja ładowania trwale przywraca stan bazowy:
+
+1. **Prąd ładowania na 0 A** — jeśli skonfigurowano `charge_current_entity`,
+   encja `number` jest ustawiona na 0 bez wcześniejszego odczytu bieżącej
+   wartości (zapis ślepy, idempotentny).
+2. **SOC programu 2 do `min_soc`** — po pomyślnym zerowaniu prądu.
+
+Kolejność jest istotna: prąd jest zerowany **przed** przywróceniem docelowego
+SOC, a oba zapisy leżą w ramach tej samej ścieżki ponownych prób — gdy któryś
+zapis zakończy się awarią falownika, zapisany plan zakończenia jest zachowany
+i po ok. 5 minutach podjęta jest kolejna próba (oba zapisy są powtarzane, zero
+jest idempotentne). Gdy SOC programu 2 jest już równe celowi (różnica ≤ 0,01 pp),
+wynik to `no_action` i żadna encja nie jest modyfikowana — prąd również nie
+jest wtedy zerowany. Zapis prądu na 0 A jest pomijany, gdy
+`charge_current_entity` nie jest skonfigurowany (stan prądu pozostaje bez zmian).
+Akceptowane ograniczenie: jeśli akcja nie zarejestrowała planu zakończenia
+(np. wynik `no_action`, brak deficytu), ostatnio ustawiony prąd ładowania
+pozostaje niewyzerany do czasu następnego udanego zapisu akcji ładowania.
 
 ## Obsługa błędów
 
