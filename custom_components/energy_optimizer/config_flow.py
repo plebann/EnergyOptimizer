@@ -165,9 +165,9 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_MIN_ARBITRAGE_PRICE,
                     default=DEFAULT_MIN_ARBITRAGE_PRICE,
                 ): _price_margin_selector(),
-                vol.Optional(
+                vol.Required(
                     CONF_MAX_CHARGE_CURRENT,
-                    description={"suggested_value": DEFAULT_MAX_CHARGE_CURRENT},
+                    description={"suggested_value": 0},
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=50)),
             }
         )
@@ -1053,9 +1053,9 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(
+                vol.Required(
                     CONF_MAX_CHARGE_CURRENT,
-                    description={"suggested_value": DEFAULT_MAX_CHARGE_CURRENT},
+                    description={"suggested_value": 0},
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=50)),
                 vol.Optional(
                     CONF_GRID_CHARGE_SWITCH,
