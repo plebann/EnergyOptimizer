@@ -40,6 +40,7 @@ CONF_BEV_CHARGING_BINARY_SENSOR = "bev_charging_binary_sensor"
 CONF_BEV_CHARGING_POWER_SENSOR = "bev_charging_power_sensor"
 CONF_CHARGE_CURRENT_ENTITY = "charge_current_entity"
 CONF_DISCHARGE_CURRENT_ENTITY = "discharge_current_entity"
+CONF_MAX_CHARGE_CURRENT = "max_charge_current"
 CONF_EXPORT_POWER_ENTITY = "export_power_entity"
 CONF_GRID_CHARGE_SWITCH = "grid_charge_switch"
 
