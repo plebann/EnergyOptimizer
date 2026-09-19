@@ -13,6 +13,7 @@ from homeassistant.util import dt as dt_util
 
 from ..const import (
     CONF_BATTERY_SOC_SENSOR,
+    CONF_CHARGE_CURRENT_ENTITY,
     CONF_MIN_SOC,
     CONF_MIN_SOC_PV,
     CONF_PROG2_SOC_ENTITY,
@@ -21,7 +22,7 @@ from ..const import (
     STORAGE_KEY_CHARGE_COMPLETION,
     STORAGE_VERSION_CHARGE_COMPLETION,
 )
-from ..controllers.inverter import set_program_soc
+from ..controllers.inverter import set_charge_current, set_program_soc
 from ..helpers import get_float_state_info, get_internal_sensor_entity_id
 from ..utils.decision_dump import active_decision_audit
 from ..utils.logging import DecisionOutcome, log_decision_unified
@@ -242,34 +243,61 @@ async def async_handle_charge_completion(
                 details=details,
             )
         else:
-            try:
-                await set_program_soc(
-                    hass,
-                    str(prog_entity),
-                    float(target_soc),
-                    entry=entry,
-                    logger=_LOGGER,
-                    context=context,
-                )
-            except HomeAssistantError as err:
-                retry_after_write_failure = True
-                outcome = DecisionOutcome(
-                    scenario=scenario,
-                    action_type="charge_completion_failed",
-                    summary=f"{scenario} failed",
-                    reason=str(err),
-                    details=details,
-                )
-            else:
-                outcome = DecisionOutcome(
-                    scenario=scenario,
-                    action_type="charge_completed",
-                    summary=f"Set Program SOC to {target_soc:.0f}%",
-                    details=details,
-                    entities_changed=[
+            charge_current_entity = config.get(CONF_CHARGE_CURRENT_ENTITY)
+            entities_changed: list[dict[str, object]] = []
+            if charge_current_entity:
+                try:
+                    await set_charge_current(
+                        hass,
+                        str(charge_current_entity),
+                        0.0,
+                        entry=entry,
+                        logger=_LOGGER,
+                        context=context,
+                    )
+                except HomeAssistantError as err:
+                    retry_after_write_failure = True
+                    outcome = DecisionOutcome(
+                        scenario=scenario,
+                        action_type="charge_completion_failed",
+                        summary=f"{scenario} failed",
+                        reason=str(err),
+                        details=details,
+                    )
+                else:
+                    entities_changed.append(
+                        {"entity_id": str(charge_current_entity), "value": 0.0}
+                    )
+            if not retry_after_write_failure:
+                try:
+                    await set_program_soc(
+                        hass,
+                        str(prog_entity),
+                        float(target_soc),
+                        entry=entry,
+                        logger=_LOGGER,
+                        context=context,
+                    )
+                except HomeAssistantError as err:
+                    retry_after_write_failure = True
+                    outcome = DecisionOutcome(
+                        scenario=scenario,
+                        action_type="charge_completion_failed",
+                        summary=f"{scenario} failed",
+                        reason=str(err),
+                        details=details,
+                    )
+                else:
+                    entities_changed.append(
                         {"entity_id": str(prog_entity), "value": float(target_soc)}
-                    ],
-                )
+                    )
+                    outcome = DecisionOutcome(
+                        scenario=scenario,
+                        action_type="charge_completed",
+                        summary=f"Set Program SOC to {target_soc:.0f}%",
+                        details=details,
+                        entities_changed=entities_changed,
+                    )
 
         await log_decision_unified(
             hass,

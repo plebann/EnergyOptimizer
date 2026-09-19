@@ -134,6 +134,32 @@ flowchart TD
 - Falownik automatycznie rozpocznie ładowanie do osiągnięcia docelowego SOC
 - Stan wsparcia z sieci po południu jest ustawiany na podstawie bazowego deficytu (bez arbitrażu)
 - Jeśli brak deficytu (po arbitrażu), możliwa jest korekta `prog4_soc` do wyliczonego `target_soc` (tylko gdy różni się od wartości bieżącej)
+- Zgłoszone zakończenie akcji zeruje prąd ładowania (`charge_current_entity`)
+  na **0 A** i trwale przywraca cel Programu 4 do `min(SOC baterii, min_soc_pv)`
+  na końcu `day_buy_window`; reset przetrwa restart Home Assistant.
+
+## Zakończenie akcji (reset)
+
+Po osiągnięciu zakończenia rozstrzygniętego okna `day_buy_window`
+zakończona akcja ładowania trwale przywraca stan bazowy:
+
+1. **Prąd ładowania na 0 A** — jeśli skonfigurowano `charge_current_entity`,
+   encja `number` jest ustawiana na 0 bez wcześniejszego odczytu bieżącej
+   wartości (zapis ślepy, idempotentny).
+2. **SOC programu 4 do `min(SOC baterii, min_soc_pv)`** — po pomyślnym
+   zerowaniu prądu.
+
+Kolejność jest istotna: prąd jest zerowany **przed** przywróceniem docelowego
+SOC, a oba zapisy leżą w ramach tej samej ścieżki ponownych prób — gdy któryś
+zapis zakończy się awarią falownika, zapisany plan zakończenia jest zachowany i
+po ok. 5 minutach podjęta jest kolejna próba (oba zapisy są powtarzane, zero
+jest idempotentne). Gdy SOC programu 4 jest już równy celowi (różnica
+≤ 0,01 pp), wynik to `no_action` i żadna encja nie jest modyfikowana — prąd
+również nie jest wtedy zerowany. Zapis prądu na 0 A jest pomijany, gdy
+`charge_current_entity` nie jest skonfigurowany. Akceptowane ograniczenie:
+jeśli akcja nie zarejestrowała planu zakończenia, ostatnio ustawiony prąd
+ładowania pozostaje niewyzerany do czasu następnego udanego zapisu akcji
+ładowania.
 
 ## Obsługa błędów
 

@@ -12,6 +12,7 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.energy_optimizer.const import (
     CONF_BATTERY_SOC_SENSOR,
+    CONF_CHARGE_CURRENT_ENTITY,
     CONF_MIN_SOC,
     CONF_MIN_SOC_PV,
     CONF_PROG2_SOC_ENTITY,
@@ -77,6 +78,19 @@ def _hass(states: dict[str, str]) -> MagicMock:
 @asynccontextmanager
 async def _audit(*_args, **_kwargs):
     yield MagicMock()
+
+
+def _completion_store(charge_type: str) -> _Store:
+    """Return a small persisted completion plan."""
+    now = dt_util.now()
+    return _Store(
+        {
+            "charge_type": charge_type,
+            "complete_at": now.isoformat(),
+            "window_start": (now - timedelta(hours=2)).isoformat(),
+            "window_end": now.isoformat(),
+        }
+    )
 
 
 @pytest.mark.asyncio
@@ -330,6 +344,225 @@ async def test_afternoon_current_failure_rolls_back_program_soc(
             context=strategy.integration_context,
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_morning_completion_zeroes_charge_current_before_program_soc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Charge completion restores charge current to 0 A before Program 2 SOC."""
+    entry = _entry(
+        {
+            CONF_PROG2_SOC_ENTITY: "number.program2_soc",
+            CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+            CONF_MIN_SOC: 15,
+        }
+    )
+    hass = _hass({"number.program2_soc": "60"})
+    store = _completion_store("morning")
+    order: list[str] = []
+    set_current = AsyncMock(side_effect=lambda *args, **kwargs: order.append("current"))
+    set_soc = AsyncMock(side_effect=lambda *args, **kwargs: order.append("soc"))
+    log_outcome = AsyncMock()
+    monkeypatch.setattr(charge_completion, "_store", lambda *_args: store)
+    monkeypatch.setattr(charge_completion, "set_program_soc", set_soc)
+    monkeypatch.setattr(charge_completion, "set_charge_current", set_current)
+    monkeypatch.setattr(charge_completion, "log_decision_unified", log_outcome)
+    monkeypatch.setattr(charge_completion, "active_decision_audit", _audit)
+
+    await charge_completion.async_handle_charge_completion(hass, entry, "morning")
+
+    assert order == ["current", "soc"]
+    set_current.assert_awaited_once_with(
+        hass,
+        "number.charge_current",
+        0,
+        entry=entry,
+        logger=ANY,
+        context=ANY,
+    )
+    set_soc.assert_awaited_once_with(
+        hass,
+        "number.program2_soc",
+        15.0,
+        entry=entry,
+        logger=ANY,
+        context=ANY,
+    )
+    outcome: object = log_outcome.await_args.args[2]
+    assert outcome.action_type == "charge_completed"  # type: ignore[attr-defined]
+    assert outcome.entities_changed == [  # type: ignore[attr-defined]
+        {"entity_id": "number.charge_current", "value": 0},
+        {"entity_id": "number.program2_soc", "value": 15.0},
+    ]
+    assert store.removed is True
+
+
+@pytest.mark.asyncio
+async def test_afternoon_completion_zeroes_charge_current_before_program_soc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Charge completion restores charge current to 0 A before Program 4 SOC."""
+    entry = _entry(
+        {
+            CONF_PROG4_SOC_ENTITY: "number.program4_soc",
+            CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+            CONF_MIN_SOC_PV: 10,
+            CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
+        }
+    )
+    hass = _hass({"number.program4_soc": "60", "sensor.battery_soc": "55"})
+    store = _completion_store("afternoon")
+    order: list[str] = []
+    set_current = AsyncMock(side_effect=lambda *args, **kwargs: order.append("current"))
+    set_soc = AsyncMock(side_effect=lambda *args, **kwargs: order.append("soc"))
+    log_outcome = AsyncMock()
+    monkeypatch.setattr(charge_completion, "_store", lambda *_args: store)
+    monkeypatch.setattr(charge_completion, "set_program_soc", set_soc)
+    monkeypatch.setattr(charge_completion, "set_charge_current", set_current)
+    monkeypatch.setattr(charge_completion, "log_decision_unified", log_outcome)
+    monkeypatch.setattr(charge_completion, "active_decision_audit", _audit)
+
+    await charge_completion.async_handle_charge_completion(hass, entry, "afternoon")
+
+    assert order == ["current", "soc"]
+    set_current.assert_awaited_once_with(
+        hass,
+        "number.charge_current",
+        0,
+        entry=entry,
+        logger=ANY,
+        context=ANY,
+    )
+    set_soc.assert_awaited_once_with(
+        hass,
+        "number.program4_soc",
+        10.0,
+        entry=entry,
+        logger=ANY,
+        context=ANY,
+    )
+    outcome: object = log_outcome.await_args.args[2]
+    assert outcome.action_type == "charge_completed"  # type: ignore[attr-defined]
+    assert outcome.entities_changed == [  # type: ignore[attr-defined]
+        {"entity_id": "number.charge_current", "value": 0},
+        {"entity_id": "number.program4_soc", "value": 10.0},
+    ]
+    assert store.removed is True
+
+
+@pytest.mark.asyncio
+async def test_morning_completion_no_action_writes_neither_soc_nor_current(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A no-action completion restores neither SOC nor charge current."""
+    entry = _entry(
+        {
+            CONF_PROG2_SOC_ENTITY: "number.program2_soc",
+            CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+            CONF_MIN_SOC: 15,
+        }
+    )
+    hass = _hass({"number.program2_soc": "15"})
+    store = _completion_store("morning")
+    set_current = AsyncMock()
+    set_soc = AsyncMock()
+    log_outcome = AsyncMock()
+    monkeypatch.setattr(charge_completion, "_store", lambda *_args: store)
+    monkeypatch.setattr(charge_completion, "set_program_soc", set_soc)
+    monkeypatch.setattr(charge_completion, "set_charge_current", set_current)
+    monkeypatch.setattr(charge_completion, "log_decision_unified", log_outcome)
+    monkeypatch.setattr(charge_completion, "active_decision_audit", _audit)
+
+    await charge_completion.async_handle_charge_completion(hass, entry, "morning")
+
+    set_current.assert_not_awaited()
+    set_soc.assert_not_awaited()
+    outcome: object = log_outcome.await_args.args[2]
+    assert outcome.action_type == "no_action"  # type: ignore[attr-defined]
+    assert store.removed is True
+
+
+@pytest.mark.asyncio
+async def test_morning_completion_without_charge_current_entity_skips_current(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Charge completion never calls the current writer when no entity is set."""
+    entry = _entry({CONF_PROG2_SOC_ENTITY: "number.program2_soc", CONF_MIN_SOC: 15})
+    hass = _hass({"number.program2_soc": "60"})
+    store = _completion_store("morning")
+    set_current = AsyncMock()
+    set_soc = AsyncMock()
+    log_outcome = AsyncMock()
+    monkeypatch.setattr(charge_completion, "_store", lambda *_args: store)
+    monkeypatch.setattr(charge_completion, "set_program_soc", set_soc)
+    monkeypatch.setattr(charge_completion, "set_charge_current", set_current)
+    monkeypatch.setattr(charge_completion, "log_decision_unified", log_outcome)
+    monkeypatch.setattr(charge_completion, "active_decision_audit", _audit)
+
+    await charge_completion.async_handle_charge_completion(hass, entry, "morning")
+
+    set_current.assert_not_awaited()
+    set_soc.assert_awaited_once_with(
+        hass,
+        "number.program2_soc",
+        15.0,
+        entry=entry,
+        logger=ANY,
+        context=ANY,
+    )
+    outcome: object = log_outcome.await_args.args[2]
+    assert outcome.action_type == "charge_completed"  # type: ignore[attr-defined]
+    assert outcome.entities_changed == [  # type: ignore[attr-defined]
+        {"entity_id": "number.program2_soc", "value": 15.0}
+    ]
+    assert store.removed is True
+
+
+@pytest.mark.asyncio
+async def test_morning_completion_current_failure_keeps_and_reschedules_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A charge-current write failure keeps the plan and reschedules completion."""
+    entry = _entry(
+        {
+            CONF_PROG2_SOC_ENTITY: "number.program2_soc",
+            CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+            CONF_MIN_SOC: 15,
+        }
+    )
+    hass = _hass({"number.program2_soc": "60"})
+    now = dt_util.now()
+    store = _completion_store("morning")
+    set_soc = AsyncMock()
+    log_outcome = AsyncMock()
+    reschedule = AsyncMock()
+    monkeypatch.setattr(charge_completion, "_store", lambda *_args: store)
+    monkeypatch.setattr(charge_completion, "set_program_soc", set_soc)
+    monkeypatch.setattr(
+        charge_completion,
+        "set_charge_current",
+        AsyncMock(side_effect=HomeAssistantError("current write failed")),
+    )
+    monkeypatch.setattr(charge_completion, "log_decision_unified", log_outcome)
+    monkeypatch.setattr(charge_completion, "active_decision_audit", _audit)
+    monkeypatch.setattr(charge_completion.dt_util, "now", lambda: now)
+    monkeypatch.setattr(
+        charge_completion,
+        "async_schedule_charge_completion",
+        reschedule,
+    )
+
+    await charge_completion.async_handle_charge_completion(hass, entry, "morning")
+
+    set_soc.assert_not_awaited()
+    assert store.removed is False
+    reschedule.assert_awaited_once()
+    kwargs = reschedule.await_args.kwargs
+    assert kwargs["charge_type"] == "morning"
+    assert kwargs["complete_at"] == now + timedelta(minutes=5)
+    outcome: object = log_outcome.await_args.args[2]
+    assert outcome.action_type == "charge_completion_failed"  # type: ignore[attr-defined]
 
 
 def test_resolve_charge_window_uses_sensor_start_and_dynamic_duration(
