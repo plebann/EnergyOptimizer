@@ -164,11 +164,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_MIN_ARBITRAGE_PRICE,
                     default=DEFAULT_MIN_ARBITRAGE_PRICE,
-                ): _price_margin_selector(),
-                vol.Required(
-                    CONF_MAX_CHARGE_CURRENT,
-                    description={"suggested_value": 0},
-                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=50)),
+                ): _price_margin_selector()
             }
         )
 
@@ -237,7 +233,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(
                     CONF_MAX_EXPORT_POWER, default=DEFAULT_MAX_EXPORT_POWER
-                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=200000)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=20000)),
                 vol.Required(
                     CONF_MAX_DISCHARGE_POWER, default=0.0
                 ): selector.NumberSelector(
@@ -250,6 +246,10 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
                 ),
                 vol.Required(
+                    CONF_MAX_CHARGE_CURRENT,
+                    default=0,
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
+                vol.Required(
                     CONF_BATTERY_CAPACITY_AH, default=DEFAULT_BATTERY_CAPACITY_AH
                 ): vol.All(vol.Coerce(float), vol.Range(min=1, max=1000)),
                 vol.Required(
@@ -258,21 +258,21 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_BATTERY_EFFICIENCY, default=DEFAULT_BATTERY_EFFICIENCY
                 ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
-                vol.Required(CONF_MIN_SOC, default=DEFAULT_MIN_SOC): vol.All(
-                    vol.Coerce(int), vol.Range(min=0, max=100)
+                vol.Required(CONF_MIN_SOC, default=DEFAULT_MIN_SOC
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)
                 ),
                 vol.Required(CONF_MIN_SOC_PV, default=DEFAULT_MIN_SOC_PV): vol.All(
-                    vol.Coerce(int), vol.Range(min=0, max=100)
+                    vol.Coerce(float), vol.Range(min=0, max=100)
                 ),
                 vol.Required(CONF_MAX_SOC, default=DEFAULT_MAX_SOC): vol.All(
-                    vol.Coerce(int), vol.Range(min=0, max=100)
+                    vol.Coerce(float), vol.Range(min=0, max=100)
                 ),
                 vol.Optional(CONF_BATTERY_CAPACITY_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(
                     CONF_BALANCING_INTERVAL_DAYS, default=DEFAULT_BALANCING_INTERVAL_DAYS
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=30)),
                 vol.Optional(
                     CONF_BALANCING_PV_THRESHOLD, default=DEFAULT_BALANCING_PV_THRESHOLD
                 ): vol.All(vol.Coerce(float), vol.Range(min=0, max=200)),
@@ -917,7 +917,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                             "inverter_max_power", DEFAULT_MAX_EXPORT_POWER
                         ),
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=200000)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=20000)),
                 vol.Required(
                     CONF_MAX_DISCHARGE_POWER,
                     default=float(
@@ -932,6 +932,10 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                         unit_of_measurement="kW",
                     )
                 ),
+                vol.Required(
+                    CONF_MAX_CHARGE_CURRENT,
+                    default=self._config_entry.data.get(CONF_MAX_CHARGE_CURRENT, 0),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
                 vol.Optional(
                     CONF_BATTERY_CAPACITY_AH,
                     default=self._config_entry.data.get(
@@ -953,17 +957,17 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_MIN_SOC,
                     default=self._config_entry.data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC),
-                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
                 vol.Optional(
                     CONF_MIN_SOC_PV,
                     default=self._config_entry.data.get(
                         CONF_MIN_SOC_PV, DEFAULT_MIN_SOC_PV
                     ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
                 vol.Optional(
                     CONF_MAX_SOC,
                     default=self._config_entry.data.get(CONF_MAX_SOC, DEFAULT_MAX_SOC),
-                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
                 vol.Optional(
                     CONF_BATTERY_CAPACITY_ENTITY,
                     default=self._config_entry.data.get(CONF_BATTERY_CAPACITY_ENTITY),
@@ -1053,10 +1057,6 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Required(
-                    CONF_MAX_CHARGE_CURRENT,
-                    description={"suggested_value": 0},
-                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=50)),
                 vol.Optional(
                     CONF_GRID_CHARGE_SWITCH,
                     default=self._config_entry.data.get(CONF_GRID_CHARGE_SWITCH),
