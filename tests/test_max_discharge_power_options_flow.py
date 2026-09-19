@@ -37,7 +37,7 @@ _SAMPLE_ENTITY_SUBMISSION: dict[str, str] = {
     "inverter_offgrid_switch": "switch.offgrid",
     "bev_charging_binary_sensor": "binary_sensor.bev_charging",
     "bev_charging_power_sensor": "sensor.bev_power",
-    "charge_current_entity": "number.charge_current",
+    "grid_charge_current_entity": "number.charge_current",
     "discharge_current_entity": "number.discharge_current",
     "export_power_entity": "number.export_power",
     "max_charge_current_entity": "number.max_charge_current",

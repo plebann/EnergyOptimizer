@@ -9,7 +9,7 @@ from homeassistant.core import Context
 from homeassistant.exceptions import HomeAssistantError
 
 from ..const import (
-    CONF_CHARGE_CURRENT_ENTITY,
+    CONF_GRID_CHARGE_CURRENT_ENTITY,
     CONF_MAX_CHARGE_CURRENT_ENTITY,
 )
 from ..controllers.inverter import (
@@ -158,7 +158,7 @@ class BaseChargeStrategy(ABC):
                 {"entity_id": self.prog_soc_entity, "value": action.target_soc}
             )
 
-        charge_current_entity = self.config.get(CONF_CHARGE_CURRENT_ENTITY)
+        charge_current_entity = self.config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
         if charge_current_entity:
             try:
                 await set_charge_current(
@@ -262,7 +262,7 @@ class BaseChargeStrategy(ABC):
             balance=balance,
         )
 
-        charge_current_entity = self.config.get(CONF_CHARGE_CURRENT_ENTITY)
+        charge_current_entity = self.config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
         max_charge_current_entity = self.config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
         max_charge_current_changed = False
         if charge_current_entity and max_charge_current_entity:

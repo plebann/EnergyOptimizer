@@ -189,7 +189,8 @@ async def test_migration_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     registry.async_update_entity.assert_called_once()
     hass.config_entries.async_update_entry.assert_any_call(entry, version=3)
     hass.config_entries.async_update_entry.assert_any_call(entry, version=4)
-    assert entry.version == 4
+    hass.config_entries.async_update_entry.assert_any_call(entry, version=5)
+    assert entry.version == 5
 
 
 @pytest.mark.asyncio
@@ -207,7 +208,8 @@ async def test_migration_tolerates_entry_without_old_entities(
     registry.async_update_entity.assert_not_called()
     hass.config_entries.async_update_entry.assert_any_call(entry, version=3)
     hass.config_entries.async_update_entry.assert_any_call(entry, version=4)
-    assert entry.version == 4
+    hass.config_entries.async_update_entry.assert_any_call(entry, version=5)
+    assert entry.version == 5
 
 
 @pytest.mark.asyncio
@@ -223,16 +225,16 @@ async def test_max_sell_energy_key_removed_on_migration(
 
     assert await async_migrate_entry(hass, entry)
 
-    assert entry.version == 4
+    assert entry.version == 5
     assert "max_sell_energy" not in entry.data
     registry.async_update_entity.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_new_entry_v4_does_not_run_migration(
+async def test_new_entry_v5_does_not_run_migration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    hass, entry, _ = _migration_context(version=4)
+    hass, entry, _ = _migration_context(version=5)
     async_get = MagicMock()
     monkeypatch.setattr(
         "custom_components.energy_optimizer.er.async_get",
@@ -243,3 +245,41 @@ async def test_new_entry_v4_does_not_run_migration(
 
     async_get.assert_not_called()
     hass.config_entries.async_update_entry.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_v4_to_v5_renames_charge_current_entity_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass, entry, registry = _migration_context(version=4)
+    entry.data["charge_current_entity"] = "number.charge_current"
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.er.async_get",
+        lambda _: registry,
+    )
+
+    assert await async_migrate_entry(hass, entry)
+
+    assert entry.version == 5
+    assert "charge_current_entity" not in entry.data
+    assert entry.data["grid_charge_current_entity"] == "number.charge_current"
+    registry.async_update_entity.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_v4_without_old_key_only_bumps_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass, entry, registry = _migration_context(version=4)
+    entry.data["work_mode_entity"] = "select.mode"
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.er.async_get",
+        lambda _: registry,
+    )
+
+    assert await async_migrate_entry(hass, entry)
+
+    assert entry.version == 5
+    assert "charge_current_entity" not in entry.data
+    assert "grid_charge_current_entity" not in entry.data
+    assert entry.data["work_mode_entity"] == "select.mode"

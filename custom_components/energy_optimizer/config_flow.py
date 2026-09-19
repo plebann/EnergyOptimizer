@@ -24,12 +24,12 @@ from .const import (
     CONF_BEV_CHARGING_BINARY_SENSOR,
     CONF_BEV_CHARGING_POWER_SENSOR,
     CONF_BUY_PRICE_SENSOR,
-    CONF_CHARGE_CURRENT_ENTITY,
     CONF_DAILY_LOAD_SENSOR,
     CONF_DAILY_LOSSES_SENSOR,
     CONF_DISCHARGE_CURRENT_ENTITY,
     CONF_ENABLE_HEAT_PUMP,
     CONF_EXPORT_POWER_ENTITY,
+    CONF_GRID_CHARGE_CURRENT_ENTITY,
     CONF_GRID_CHARGE_SWITCH,
     CONF_HEAT_PUMP_FORECAST_DOMAIN,
     CONF_HEAT_PUMP_FORECAST_SERVICE,
@@ -97,14 +97,15 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-def _price_margin_selector() -> selector.NumberSelector:
-    """Build a numeric selector for PLN/kWh margin values."""
+def create_selector(min_val: float, max_val: float, step_size: float, unit: str, mode: str = "BOX") -> selector.NumberSelector:
+    """Create a standardized numeric selector with configurable range, precision, unit, and input mode."""
     return selector.NumberSelector(
         selector.NumberSelectorConfig(
-            min=0,
-            step=0.001,
-            mode=selector.NumberSelectorMode.BOX,
-            unit_of_measurement=PRICE_UNIT_PLN_PER_KWH,
+            min=min_val,
+            max=max_val,
+            step=step_size,
+            mode=selector.NumberSelectorMode.BOX if mode.upper() == "BOX" else selector.NumberSelectorMode.SLIDER,
+            unit_of_measurement=unit,
         )
     )
 
@@ -112,7 +113,7 @@ def _price_margin_selector() -> selector.NumberSelector:
 class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Energy Optimizer."""
 
-    VERSION = 4
+    VERSION = 5
 
     def __init__(self) -> None:
         """Initialize config flow."""
@@ -164,7 +165,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_MIN_ARBITRAGE_PRICE,
                     default=DEFAULT_MIN_ARBITRAGE_PRICE,
-                ): _price_margin_selector()
+                ): create_selector(0, 100, 0.001, "PLN/kWh")
             }
         )
 
@@ -233,7 +234,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(
                     CONF_MAX_EXPORT_POWER, default=DEFAULT_MAX_EXPORT_POWER
-                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=20000)),
+                ): create_selector(1, 20000, 1.0, "W"),
                 vol.Required(
                     CONF_MAX_DISCHARGE_POWER, default=0.0
                 ): selector.NumberSelector(
@@ -248,19 +249,18 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_MAX_CHARGE_CURRENT,
                     default=0,
-                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
+                ): create_selector(0, 50, 0.1, "A"),
                 vol.Required(
                     CONF_BATTERY_CAPACITY_AH, default=DEFAULT_BATTERY_CAPACITY_AH
-                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=1000)),
+                ): create_selector(1, 1000, 1.0, "Ah"),
                 vol.Required(
                     CONF_BATTERY_VOLTAGE, default=DEFAULT_BATTERY_VOLTAGE
-                ): vol.All(vol.Coerce(float), vol.Range(min=12, max=600)),
+                ): create_selector(12, 600, 1.0, "V"),
                 vol.Required(
                     CONF_BATTERY_EFFICIENCY, default=DEFAULT_BATTERY_EFFICIENCY
-                ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
+                ): create_selector(50, 100, 0.1, "%"),
                 vol.Required(CONF_MIN_SOC, default=DEFAULT_MIN_SOC
-                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)
-                ),
+                ): create_selector(0, 100, 0.1, "%"),
                 vol.Required(CONF_MIN_SOC_PV, default=DEFAULT_MIN_SOC_PV): vol.All(
                     vol.Coerce(float), vol.Range(min=0, max=100)
                 ),
@@ -272,10 +272,10 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(
                     CONF_BALANCING_INTERVAL_DAYS, default=DEFAULT_BALANCING_INTERVAL_DAYS
-                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=30)),
+                ): create_selector(1, 30, 0.1, "days"),
                 vol.Optional(
                     CONF_BALANCING_PV_THRESHOLD, default=DEFAULT_BALANCING_PV_THRESHOLD
-                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=200)),
+                ): create_selector(0, 200, 1.0, "%"),
             }
         )
 
@@ -312,7 +312,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_BEV_CHARGING_POWER_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor", device_class="power")
                 ),
-                vol.Optional(CONF_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
+                vol.Optional(CONF_GRID_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_DISCHARGE_CURRENT_ENTITY): selector.EntitySelector(
@@ -419,11 +419,11 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_PV_EFFICIENCY,
                     default=DEFAULT_PV_EFFICIENCY,
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
+                ): create_selector(0.1, 2.0, 0.01, "ratio"),
                 vol.Optional(
                     CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
                     default=DEFAULT_MORNING_SELL_PV_COVERAGE_MARGIN,
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
+                ): create_selector(0.0, 2.0, 0.01, "ratio"),
                 vol.Optional(CONF_PV_FORECAST_TODAY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -508,11 +508,11 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_HEAT_PUMP_FORECAST_DOMAIN,
                     default=DEFAULT_HEAT_PUMP_FORECAST_DOMAIN,
-                ): vol.Coerce(str),
+                ): selector.TextSelector(),
                 vol.Optional(
                     CONF_HEAT_PUMP_FORECAST_SERVICE,
                     default=DEFAULT_HEAT_PUMP_FORECAST_SERVICE,
-                ): vol.Coerce(str),
+                ): selector.TextSelector(),
             }
         )
 
@@ -847,7 +847,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     default=self._config_entry.data.get(
                         CONF_MIN_ARBITRAGE_PRICE, DEFAULT_MIN_ARBITRAGE_PRICE
                     ),
-                ): _price_margin_selector(),
+                ): create_selector(0, 100, 0.001, "PLN/kWh")
             }
         )
 
@@ -917,7 +917,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                             "inverter_max_power", DEFAULT_MAX_EXPORT_POWER
                         ),
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=20000)),
+                ): create_selector(1, 20000, 1.0, "W"),
                 vol.Required(
                     CONF_MAX_DISCHARGE_POWER,
                     default=float(
@@ -935,39 +935,39 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(
                     CONF_MAX_CHARGE_CURRENT,
                     default=self._config_entry.data.get(CONF_MAX_CHARGE_CURRENT, 0),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
+                ): create_selector(0, 50, 0.1, "A"),
                 vol.Optional(
                     CONF_BATTERY_CAPACITY_AH,
                     default=self._config_entry.data.get(
                         CONF_BATTERY_CAPACITY_AH, DEFAULT_BATTERY_CAPACITY_AH
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=1000)),
+                ): create_selector(1, 1000, 1.0, "Ah"),
                 vol.Optional(
                     CONF_BATTERY_VOLTAGE,
                     default=self._config_entry.data.get(
                         CONF_BATTERY_VOLTAGE, DEFAULT_BATTERY_VOLTAGE
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=12, max=600)),
+                ): create_selector(12, 600, 1.0, "V"),
                 vol.Optional(
                     CONF_BATTERY_EFFICIENCY,
                     default=self._config_entry.data.get(
                         CONF_BATTERY_EFFICIENCY, DEFAULT_BATTERY_EFFICIENCY
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
+                ): create_selector(50, 100, 0.1, "%"),
                 vol.Optional(
                     CONF_MIN_SOC,
                     default=self._config_entry.data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+                ): create_selector(0, 100, 0.1, "%"),
                 vol.Optional(
                     CONF_MIN_SOC_PV,
                     default=self._config_entry.data.get(
                         CONF_MIN_SOC_PV, DEFAULT_MIN_SOC_PV
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+                ): create_selector(0, 100, 0.1, "%"),
                 vol.Optional(
                     CONF_MAX_SOC,
                     default=self._config_entry.data.get(CONF_MAX_SOC, DEFAULT_MAX_SOC),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+                ): create_selector(0, 100, 0.1, "%"),
                 vol.Optional(
                     CONF_BATTERY_CAPACITY_ENTITY,
                     default=self._config_entry.data.get(CONF_BATTERY_CAPACITY_ENTITY),
@@ -979,13 +979,13 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     default=self._config_entry.data.get(
                         CONF_BALANCING_INTERVAL_DAYS, DEFAULT_BALANCING_INTERVAL_DAYS
                     ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
+                ): create_selector(1, 30, 1.0, "days"),
                 vol.Optional(
                     CONF_BALANCING_PV_THRESHOLD,
                     default=self._config_entry.data.get(
                         CONF_BALANCING_PV_THRESHOLD, DEFAULT_BALANCING_PV_THRESHOLD
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=200)),
+                ): create_selector(0, 200, 1.0, "%"),
             }
         )
 
@@ -1034,8 +1034,8 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     selector.EntitySelectorConfig(domain="sensor", device_class="power")
                 ),
                 vol.Optional(
-                    CONF_CHARGE_CURRENT_ENTITY,
-                    default=self._config_entry.data.get(CONF_CHARGE_CURRENT_ENTITY),
+                    CONF_GRID_CHARGE_CURRENT_ENTITY,
+                    default=self._config_entry.data.get(CONF_GRID_CHARGE_CURRENT_ENTITY),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
@@ -1251,14 +1251,14 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     default=self._config_entry.data.get(
                         CONF_PV_EFFICIENCY, DEFAULT_PV_EFFICIENCY
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
+                ): create_selector(0.1, 2.0, 0.01, "ratio"),
                 vol.Optional(
                     CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
                     default=self._config_entry.data.get(
                         CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
                         DEFAULT_MORNING_SELL_PV_COVERAGE_MARGIN,
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
+                ): create_selector(0.0, 2.0, 0.01, "ratio"),
                 vol.Optional(
                     CONF_WEATHER_FORECAST,
                     default=self._config_entry.data.get(CONF_WEATHER_FORECAST),
@@ -1346,13 +1346,13 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     default=self._config_entry.data.get(
                         CONF_HEAT_PUMP_FORECAST_DOMAIN, DEFAULT_HEAT_PUMP_FORECAST_DOMAIN
                     ),
-                ): vol.Coerce(str),
+                ): selector.TextSelector(),
                 vol.Optional(
                     CONF_HEAT_PUMP_FORECAST_SERVICE,
                     default=self._config_entry.data.get(
                         CONF_HEAT_PUMP_FORECAST_SERVICE, DEFAULT_HEAT_PUMP_FORECAST_SERVICE
                     ),
-                ): vol.Coerce(str),
+                ): selector.TextSelector(),
             }
         )
 
