@@ -12,7 +12,7 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.energy_optimizer.const import (
     CONF_BATTERY_SOC_SENSOR,
-    CONF_CHARGE_CURRENT_ENTITY,
+    CONF_GRID_CHARGE_CURRENT_ENTITY,
     CONF_MIN_SOC,
     CONF_MIN_SOC_PV,
     CONF_PROG2_SOC_ENTITY,
@@ -241,7 +241,7 @@ async def test_morning_current_failure_restores_program_controls(
     """A charge-current failure rolls back the already-written Program 2 controls."""
     strategy = MorningChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
     strategy.entry = _entry({})
-    strategy.config = {"charge_current_entity": "number.charge_current"}
+    strategy.config = {"grid_charge_current_entity": "number.charge_current"}
     strategy.integration_context = Context()
     strategy._write_temporary_program_soc = AsyncMock(return_value=[])
     strategy._rollback_temporary_program_soc = AsyncMock()
@@ -309,7 +309,7 @@ async def test_afternoon_current_failure_rolls_back_program_soc(
     entry = _entry({})
     strategy = AfternoonChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
     strategy.entry = entry
-    strategy.config = {"charge_current_entity": "number.charge_current"}
+    strategy.config = {"grid_charge_current_entity": "number.charge_current"}
     strategy.prog_soc_entity = "number.program4_soc"
     strategy.prog_soc_value = 20
     strategy.integration_context = Context()
@@ -354,7 +354,7 @@ async def test_morning_completion_zeroes_charge_current_before_program_soc(
     entry = _entry(
         {
             CONF_PROG2_SOC_ENTITY: "number.program2_soc",
-            CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+            CONF_GRID_CHARGE_CURRENT_ENTITY: "number.charge_current",
             CONF_MIN_SOC: 15,
         }
     )
@@ -406,7 +406,7 @@ async def test_afternoon_completion_zeroes_charge_current_before_program_soc(
     entry = _entry(
         {
             CONF_PROG4_SOC_ENTITY: "number.program4_soc",
-            CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+            CONF_GRID_CHARGE_CURRENT_ENTITY: "number.charge_current",
             CONF_MIN_SOC_PV: 10,
             CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         }
@@ -459,7 +459,7 @@ async def test_morning_completion_no_action_writes_neither_soc_nor_current(
     entry = _entry(
         {
             CONF_PROG2_SOC_ENTITY: "number.program2_soc",
-            CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+            CONF_GRID_CHARGE_CURRENT_ENTITY: "number.charge_current",
             CONF_MIN_SOC: 15,
         }
     )
@@ -527,7 +527,7 @@ async def test_morning_completion_current_failure_keeps_and_reschedules_plan(
     entry = _entry(
         {
             CONF_PROG2_SOC_ENTITY: "number.program2_soc",
-            CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+            CONF_GRID_CHARGE_CURRENT_ENTITY: "number.charge_current",
             CONF_MIN_SOC: 15,
         }
     )

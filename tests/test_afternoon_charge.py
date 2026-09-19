@@ -11,7 +11,7 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_EFFICIENCY,
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
-    CONF_CHARGE_CURRENT_ENTITY,
+    CONF_GRID_CHARGE_CURRENT_ENTITY,
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_MAX_SOC,
     CONF_MIN_ARBITRAGE_PRICE,
@@ -78,7 +78,7 @@ def _hass(
     """Build a minimal Home Assistant harness with observable outputs."""
     config = {
         CONF_PROG4_SOC_ENTITY: "number.program4_soc",
-        CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+        CONF_GRID_CHARGE_CURRENT_ENTITY: "number.charge_current",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_BATTERY_CAPACITY_AH: capacity_ah,
         CONF_BATTERY_VOLTAGE: voltage,

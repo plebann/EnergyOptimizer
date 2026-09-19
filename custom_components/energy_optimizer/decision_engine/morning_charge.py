@@ -16,7 +16,7 @@ from ..calculations.energy import (
     calculate_needed_reserve_sufficiency,
 )
 from ..const import (
-    CONF_CHARGE_CURRENT_ENTITY,
+    CONF_GRID_CHARGE_CURRENT_ENTITY,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_PROG2_TIME_START_ENTITY,
@@ -329,7 +329,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
         entities_changed = await self._write_temporary_program_soc(action.target_soc)
         if entities_changed is None:
             return None
-        charge_current_entity = self.config.get(CONF_CHARGE_CURRENT_ENTITY)
+        charge_current_entity = self.config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
         if charge_current_entity:
             try:
                 await set_charge_current(

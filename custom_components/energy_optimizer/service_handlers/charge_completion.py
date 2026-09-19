@@ -13,7 +13,7 @@ from homeassistant.util import dt as dt_util
 
 from ..const import (
     CONF_BATTERY_SOC_SENSOR,
-    CONF_CHARGE_CURRENT_ENTITY,
+    CONF_GRID_CHARGE_CURRENT_ENTITY,
     CONF_MIN_SOC,
     CONF_MIN_SOC_PV,
     CONF_PROG2_SOC_ENTITY,
@@ -243,7 +243,7 @@ async def async_handle_charge_completion(
                 details=details,
             )
         else:
-            charge_current_entity = config.get(CONF_CHARGE_CURRENT_ENTITY)
+            charge_current_entity = config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
             entities_changed: list[dict[str, object]] = []
             if charge_current_entity:
                 try:

@@ -45,7 +45,7 @@ _CONSUME_WINDOW_ENTITY_MIGRATIONS = (
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate an Energy Optimizer config entry."""
-    if entry.version >= 4:
+    if entry.version >= 5:
         return True
 
     registry = er.async_get(hass)
@@ -86,6 +86,15 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.config_entries.async_update_entry(entry, data=data, version=4)
     else:
         hass.config_entries.async_update_entry(entry, version=4)
+
+    # v4 -> v5: rename charge_current_entity key to grid_charge_current_entity.
+    # The entity reference is preserved, only the config key name changes.
+    data = dict(entry.data)
+    if "charge_current_entity" in data:
+        data["grid_charge_current_entity"] = data.pop("charge_current_entity")
+        hass.config_entries.async_update_entry(entry, data=data, version=5)
+    else:
+        hass.config_entries.async_update_entry(entry, version=5)
     return True
 
 

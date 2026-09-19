@@ -10,7 +10,7 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_EFFICIENCY,
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
-    CONF_CHARGE_CURRENT_ENTITY,
+    CONF_GRID_CHARGE_CURRENT_ENTITY,
     CONF_DAILY_LOAD_SENSOR,
     CONF_ENABLE_HEAT_PUMP,
     CONF_HEAT_PUMP_FORECAST_DOMAIN,
@@ -264,7 +264,7 @@ async def test_morning_charge_includes_pv_and_heat_pump_and_sets_current() -> No
     config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
         CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
-        CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+        CONF_GRID_CHARGE_CURRENT_ENTITY: "number.charge_current",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
         CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",
@@ -330,7 +330,7 @@ async def test_morning_charge_uses_sufficiency_deficit_when_pv_ramps_late() -> N
     config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
         CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
-        CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+        CONF_GRID_CHARGE_CURRENT_ENTITY: "number.charge_current",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
         CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",
@@ -405,7 +405,7 @@ async def test_morning_charge_logs_last_optimization_attributes() -> None:
     config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
         CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
-        CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+        CONF_GRID_CHARGE_CURRENT_ENTITY: "number.charge_current",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
         CONF_DAILY_LOSSES_SENSOR: "sensor.daily_losses",
@@ -535,7 +535,7 @@ async def test_morning_charge_uses_night_buy_window_duration_for_current_sizing(
     config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
         CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
-        CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+        CONF_GRID_CHARGE_CURRENT_ENTITY: "number.charge_current",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
         CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",
@@ -609,7 +609,7 @@ async def test_morning_charge_restores_lower_max_current_before_setting_current(
     config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
         CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
-        CONF_CHARGE_CURRENT_ENTITY: "number.charge_current",
+        CONF_GRID_CHARGE_CURRENT_ENTITY: "number.charge_current",
         CONF_MAX_CHARGE_CURRENT_ENTITY: "number.max_charge_current",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
