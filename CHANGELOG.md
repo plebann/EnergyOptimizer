@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Breaking change: renamed config key `charge_current_entity` to `grid_charge_current_entity` (constant `CONF_CHARGE_CURRENT_ENTITY` → `CONF_GRID_CHARGE_CURRENT_ENTITY`). Existing entries are migrated automatically (config entry v4 → v5) with the value carried over under the new key. External references to the old key (e.g. automations or scripts reading `entry.data["charge_current_entity"]`) must be updated to the new name.
 
+- Breaking change: renamed the balancing charge-current cap key `max_charge_current_entity` to `charge_current_entity` (constant `CONF_MAX_CHARGE_CURRENT_ENTITY` → `CONF_CHARGE_CURRENT_ENTITY`), reusing the historical grid key name that is no longer in use since the v4 → v5 migration. Existing entries are migrated automatically (config entry v5 → v6) with the value carried over under the new key. External references to the old key (e.g. automations or scripts reading `entry.data["max_charge_current_entity"]`) must be updated to the new name.
+
 ### For Users
 
 - Existing Energy Optimizer entries using the old tariff hour sensor fields must be reconfigured in the UI because this rename is intentionally not migrated automatically.

@@ -10,7 +10,7 @@ from homeassistant.util import dt as dt_util
 from ..calculations.energy import calculate_losses, hourly_demand
 from ..calculations.utils import build_hourly_usage_array
 from ..const import (
-    CONF_MAX_CHARGE_CURRENT_ENTITY,
+    CONF_CHARGE_CURRENT_ENTITY,
     CONF_PV_FORECAST_TODAY,
     SUN_ABOVE_HORIZON,
     SUN_ENTITY,
@@ -42,8 +42,8 @@ async def _async_run_solar_charge_block(
     config = entry.data
     bc = get_battery_config(config)
 
-    max_charge_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
-    if not max_charge_entity:
+    charge_current_entity = config.get(CONF_CHARGE_CURRENT_ENTITY)
+    if not charge_current_entity:
         _LOGGER.warning(
             "Solar charge block: max charge current entity not configured — skip"
         )
@@ -70,7 +70,7 @@ async def _async_run_solar_charge_block(
     if now.time() >= daytime_min_price_time:
         current_max_charge, raw_max_charge, max_charge_error = get_float_state_info(
             hass,
-            str(max_charge_entity),
+            str(charge_current_entity),
         )
         if max_charge_error is not None or current_max_charge != 0:
             _LOGGER.debug(
@@ -88,7 +88,7 @@ async def _async_run_solar_charge_block(
         )
         await set_max_charge_current(
             hass,
-            max_charge_entity,
+            charge_current_entity,
             int(bc.max_charge_current),
             entry=entry,
             logger=_LOGGER,
@@ -170,7 +170,7 @@ async def _async_run_solar_charge_block(
         )
         await set_max_charge_current(
             hass,
-            max_charge_entity,
+            charge_current_entity,
             int(bc.max_charge_current),
             entry=entry,
             logger=_LOGGER,
@@ -213,7 +213,7 @@ async def _async_run_solar_charge_block(
         )
         await set_max_charge_current(
             hass,
-            max_charge_entity,
+            charge_current_entity,
             int(bc.max_charge_current),
             entry=entry,
             logger=_LOGGER,
@@ -232,7 +232,7 @@ async def _async_run_solar_charge_block(
     )
     await set_max_charge_current(
         hass,
-        max_charge_entity,
+        charge_current_entity,
         0,
         entry=entry,
         logger=_LOGGER,

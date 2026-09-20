@@ -23,7 +23,7 @@ from ..const import (
     CONF_BALANCING_INTERVAL_DAYS,
     CONF_BALANCING_PV_THRESHOLD,
     CONF_MAX_CHARGE_CURRENT,
-    CONF_MAX_CHARGE_CURRENT_ENTITY,
+    CONF_CHARGE_CURRENT_ENTITY,
     CONF_PROG1_SOC_ENTITY,
     CONF_PROG2_SOC_ENTITY,
     CONF_PROG6_SOC_ENTITY,
@@ -173,7 +173,7 @@ async def _handle_balancing(
     prog2_soc: str | None,
     prog6_soc: str | None,
     max_soc: float,
-    max_charge_current_entity: str | None,
+    charge_current_entity: str | None,
     max_charge_current: int,
     pv_compensation_details: dict[str, float | None],
 ) -> bool:
@@ -226,7 +226,7 @@ async def _handle_balancing(
     )
     await set_max_charge_current(
         hass,
-        max_charge_current_entity,
+        charge_current_entity,
         max_charge_current,
         entry=entry,
         logger=_LOGGER,
@@ -251,7 +251,7 @@ async def _handle_balancing(
             {"entity_id": prog1_soc, "value": max_soc},
             {"entity_id": prog2_soc, "value": max_soc},
             {"entity_id": prog6_soc, "value": max_soc},
-            {"entity_id": max_charge_current_entity, "value": max_charge_current},
+            {"entity_id": charge_current_entity, "value": max_charge_current},
         ],
     )
     await log_decision_unified(
@@ -867,7 +867,7 @@ async def _async_run_evening_behavior(
     prog1_soc = config.get(CONF_PROG1_SOC_ENTITY)
     prog2_soc = config.get(CONF_PROG2_SOC_ENTITY)
     prog6_soc = config.get(CONF_PROG6_SOC_ENTITY)
-    max_charge_current_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
+    charge_current_entity = config.get(CONF_CHARGE_CURRENT_ENTITY)
 
     entry_data = get_entry_data(hass, entry.entry_id)
     last_balancing_sensor = None if entry_data is None else entry_data.get("last_balancing_sensor")
@@ -906,7 +906,7 @@ async def _async_run_evening_behavior(
         prog2_soc=prog2_soc,
         prog6_soc=prog6_soc,
         max_soc=bc.max_soc,
-        max_charge_current_entity=max_charge_current_entity,
+        charge_current_entity=charge_current_entity,
         max_charge_current=int(bc.max_charge_current),
         pv_compensation_details=pv_compensation_details,
     ):

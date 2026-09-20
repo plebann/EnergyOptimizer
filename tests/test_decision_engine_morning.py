@@ -600,7 +600,7 @@ async def test_morning_charge_restores_lower_max_current_before_setting_current(
     expected_current_calls: list[tuple[str, float]],
 ) -> None:
     from custom_components.energy_optimizer.const import (
-        CONF_MAX_CHARGE_CURRENT_ENTITY,
+        CONF_CHARGE_CURRENT_ENTITY,
         CONF_TEST_MODE,
         DEFAULT_MAX_CHARGE_CURRENT,
     )
@@ -610,7 +610,7 @@ async def test_morning_charge_restores_lower_max_current_before_setting_current(
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
         CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
         CONF_GRID_CHARGE_CURRENT_ENTITY: "number.charge_current",
-        CONF_MAX_CHARGE_CURRENT_ENTITY: "number.max_charge_current",
+        CONF_CHARGE_CURRENT_ENTITY: "number.max_charge_current",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
         CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",

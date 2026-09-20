@@ -13,9 +13,9 @@ from ..const import (
     CONF_BATTERY_SOC_SENSOR,
     CONF_BEV_CHARGING_BINARY_SENSOR,
     CONF_BEV_CHARGING_POWER_SENSOR,
+    CONF_CHARGE_CURRENT_ENTITY,
     CONF_INVERTER_EXPORT_SURPLUS_SWITCH,
     CONF_INVERTER_OFFGRID_SWITCH,
-    CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_PRICE_SENSOR,
     CONF_PV_FORECAST_TODAY,
     CONF_SELL_PRICE_SENSOR,
@@ -132,14 +132,14 @@ def _get_battery_hourly_capacity_kwh(
         return None
 
     battery_config = get_battery_config(config)
-    max_charge_entity = config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
+    charge_current_entity = config.get(CONF_CHARGE_CURRENT_ENTITY)
     max_current_a: float | None = None
-    if max_charge_entity:
-        max_current_a, _, error = get_float_state_info(hass, str(max_charge_entity))
+    if charge_current_entity:
+        max_current_a, _, error = get_float_state_info(hass, str(charge_current_entity))
         if error is not None or max_current_a is None:
             _LOGGER.warning(
                 "Export block control: max charge current entity %s is unavailable (%s)",
-                max_charge_entity,
+                charge_current_entity,
                 error,
             )
             return None

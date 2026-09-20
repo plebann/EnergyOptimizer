@@ -95,7 +95,7 @@
           "grid_charge_current_entity": "Grid Charge Current Control (Optional)",
           "discharge_current_entity": "Discharge Current Control (Optional)",
           "export_power_entity": "Export Power Control (Optional)",
-          "max_charge_current_entity": "Max Charge Current (Optional)",
+          "charge_current_entity": "Max Charge Current (Optional)",
           "grid_charge_switch": "Grid Charge Switch (Optional)"
         },
         "data_description": {
@@ -107,7 +107,7 @@
           "grid_charge_current_entity": "Entity to control grid charge current limit",
           "discharge_current_entity": "Entity to control discharge current limit",
           "export_power_entity": "Entity to control export power limit during selling",
-          "max_charge_current_entity": "Entity to cap charge current (set to default 23A during balancing)",
+          "charge_current_entity": "Entity to cap charge current (set to default 23A during balancing)",
           "grid_charge_switch": "Switch to enable/disable grid charging"
         }
       },
@@ -253,7 +253,7 @@
           "battery_efficiency": "Battery Efficiency (%)",
           "balancing_interval_days": "Balancing Interval (Days)",
           "balancing_pv_threshold_kwh": "Balancing PV Threshold (kWh)",
-          "max_charge_current_entity": "Max Charge Current (Optional)"
+          "charge_current_entity": "Max Charge Current (Optional)"
         },
         "data_description": {
           "max_export_power": "Maximum export value applied after the sell window ends",
@@ -266,7 +266,7 @@
           "battery_efficiency": "Round-trip efficiency (90-95% typical)",
           "balancing_interval_days": "How often to trigger full balancing if PV forecast is low (default 14 days)",
           "balancing_pv_threshold_kwh": "Only enable balancing when tomorrow's PV forecast is below this threshold",
-          "max_charge_current_entity": "Entity to cap charge current (set to default 23A during balancing)"
+          "charge_current_entity": "Entity to cap charge current (set to default 23A during balancing)"
         }
       },
       "control_entities": {

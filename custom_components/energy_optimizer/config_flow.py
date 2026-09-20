@@ -24,6 +24,7 @@ from .const import (
     CONF_BEV_CHARGING_BINARY_SENSOR,
     CONF_BEV_CHARGING_POWER_SENSOR,
     CONF_BUY_PRICE_SENSOR,
+    CONF_CHARGE_CURRENT_ENTITY,
     CONF_DAILY_LOAD_SENSOR,
     CONF_DAILY_LOSSES_SENSOR,
     CONF_DISCHARGE_CURRENT_ENTITY,
@@ -41,7 +42,6 @@ from .const import (
     CONF_LOAD_USAGE_12_16,
     CONF_LOAD_USAGE_16_20,
     CONF_LOAD_USAGE_20_24,
-    CONF_MAX_CHARGE_CURRENT_ENTITY,
     CONF_MAX_DISCHARGE_POWER,
     CONF_MAX_EXPORT_POWER,
     CONF_MAX_SOC,
@@ -113,7 +113,7 @@ def create_selector(min_val: float, max_val: float, step_size: float, unit: str,
 class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Energy Optimizer."""
 
-    VERSION = 5
+    VERSION = 6
 
     def __init__(self) -> None:
         """Initialize config flow."""
@@ -321,7 +321,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_EXPORT_POWER_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
-                vol.Optional(CONF_MAX_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
+                vol.Optional(CONF_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_GRID_CHARGE_SWITCH): selector.EntitySelector(
@@ -667,11 +667,11 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         # Validate max charge current entity if provided
-        max_charge_entity = user_input.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
-        if max_charge_entity:
+        charge_current_entity = user_input.get(CONF_CHARGE_CURRENT_ENTITY)
+        if charge_current_entity:
             self._validate_entity(
-                entity_id=max_charge_entity,
-                field=CONF_MAX_CHARGE_CURRENT_ENTITY,
+                entity_id=charge_current_entity,
+                field=CONF_CHARGE_CURRENT_ENTITY,
                 errors=errors,
                 expected_domain="number",
                 domain_error="not_number_entity",
@@ -1052,8 +1052,8 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(
-                    CONF_MAX_CHARGE_CURRENT_ENTITY,
-                    default=self._config_entry.data.get(CONF_MAX_CHARGE_CURRENT_ENTITY),
+                    CONF_CHARGE_CURRENT_ENTITY,
+                    default=self._config_entry.data.get(CONF_CHARGE_CURRENT_ENTITY),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
