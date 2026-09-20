@@ -1,4 +1,4 @@
-﻿"""Tests for solar charge block decision logic."""
+"""Tests for solar charge block decision logic."""
 from __future__ import annotations
 
 from contextlib import ExitStack
@@ -9,7 +9,7 @@ import pytest
 
 from custom_components.energy_optimizer.const import (
     CONF_BATTERY_SOC_SENSOR,
-    CONF_MAX_CHARGE_CURRENT_ENTITY,
+    CONF_CHARGE_CURRENT_ENTITY,
     CONF_MIN_SOC_PV,
     CONF_PROG3_SOC_ENTITY,
     CONF_PV_FORECAST_TODAY,
@@ -51,7 +51,7 @@ def _setup_hass(
     entry.domain = DOMAIN
     entry.options = {}
     entry.data = {
-        CONF_MAX_CHARGE_CURRENT_ENTITY: _MAX_CHARGE_ENTITY,
+        CONF_CHARGE_CURRENT_ENTITY: _MAX_CHARGE_ENTITY,
         CONF_PV_FORECAST_TODAY: _PV_FORECAST_ENTITY,
         # These values must not affect the narrowed action.
         CONF_BATTERY_SOC_SENSOR: "sensor.soc",

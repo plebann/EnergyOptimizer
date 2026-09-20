@@ -329,12 +329,12 @@ class MorningChargeStrategy(BaseChargeStrategy):
         entities_changed = await self._write_temporary_program_soc(action.target_soc)
         if entities_changed is None:
             return None
-        charge_current_entity = self.config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
-        if charge_current_entity:
+        grid_charge_current_entity = self.config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
+        if grid_charge_current_entity:
             try:
                 await set_charge_current(
                     self.hass,
-                    str(charge_current_entity),
+                    str(grid_charge_current_entity),
                     action.charge_current,
                     entry=self.entry,
                     logger=_LOGGER,
@@ -345,7 +345,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
                 await self._log_write_failure(str(err))
                 return None
             entities_changed.append(
-                {"entity_id": str(charge_current_entity), "value": action.charge_current}
+                {"entity_id": str(grid_charge_current_entity), "value": action.charge_current}
             )
         return entities_changed
 

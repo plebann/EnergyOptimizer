@@ -9,8 +9,8 @@ from homeassistant.core import Context
 from homeassistant.exceptions import HomeAssistantError
 
 from ..const import (
+    CONF_CHARGE_CURRENT_ENTITY,
     CONF_GRID_CHARGE_CURRENT_ENTITY,
-    CONF_MAX_CHARGE_CURRENT_ENTITY,
 )
 from ..controllers.inverter import (
     set_charge_current,
@@ -158,12 +158,12 @@ class BaseChargeStrategy(ABC):
                 {"entity_id": self.prog_soc_entity, "value": action.target_soc}
             )
 
-        charge_current_entity = self.config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
-        if charge_current_entity:
+        grid_charge_current_entity = self.config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
+        if grid_charge_current_entity:
             try:
                 await set_charge_current(
                     self.hass,
-                    str(charge_current_entity),
+                    str(grid_charge_current_entity),
                     action.charge_current,
                     entry=self.entry,
                     logger=_LOGGER,
@@ -197,7 +197,10 @@ class BaseChargeStrategy(ABC):
                 )
                 return None
             entities_changed.append(
-                {"entity_id": str(charge_current_entity), "value": action.charge_current}
+                {
+                    "entity_id": str(grid_charge_current_entity),
+                    "value": action.charge_current,
+                }
             )
         return entities_changed
 
@@ -262,13 +265,13 @@ class BaseChargeStrategy(ABC):
             balance=balance,
         )
 
-        charge_current_entity = self.config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
-        max_charge_current_entity = self.config.get(CONF_MAX_CHARGE_CURRENT_ENTITY)
+        grid_charge_current_entity = self.config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
+        charge_current_entity = self.config.get(CONF_CHARGE_CURRENT_ENTITY)
         max_charge_current_changed = False
-        if charge_current_entity and max_charge_current_entity:
+        if grid_charge_current_entity and charge_current_entity:
             max_charge_current, _, max_charge_current_error = get_float_state_info(
                 self.hass,
-                str(max_charge_current_entity),
+                str(charge_current_entity),
             )
             if (
                 max_charge_current_error is None
@@ -277,7 +280,7 @@ class BaseChargeStrategy(ABC):
             ):
                 await set_max_charge_current(
                     self.hass,
-                    str(max_charge_current_entity),
+                    str(charge_current_entity),
                     int(self.bc.max_charge_current),
                     entry=self.entry,
                     logger=_LOGGER,
@@ -292,7 +295,7 @@ class BaseChargeStrategy(ABC):
             entities_changed.insert(
                 0,
                 {
-                    "entity_id": str(max_charge_current_entity),
+                    "entity_id": str(charge_current_entity),
                     "value": int(self.bc.max_charge_current),
                 },
             )

@@ -25,7 +25,7 @@ akcję.
   ręczne i harmonogram zachowują się tak samo.
 - Przed początkiem Morning Sell Window akcja nie wykonuje żadnej zmiany.
 - Od czasu Midday Avoidance Window włącznie akcja nie blokuje ładowania; jeśli
-  bieżący `max_charge_current_entity` ma wartość `0`, przywraca
+  bieżący `charge_current_entity` ma wartość `0`, przywraca
   `DEFAULT_MAX_CHARGE_CURRENT`.
 
 ## Dane wejściowe
@@ -37,7 +37,7 @@ akcję.
 - prognoza PV dla bieżącej godziny;
 - wolne miejsce w baterii z `battery_space_sensor`;
 - lokalne zapotrzebowanie w bieżącej godzinie;
-- encja `max_charge_current_entity`.
+- encja `charge_current_entity`.
 
 Brak prognozy PV, czasu zachodu lub informacji o wolnym miejscu w baterii
 powoduje pominięcie akcji bez zmiany falownika.
@@ -79,7 +79,7 @@ flowchart TD
 Solar Charge Block sam przywraca domyślny prąd ładowania, gdy znane warunki
 blokady przestają być spełnione przed czasem Midday Avoidance Window. Od czasu
 Midday Avoidance Window włącznie przywraca prąd tylko wtedy, gdy może potwierdzić,
-że bieżący `max_charge_current_entity` wynosi `0`.
+że bieżący `charge_current_entity` wynosi `0`.
 
 Brak danych nie jest traktowany jako fałszywy warunek: w takim przypadku nie
 jest wykonywane ani blokowanie, ani przywrócenie.

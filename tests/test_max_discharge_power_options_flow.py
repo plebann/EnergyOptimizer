@@ -40,7 +40,7 @@ _SAMPLE_ENTITY_SUBMISSION: dict[str, str] = {
     "grid_charge_current_entity": "number.charge_current",
     "discharge_current_entity": "number.discharge_current",
     "export_power_entity": "number.export_power",
-    "max_charge_current_entity": "number.max_charge_current",
+    "charge_current_entity": "number.max_charge_current",
     "grid_charge_switch": "switch.grid_charge",
 }
 

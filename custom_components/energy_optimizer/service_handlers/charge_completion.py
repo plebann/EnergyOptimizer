@@ -243,13 +243,13 @@ async def async_handle_charge_completion(
                 details=details,
             )
         else:
-            charge_current_entity = config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
+            grid_charge_current_entity = config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
             entities_changed: list[dict[str, object]] = []
-            if charge_current_entity:
+            if grid_charge_current_entity:
                 try:
                     await set_charge_current(
                         hass,
-                        str(charge_current_entity),
+                        str(grid_charge_current_entity),
                         0.0,
                         entry=entry,
                         logger=_LOGGER,
@@ -266,7 +266,7 @@ async def async_handle_charge_completion(
                     )
                 else:
                     entities_changed.append(
-                        {"entity_id": str(charge_current_entity), "value": 0.0}
+                        {"entity_id": str(grid_charge_current_entity), "value": 0.0}
                     )
             if not retry_after_write_failure:
                 try:
