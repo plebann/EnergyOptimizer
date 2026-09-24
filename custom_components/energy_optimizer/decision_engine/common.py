@@ -338,17 +338,44 @@ def calculate_charge_action(
     gap_kwh: float,
     current_soc: float,
     target_charge_time_hours: float = 2.0,
+    target_floor: float | None = None,
 ) -> ChargeAction:
-    """Calculate charge parameters from energy gap."""
+    """Calculate charge parameters from energy gap.
+
+    The target is derived from the Charge Base -- the maximum of the reported
+    SOC and ``target_floor`` (defaulting to ``bc.min_soc``) -- so a battery that
+    starts below the floor still charges toward at least that floor. When the
+    reported SOC is below the floor, the fill-to-floor energy is added to the
+    gap before sizing the charge current, keeping the requested current able to
+    deliver the full window energy. Reported-SOC-only math (reserve, arbitrage)
+    is untouched.
+    """
+    if target_floor is None:
+        target_floor = bc.min_soc
     gap_to_charge_kwh = apply_efficiency_compensation(gap_kwh, bc.efficiency)
     soc_delta = calculate_soc_delta(
         gap_to_charge_kwh,
         capacity_ah=bc.capacity_ah,
         voltage=bc.voltage,
     )
-    target_soc = calculate_target_soc(current_soc, soc_delta, max_soc=bc.max_soc)
+    target_base = max(current_soc, target_floor)
+    if target_base != current_soc:
+        _LOGGER.warning(
+            "Charge action target base clamped to floor %.1f (reported SOC %.1f)",
+            target_floor,
+            current_soc,
+        )
+    target_soc = calculate_target_soc(target_base, soc_delta, max_soc=bc.max_soc)
+    fill_kwh = 0.0
+    if current_soc < target_floor:
+        fill_kwh = soc_to_kwh(
+            target_floor - current_soc,
+            bc.capacity_ah,
+            bc.voltage,
+        )
+    total_energy_kwh = gap_to_charge_kwh + fill_kwh
     charge_current = calculate_charge_current(
-        gap_to_charge_kwh,
+        total_energy_kwh,
         current_soc=current_soc,
         capacity_ah=bc.capacity_ah,
         voltage=bc.voltage,
@@ -367,11 +394,14 @@ def calculate_charge_action(
             "gap_kwh": round(gap_kwh, 2),
             "current_soc": round(current_soc, 1),
             "target_charge_time_hours": round(target_charge_time_hours, 2),
+            "target_base": round(target_base, 1),
+            "target_floor": round(target_floor, 1),
         },
         result={
             "target_soc": round(action.target_soc, 1),
             "charge_current_a": round(action.charge_current, 1),
             "to_charge_kwh": round(action.gap_to_charge_kwh, 2),
+            "fill_to_floor_kwh": round(fill_kwh, 3),
         },
     )
     return action

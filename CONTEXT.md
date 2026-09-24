@@ -83,6 +83,11 @@ _Avoid_: Emptying the battery
 The configured minimum battery state of charge that an EnergyOptimizer decision must preserve. `min_soc` is the default floor; `min_soc_pv` applies only when the decision confirms sufficient PV energy for the relevant horizon.
 _Avoid_: Program SOC safety level
 
+### Charge Base
+
+The effective state of charge from which EnergyOptimizer calculates the temporary Morning Charge target. When the battery SOC reported at decision time is below the current Safety SOC Floor, the Charge Base is the Safety SOC Floor; otherwise it equals the reported SOC.
+_Avoid_: Virtual SOC, Clamped SOC
+
 ### Program 2 Normal SOC Target
 
 The Program 2 SOC value used after a temporary Morning Charge target ends: `min_soc`.
