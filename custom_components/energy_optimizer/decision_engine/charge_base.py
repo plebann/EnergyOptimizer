@@ -107,6 +107,10 @@ class BaseChargeStrategy(ABC):
         """Return the charging window duration used for current sizing."""
         return 2.0
 
+    def _resolve_target_floor(self) -> float:
+        """Return the Safety SOC Floor used as the Charge Base target floor."""
+        return self.bc.min_soc
+
     def _calculate_charge_action(
         self,
         *,
@@ -120,6 +124,7 @@ class BaseChargeStrategy(ABC):
             gap_kwh=total_gap,
             current_soc=self.current_soc,
             target_charge_time_hours=self._resolve_charge_time_hours(),
+            target_floor=self._resolve_target_floor(),
         )
 
     def _history_window_kinds(self) -> tuple[str, str]:

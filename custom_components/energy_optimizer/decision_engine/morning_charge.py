@@ -151,6 +151,12 @@ class MorningChargeStrategy(BaseChargeStrategy):
             default_hours=2.0,
         )
 
+    def _resolve_target_floor(self) -> float:
+        """Floor at min_soc_pv once morning sufficiency is reached, else min_soc."""
+        if self._sufficiency.sufficiency_reached:
+            return self.bc.min_soc_pv
+        return self.bc.min_soc
+
     def _resolve_completion_window(self) -> tuple[datetime, datetime]:
         """Resolve the concrete night buy window used by this run."""
         start_hour = resolve_night_buy_window_start_hour(

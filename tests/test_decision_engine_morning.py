@@ -525,6 +525,203 @@ def test_calculate_charge_current_respects_target_charge_time_hours() -> None:
     assert current == 2
 
 
+def _battery_config() -> decision_common.BatteryConfig:
+    return decision_common.BatteryConfig(
+        capacity_ah=200,
+        voltage=48.0,
+        min_soc=21.0,
+        min_soc_pv=15.0,
+        max_soc=100.0,
+        efficiency=100.0,
+    )
+
+
+def test_charge_action_below_floor_targets_charge_base_and_sizes_current_for_total_energy() -> None:
+    # Worked example (9.6 kWh battery): SOC 5% is below the floor of 21%.
+    # Gap 1.0 kWh -> soc_delta 10, so the raw-SOC target would be ceil(5 + 10) = 15,
+    # still below the floor. From the Charge Base (21) the target is ceil(21 + 10) = 31.
+    # Fill-to-floor energy: soc_to_kwh(16, 200, 48) = 1.536 kWh; total window
+    # energy = 1.0 + 1.536 = 2.536 kWh -> phase-1 time 2536 / (48 * 23) = 2.30 h
+    # exceeds the 2.0 h window, so the current saturates at the level-1 23 A
+    # (the gap alone would have sized only 11 A).
+    action = decision_common.calculate_charge_action(
+        _battery_config(),
+        gap_kwh=1.0,
+        current_soc=5.0,
+        target_floor=21.0,
+        target_charge_time_hours=2.0,
+    )
+
+    assert action.target_soc == pytest.approx(31.0)
+    assert action.charge_current == 23
+
+
+def test_charge_action_at_or_above_floor_is_unchanged_by_explicit_floor() -> None:
+    # SOC 45% is already above the floor: an explicit floor must not alter the
+    # existing target or current formulas at all.
+    action = decision_common.calculate_charge_action(
+        _battery_config(),
+        gap_kwh=1.0,
+        current_soc=45.0,
+        target_floor=21.0,
+        target_charge_time_hours=2.0,
+    )
+
+    assert action.target_soc == pytest.approx(55.0)
+    assert action.charge_current == 11
+
+
+def test_charge_action_default_target_floor_is_min_soc() -> None:
+    # Without an explicit target floor the charge base falls back to min_soc,
+    # so a below-min SOC still gets its target lifted to the min-based Charge Base.
+    action = decision_common.calculate_charge_action(
+        _battery_config(),
+        gap_kwh=1.0,
+        current_soc=5.0,
+        target_charge_time_hours=2.0,
+    )
+
+    assert action.target_soc == pytest.approx(31.0)
+    assert action.charge_current == 23
+
+
+def _morning_below_min_states_and_config() -> tuple[dict[str, object], dict[str, str]]:
+    """Below-min morning mirroring issue #51's replay (SOC 13 / min_soc 21)."""
+    config = {
+        CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
+        CONF_GRID_CHARGE_CURRENT_ENTITY: "number.charge_current",
+        CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
+        CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
+        CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",
+        CONF_BATTERY_CAPACITY_AH: 100,
+        CONF_BATTERY_VOLTAGE: 50,
+        CONF_MIN_SOC: 21,
+        CONF_MAX_SOC: 100,
+        CONF_BATTERY_EFFICIENCY: 100,
+    }
+    states = {
+        "number.prog2_soc": "50",
+        "time.prog2_start": "04:00:00",
+        "number.charge_current": "0",
+        "sensor.battery_soc": "13",
+        "sensor.daily_load": "48",
+        "sensor.tariff_end_hour": "13",
+    }
+    return config, states
+
+
+@pytest.mark.asyncio
+async def test_morning_below_min_writes_program_at_least_floor(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Below-min morning (sufficiency not reached): Program 2 write >= min_soc.
+
+    Without a PV forecast sensor the sufficiency is not reached, so the Safety
+    SOC Floor is ``min_soc`` and the charge action's default target floor already
+    lifts the Charge Base to it -- this guards the issue #51 replay end-to-end.
+    """
+    from custom_components.energy_optimizer.const import CONF_TEST_MODE
+
+    config, states = _morning_below_min_states_and_config()
+    config[CONF_TEST_MODE] = False
+    hass = _setup_hass(config, states)
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    prog2_writes = [
+        call.args[2]["value"]
+        for call in hass.services.async_call.call_args_list
+        if call.args[:2] == ("number", "set_value")
+        and call.args[2].get("entity_id") == "number.prog2_soc"
+    ]
+    assert prog2_writes, "expected a Program 2 SOC write on the below-min charge path"
+    assert all(value >= float(config[CONF_MIN_SOC]) - 0.01 for value in prog2_writes)
+
+    current_writes = [
+        call.args[2]["value"]
+        for call in hass.services.async_call.call_args_list
+        if call.args[:2] == ("number", "set_value")
+        and call.args[2].get("entity_id") == "number.charge_current"
+    ]
+    assert current_writes, "expected a charge-current write on the below-min charge path"
+
+    assert any(
+        "21.0" in record.getMessage() and "13.0" in record.getMessage()
+        for record in caplog.records
+    ), "expected the clamp warning to report floor 21.0 and reported SOC 13.0"
+
+
+@pytest.mark.asyncio
+async def test_morning_below_min_with_sufficiency_uses_dynamic_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Below-min morning with sufficiency reached floors at min_soc_pv, not min_soc.
+
+    This is the genuinely new behavior introduced by the strategy hook: when the
+    morning confirms sufficient PV, the Safety SOC Floor is ``min_soc_pv`` (lower),
+    so the charge base is lifted only to that lower floor rather than to ``min_soc``.
+    ``compute_sufficiency`` is pinned to ``reached=True`` so the dynamic-floor
+    branch engages deterministically, and a spy records the target floor the shared
+    calculation actually received.
+    """
+    from custom_components.energy_optimizer.const import CONF_MIN_SOC_PV, CONF_TEST_MODE
+    from custom_components.energy_optimizer.decision_engine import (
+        common as decision_common,
+    )
+
+    config, states = _morning_below_min_states_and_config()
+    config[CONF_MIN_SOC_PV] = 15
+    config[CONF_TEST_MODE] = False
+    hass = _setup_hass(config, states)
+
+    # Pin the sufficiency result so the dynamic-floor branch engages without
+    # coupling this test to the forecast date plumbing. The strategy resolves the
+    # name in its own module namespace, so patch it there.
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.compute_sufficiency",
+        lambda forecasts: decision_common.SufficiencyResult(
+            required_kwh=4.0,
+            required_sufficiency_kwh=0.0,
+            pv_sufficiency_kwh=0.0,
+            sufficiency_hour=6,
+            sufficiency_reached=True,
+        ),
+    )
+
+    observed_floor: dict[str, float] = {}
+    real_calculate = decision_common.calculate_charge_action
+
+    def spy_calculate(
+        bc,
+        *,
+        gap_kwh,
+        current_soc,
+        target_charge_time_hours=2.0,
+        target_floor=None,
+    ):
+        if target_floor is not None:
+            observed_floor["value"] = float(target_floor)
+        return real_calculate(
+            bc,
+            gap_kwh=gap_kwh,
+            current_soc=current_soc,
+            target_charge_time_hours=target_charge_time_hours,
+            target_floor=target_floor,
+        )
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.charge_base.calculate_charge_action",
+        spy_calculate,
+    )
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    assert observed_floor.get("value") == pytest.approx(
+        15.0
+    ), f"expected the dynamic floor min_soc_pv (15), got {observed_floor.get('value')}"
+
+
 @pytest.mark.asyncio
 async def test_morning_charge_uses_night_buy_window_duration_for_current_sizing(
     monkeypatch: pytest.MonkeyPatch,
