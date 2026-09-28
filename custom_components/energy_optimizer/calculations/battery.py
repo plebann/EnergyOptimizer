@@ -110,10 +110,9 @@ def calculate_hourly_charge_capacity(
     )
 
     for upper_soc, profile_current_a in (
-        (50.0, 23.0),
-        (70.0, 18.0),
-        (90.0, 9.0),
-        (max_soc, 5.0),
+        (70.0, 32.0),
+        (90.0, 18.0),
+        (max_soc, 11.0),
     ):
         target_soc = min(upper_soc, max_soc)
         if target_soc <= soc:
@@ -161,13 +160,13 @@ def calculate_expected_charge_current(
     voltage: float,
     *,
     target_charge_time_hours: float = 2.0,
-    lvl1_current: float = 23.0,
+    lvl1_current: float = 32.0,
     lvl2_threshold: float = 50.0,
-    lvl2_current: float = 18.0,
+    lvl2_current: float = 32.0,
     lvl3_threshold: float = 70.0,
-    lvl3_current: float = 9.0,
+    lvl3_current: float = 18.0,
     lvl4_threshold: float = 90.0,
-    lvl4_current: float = 5.0,
+    lvl4_current: float = 11.0,
 ) -> int:
     """Calculate expected charge current based on SOC phases and time window.
 
