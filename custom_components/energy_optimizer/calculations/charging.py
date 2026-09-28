@@ -10,9 +10,9 @@ def get_expected_current_multi_phase(
     """Calculate expected charge current considering multi-phase charging.
     
     Battery charging has different phases with different currents:
-    - Phase 1 (0-70% SOC): 23A charging current
-    - Phase 2 (70-90% SOC): 9A charging current  
-    - Phase 3 (90-100% SOC): 4A charging current
+    - Phase 1 (0-70% SOC): 32A charging current
+    - Phase 2 (70-90% SOC): 18A charging current  
+    - Phase 3 (90-100% SOC): 11A charging current
     
     Args:
         energy_to_charge: Energy to charge (kWh)
@@ -25,9 +25,9 @@ def get_expected_current_multi_phase(
     """
     # Define charging phases (SOC threshold, current)
     phases = [
-        (0, 70, 23),   # Phase 1: 0-70% at 23A
-        (70, 90, 9),   # Phase 2: 70-90% at 9A
-        (90, 100, 4),  # Phase 3: 90-100% at 4A
+        (0, 70, 32),   # Phase 1: 0-70% at 32A
+        (70, 90, 18),   # Phase 2: 70-90% at 18A
+        (90, 100, 11),  # Phase 3: 90-100% at 11A
     ]
     
     # Calculate target SOC
@@ -66,6 +66,6 @@ def get_expected_current_multi_phase(
         weighted_current += phase_current * phase_energy
     
     if total_energy == 0:
-        return 23  # Default to Phase 1 current
+        return 32  # Default to Phase 1 current
     
     return weighted_current / total_energy
