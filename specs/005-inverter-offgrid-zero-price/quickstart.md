@@ -44,12 +44,10 @@ With the switch configured:
 
 ## Testing
 
-Run export-block-control tests in WSL:
+Run export-block-control tests:
 
-```bash
-wsl -d Ubuntu-24.04 -u mpleb -- bash -lc \
-  'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; \
-   ./.venv-wsl/bin/python -m pytest tests/test_export_block_control.py -v'
+```powershell
+.\.venv-win\Scripts\python.exe -m pytest tests/test_export_block_control.py -v
 ```
 
 ---

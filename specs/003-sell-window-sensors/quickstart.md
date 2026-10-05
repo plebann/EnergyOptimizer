@@ -41,13 +41,13 @@ Add four derived Home Assistant sensors alongside the current pricing sensor set
 Run the focused pricing tests first:
 
 ```bash
-wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py -q'
+.\.venv-win\Scripts\python.exe -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py -q
 ```
 
 If sensor registration coverage also moves, rerun a slightly broader slice:
 
 ```bash
-wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py tests/test_services_registration.py -q'
+.\.venv-win\Scripts\python.exe -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py tests/test_services_registration.py -q
 ```
 
 ## Manual Verification

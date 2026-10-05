@@ -711,18 +711,18 @@ Calculations return domain results; sensors decide HA availability, state format
 - pytest with pytest-asyncio in auto mode.
 - `MagicMock` and `AsyncMock` for Home Assistant state, services, config entries, and sensors.
 - Focused test files map closely to modules.
-- The WSL virtual environment command is the preferred local test runner.
+- The Windows virtual environment (`\.venv-win\`) is the preferred local test runner.
 
 ### Recommended Test Commands
 
-```bash
-wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/ -q'
+```powershell
+.\.venv-win\Scripts\python.exe -m pytest tests/ -q
 ```
 
 Focused Market Window compatibility set:
 
 ```bash
-wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py tests/test_helpers.py tests/test_scheduled_actions.py tests/test_solar_charge_block.py tests/test_export_block_control.py -q'
+.\.venv-win\Scripts\python.exe -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py tests/test_helpers.py tests/test_scheduled_actions.py tests/test_solar_charge_block.py tests/test_export_block_control.py -q
 ```
 
 ### Testing Guidance By Layer

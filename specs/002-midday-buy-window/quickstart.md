@@ -38,13 +38,13 @@ Add two derived Home Assistant text sensors that expose the cheapest 8-quarter-h
 Run focused tests first:
 
 ```bash
-wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py -q'
+.\.venv-win\Scripts\python.exe -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py -q
 ```
 
 If day-separation logic is also covered in a broader time-window regression file, run the expanded focused set:
 
 ```bash
-wsl -d Ubuntu-24.04 -u mpleb -- bash -lc 'cd /mnt/c/Users/mpleb/Sources/EnergyOptimizer; ./.venv-wsl/bin/python -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py tests/test_time_windows.py -q'
+.\.venv-win\Scripts\python.exe -m pytest tests/test_price_windows.py tests/test_pricing_sensors.py tests/test_time_windows.py -q
 ```
 
 ## Manual Verification

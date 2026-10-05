@@ -77,3 +77,10 @@ Use the default triage label vocabulary: `needs-triage`, `needs-info`, `ready-fo
 ### Domain docs
 
 This repo uses a single-context domain docs layout: root `CONTEXT.md` plus root `docs/adr/`. See `docs/agents/domain.md`.
+
+## Repo documentation
+
+Pointers into this repo's own docs, reached when a task touches them.
+
+- **Architecture** — `docs/EnergyOptimizer_Architecture.md` maps the HACS integration (data / decision-engine / control layers, scheduler). Read it before exploring structure or decision-engine actions, starting from its model instead of re-deriving the architecture.
+- **Research inventory** — `.copilot-tracking/research/` holds dated inventories of questions already investigated; `.copilot-tracking/README.md` indexes the folder and its retention rules. Check it before researching a question that may already be answered there.
