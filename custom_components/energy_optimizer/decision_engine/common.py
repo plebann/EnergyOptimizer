@@ -10,8 +10,8 @@ from homeassistant.util import dt as dt_util
 from ..calculations.battery import (
     apply_efficiency_compensation,
     calculate_charge_current,
+    calculate_charge_target_soc,
     calculate_soc_delta,
-    calculate_target_soc,
     calculate_target_soc_from_reserve,
     soc_to_kwh,
 )
@@ -365,7 +365,10 @@ def calculate_charge_action(
             target_floor,
             current_soc,
         )
-    target_soc = calculate_target_soc(target_base, soc_delta, max_soc=bc.max_soc)
+    target_soc = calculate_charge_target_soc(
+        target_base + soc_delta,
+        max_soc=bc.max_soc,
+    )
     fill_kwh = 0.0
     if current_soc < target_floor:
         fill_kwh = soc_to_kwh(

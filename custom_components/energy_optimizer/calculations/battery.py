@@ -3,6 +3,10 @@ from __future__ import annotations
 
 from math import ceil, floor
 
+# Fixed percentage point added to a charge target SOC after rounding up
+# (see "Charge Target Safety Margin" in CONTEXT.md).
+CHARGE_TARGET_SAFETY_MARGIN = 1.0
+
 
 def soc_to_kwh(soc: float, capacity_ah: float, voltage: float) -> float:
     """Convert SOC percentage to kWh energy.
@@ -300,6 +304,20 @@ def calculate_target_soc_from_reserve(
     reserve_soc = kwh_to_soc(needed_reserve_kwh, capacity_ah, voltage)
     target_soc = min_soc + reserve_soc
     return float(min(ceil(target_soc), max_soc))
+
+
+def calculate_charge_target_soc(
+    calculated_target_soc: float,
+    *,
+    max_soc: float,
+) -> float:
+    """Apply the Charge Target Safety Margin to a calculated charge target.
+
+    Rounds the calculated target up to a full percent, adds the fixed
+    safety margin, and caps the result at the configured ``max_soc``.
+    """
+    margin_applied = ceil(calculated_target_soc) + CHARGE_TARGET_SAFETY_MARGIN
+    return float(min(margin_applied, max_soc))
 
 
 def calculate_charge_current(

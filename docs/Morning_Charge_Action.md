@@ -104,6 +104,8 @@ Magazyn ma różne limity prądu ładowania w zależności od zakresu SOC:
 - 70-90% SOC: max 9A
 - 90-100% SOC: max 5A
 
+Wyznaczony docelowy SOC jest zaokrąglany w górę do pełnego procenta, a następnie podlega **Charge Target Safety Margin** (patrz `CONTEXT.md`): dokleja się 1 punkt procentowy, a wynik jest cięty do `max_soc` — np. wyliczenie 41.0 daje 42, a 99.5 przy `max_soc` 100 daje 100.
+
 Algorytm:
 1. Oblicz docelowy SOC na podstawie deficytu energii
 2. Podziel ładowanie na fazy odpowiadające zakresom SOC

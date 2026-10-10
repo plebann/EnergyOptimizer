@@ -122,6 +122,8 @@ flowchart TD
 
 **Obliczanie prądu ładowania**: jak w porannym scenariuszu (algorytm wielofazowy z limitami prądu).
 
+**Docelowy SOC programu 4** (szczyt SOC w oknie ładowania) trafia do falownika z tym samym w górę zaokrągleniem i **Charge Target Safety Margin** (patrz `CONTEXT.md`) jak w porannym scenariuszu — wynik jest cięty do `max_soc`.
+
 ## Wpływ na maszynę stanów
 
 - NORMAL → CHARGING_FROM_GRID, gdy wymagane jest ładowanie magazynu z sieci

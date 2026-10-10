@@ -478,7 +478,7 @@ async def test_morning_charge_logs_last_optimization_attributes() -> None:
     scenario, details = opt_sensor.log_optimization.call_args.args
 
     assert scenario == "Morning Grid Charge"
-    assert details["target_soc"] == pytest.approx(66.0)
+    assert details["target_soc"] == pytest.approx(67.0)
     assert details["charge_current_a"] == pytest.approx(8)
     history_sensor = hass.data[DOMAIN]["entry-1"]["optimization_history_sensor"]
     assert history_sensor.add_entry.call_args.kwargs["windows"] == [
@@ -552,7 +552,7 @@ def test_charge_action_below_floor_targets_charge_base_and_sizes_current_for_tot
         target_charge_time_hours=2.0,
     )
 
-    assert action.target_soc == pytest.approx(31.0)
+    assert action.target_soc == pytest.approx(32.0)
     assert action.charge_current == 23
 
 
@@ -567,7 +567,7 @@ def test_charge_action_at_or_above_floor_is_unchanged_by_explicit_floor() -> Non
         target_charge_time_hours=2.0,
     )
 
-    assert action.target_soc == pytest.approx(55.0)
+    assert action.target_soc == pytest.approx(56.0)
     assert action.charge_current == 11
 
 
@@ -581,8 +581,42 @@ def test_charge_action_default_target_floor_is_min_soc() -> None:
         target_charge_time_hours=2.0,
     )
 
-    assert action.target_soc == pytest.approx(31.0)
+    assert action.target_soc == pytest.approx(32.0)
     assert action.charge_current == 23
+
+
+def test_charge_action_target_includes_safety_margin() -> None:
+    # Issue #56: 24.1% base + delta 4 (0.4 kWh of 9.6 kWh floors to 4) gives
+    # 28.1 -> ceil 29 + 1 safety point = 30%.
+    action = decision_common.calculate_charge_action(
+        _battery_config(),
+        gap_kwh=0.4,
+        current_soc=24.1,
+        target_charge_time_hours=2.0,
+    )
+
+    assert action.target_soc == pytest.approx(30.0)
+
+
+def test_charge_action_target_capped_at_max_soc() -> None:
+    # Issue #56: 93.0 + delta 1 (0.1 kWh of 9.6 kWh floors to 1) gives raw 94;
+    # rounded + 1 = 95 lands exactly on max_soc 95.
+    capped_config = decision_common.BatteryConfig(
+        capacity_ah=200,
+        voltage=48.0,
+        min_soc=21.0,
+        min_soc_pv=15.0,
+        max_soc=95.0,
+        efficiency=100.0,
+    )
+    action = decision_common.calculate_charge_action(
+        capped_config,
+        gap_kwh=0.1,
+        current_soc=93.0,
+        target_charge_time_hours=2.0,
+    )
+
+    assert action.target_soc == pytest.approx(95.0)
 
 
 def _morning_below_min_states_and_config() -> tuple[dict[str, object], dict[str, str]]:

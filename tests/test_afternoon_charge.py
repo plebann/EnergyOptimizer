@@ -421,6 +421,36 @@ async def test_afternoon_metrics_use_new_public_contract() -> None:
 
 
 @pytest.mark.asyncio
+async def test_no_grid_charge_targets_peak_plus_safety_margin() -> None:
+    """Issue #56: the Program 4 target is the charge-window peak + 1 point.
+
+    No demand, no PV, no arbitrage: the window peak is the current SOC 44.3,
+    so the target is ceil(44.3) + 1 = 46 instead of today's ceil(44.3) = 45.
+    """
+    hass, _ = _hass(current_soc=44.3)
+    details = await _run(
+        hass,
+        _forecast(),
+        arbitrage_enabled=False,
+    )
+
+    assert details["target_soc"] == pytest.approx(46.0)
+
+
+@pytest.mark.asyncio
+async def test_no_grid_charge_target_capped_at_max_soc() -> None:
+    """Issue #56: peak 43.2 rounds up to 44; +1 lands exactly on max_soc 45."""
+    hass, _ = _hass(current_soc=43.2, max_soc=45.0)
+    details = await _run(
+        hass,
+        _forecast(),
+        arbitrage_enabled=False,
+    )
+
+    assert details["target_soc"] == pytest.approx(45.0)
+
+
+@pytest.mark.asyncio
 async def test_forecast_horizon_falls_back_to_midnight() -> None:
     """Unavailable tomorrow pricing keeps the full day-buy start-to-midnight horizon."""
     hass, _ = _hass(current_soc=50.0)
