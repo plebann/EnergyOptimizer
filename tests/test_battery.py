@@ -2,8 +2,10 @@
 import pytest
 
 from custom_components.energy_optimizer.calculations.battery import (
+    CHARGE_TARGET_SAFETY_MARGIN,
     calculate_battery_reserve,
     calculate_battery_space,
+    calculate_charge_target_soc,
     calculate_hourly_charge_capacity,
     calculate_target_soc_from_reserve,
     calculate_total_capacity,
@@ -130,3 +132,24 @@ def test_calculate_target_soc_from_reserve():
         voltage=48,
     )
     assert capped_target == 80.0
+
+
+def test_charge_target_safety_margin_is_one_point():
+    """The safety margin is a fixed single percentage point."""
+    assert CHARGE_TARGET_SAFETY_MARGIN == 1.0
+
+
+def test_calculate_charge_target_soc_normal_case():
+    """Issue #56 acceptance: 24.1 -> ceil 25 + 1 = 26."""
+    assert calculate_charge_target_soc(24.1, max_soc=100) == 26.0
+
+
+def test_calculate_charge_target_soc_integer_target():
+    """Issue #56 acceptance: an exact integer still gains the margin point."""
+    assert calculate_charge_target_soc(25.0, max_soc=100) == 26.0
+
+
+def test_calculate_charge_target_soc_capped_at_max_soc():
+    """Issue #56 acceptance: rounded-plus-one exceeding max_soc is capped."""
+    assert calculate_charge_target_soc(99.5, max_soc=95) == 95.0
+    assert calculate_charge_target_soc(95.0, max_soc=95) == 95.0

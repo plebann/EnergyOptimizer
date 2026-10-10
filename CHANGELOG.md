@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Morning Charge and Afternoon Charge now apply a fixed 1 percentage point safety margin to the calculated charge target SOC: the target is rounded up to a full percent, +1 point is added, and the result is capped at the configured `max_soc` (issue #56).
+
 - Breaking change: renamed config keys `tariff_start_hour_sensor` and `tariff_end_hour_sensor` to `high_tariff_start_hour_sensor` and `high_tariff_end_hour_sensor`.
 - Updated config flow translations, scheduler diagnostics, tests, and action documentation to use the new high-tariff naming.
 

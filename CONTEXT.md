@@ -88,6 +88,11 @@ _Avoid_: Program SOC safety level
 The effective state of charge from which EnergyOptimizer calculates the temporary Morning Charge target. When the battery SOC reported at decision time is below the current Safety SOC Floor, the Charge Base is the Safety SOC Floor; otherwise it equals the reported SOC.
 _Avoid_: Virtual SOC, Clamped SOC
 
+### Charge Target Safety Margin
+
+The fixed percentage point (currently 1 point) added to a calculated charge target SOC after rounding it up, before the result is capped at the configured `max_soc`. It applies to the Morning Charge temporary Program 2 target and the Afternoon Charge Program 4 target; sell/discharge targets are unaffected.
+_Avoid_: margin (forecast demand multiplier), Arbitrage Margin
+
 ### Program 2 Normal SOC Target
 
 The Program 2 SOC value used after a temporary Morning Charge target ends: `min_soc`.

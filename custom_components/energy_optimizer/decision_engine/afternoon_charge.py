@@ -7,7 +7,11 @@ from math import ceil
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
-from ..calculations.battery import calculate_hourly_charge_capacity, soc_to_kwh
+from ..calculations.battery import (
+    calculate_charge_target_soc,
+    calculate_hourly_charge_capacity,
+    soc_to_kwh,
+)
 from ..calculations.energy import hourly_demand
 from ..const import (
     CONF_EVENING_MAX_PRICE_SENSOR,
@@ -240,8 +244,9 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
         return ChargeAction(
             gap_to_charge_kwh=self._plan.planned_grid_charge_kwh,
             soc_delta=grid_soc_delta,
-            target_soc=float(
-                min(ceil(simulation.charge_window_peak_soc), self.bc.max_soc)
+            target_soc=calculate_charge_target_soc(
+                simulation.charge_window_peak_soc,
+                max_soc=self.bc.max_soc,
             ),
             charge_current=simulation.planned_charge_current_a,
         )
