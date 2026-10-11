@@ -314,10 +314,12 @@ def calculate_charge_target_soc(
     """Apply the Charge Target Safety Margin to a calculated charge target.
 
     Rounds the calculated target up to a full percent, adds the fixed
-    safety margin, and caps the result at the configured ``max_soc``.
+    safety margin, and caps the result at the greatest whole percentage
+    at or below the configured ``max_soc`` — the Program SOC write rounds
+    up, so a fractional cap would be written above the configured maximum.
     """
     margin_applied = ceil(calculated_target_soc) + CHARGE_TARGET_SAFETY_MARGIN
-    return float(min(margin_applied, max_soc))
+    return float(min(margin_applied, floor(max_soc)))
 
 
 def calculate_charge_current(
