@@ -75,10 +75,109 @@ class _FakeStore:
 
 
 @pytest.mark.asyncio
-async def test_execute_sell_clamps_target_to_safety_soc_floor(
+async def test_execute_sell_no_action_when_floored_raw_target_below_floor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Target SOC never drops below the configured safety floor."""
+    """Issue #57: a raw target SOC below the Safety SOC Floor must not sell."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    strategy = _TestSellStrategy(hass, entry_id="entry-1", margin=1.0)
+    strategy.entry = entry
+    strategy.config = {}
+    strategy.battery_config = SimpleNamespace(
+        min_soc=18.0,
+        capacity_ah=37.0,
+        voltage=640.0,
+        efficiency=0.9,
+    )
+    strategy.current_soc = 19.0
+    strategy.prog_soc_entity = "number.prog5_soc"
+    strategy.original_prog_soc = 19.0
+    strategy.restore_hour = 18
+    strategy.integration_context = SimpleNamespace()
+
+    saved: list[dict] = []
+
+    class _RecordingStore:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def async_load(self):
+            return None
+
+        async def async_save(self, data: dict) -> None:
+            saved.append(data)
+
+    set_work_mode = AsyncMock()
+    set_program_soc = AsyncMock()
+    set_export_power = AsyncMock()
+    set_discharge_current = AsyncMock()
+    outcomes: list = []
+
+    async def _capture_log(_hass, _entry, outcome, **_kwargs) -> None:
+        outcomes.append(outcome)
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.Store",
+        _RecordingStore,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_work_mode",
+        set_work_mode,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_program_soc",
+        set_program_soc,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base.set_export_power",
+        set_export_power,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base."
+        "set_discharge_current",
+        set_discharge_current,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base."
+        "log_decision_unified",
+        _capture_log,
+    )
+
+    outcome = SimpleNamespace(
+        action_type="no_action", details={}, entities_changed=[]
+    )
+    # Surplus sized so the raw target SOC lands just below the 18% floor
+    # (raw target ~15.7%), while the current SOC sits only 1 point above it.
+    await strategy._execute_sell(
+        SellRequest(
+            surplus_kwh=0.7032,
+            required_kwh=0.0,
+            build_outcome_fn=lambda *args: outcome,
+            build_no_action_fn=lambda _surplus: outcome,
+        )
+    )
+
+    assert outcomes
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].reason == "insufficient battery energy above minimum SOC"
+    assert outcomes[-1].details["safety_soc_floor"] == 18.0
+    assert outcomes[-1].details["floored_raw_target_soc"] == 15.0
+    assert set_work_mode.await_count == 0
+    assert set_program_soc.await_count == 0
+    assert set_export_power.await_count == 0
+    assert set_discharge_current.await_count == 0
+    assert saved == []
+    assert "sell_restore" not in hass.data[DOMAIN]["entry-1"]
+
+
+@pytest.mark.asyncio
+async def test_execute_sell_sells_when_floored_raw_target_reaches_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A floored raw target at the floor is eligible and sells down to it."""
     hass = MagicMock()
     hass.data = {DOMAIN: {"entry-1": {}}}
     entry = MagicMock()
@@ -89,46 +188,146 @@ async def test_execute_sell_clamps_target_to_safety_soc_floor(
     strategy.battery_config = SimpleNamespace(
         min_soc=20.0,
         capacity_ah=37.0,
-        voltage=600.0,
-        efficiency=90.0,
+        voltage=640.0,
+        efficiency=0.9,
     )
-    strategy.current_soc = 40.0
+    strategy.current_soc = 23.0
     strategy.prog_soc_entity = "number.prog5_soc"
-    strategy.original_prog_soc = 40.0
+    strategy.original_prog_soc = 23.0
     strategy.restore_hour = 18
     strategy.integration_context = SimpleNamespace()
 
+    set_work_mode = AsyncMock()
+    set_program_soc = AsyncMock()
+    set_export_power = AsyncMock()
+
+    async def _capture_log(_hass, _entry, outcome, **_kwargs) -> None:
+        pass
+
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.set_program_soc",
-        AsyncMock(),
+        "custom_components.energy_optimizer.decision_engine.sell_base."
+        "set_work_mode",
+        set_work_mode,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.set_export_power",
-        AsyncMock(),
+        "custom_components.energy_optimizer.decision_engine.sell_base."
+        "set_program_soc",
+        set_program_soc,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.sell_base.log_decision_unified",
-        AsyncMock(),
+        "custom_components.energy_optimizer.decision_engine.sell_base."
+        "set_export_power",
+        set_export_power,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base."
+        "log_decision_unified",
+        _capture_log,
     )
 
-    outcome = SimpleNamespace(details={}, entities_changed=[])
+    outcome = SimpleNamespace(action_type="sell", details={}, entities_changed=[])
     captured: dict[str, float] = {}
 
     await strategy._execute_sell(
         SellRequest(
-            surplus_kwh=5.0,
-            required_kwh=2.7,
+            surplus_kwh=0.554112,
+            required_kwh=0.0,
             build_outcome_fn=lambda target, _surplus, _export: (
                 captured.update(target=target) or outcome
             ),
-            build_no_action_fn=lambda _surplus: outcome,
+            build_no_action_fn=lambda _surplus: SimpleNamespace(
+                action_type="no_action", details={}, entities_changed=[]
+            ),
         ),
         skip_restore=True,
     )
 
+    # Raw target 20.4 floors to 20, exactly the floor: the sell is eligible
+    # and the written Program SOC lands on the floor.
     assert captured["target"] == 20.0
+    assert outcome.details["floored_raw_target_soc"] == 20.0
     assert outcome.details["safety_soc_floor"] == 20.0
-    assert outcome.details["required_battery_energy_dc_kwh"] == pytest.approx(5.556)
+    assert set_program_soc.await_count == 1
+    assert set_work_mode.await_count == 1
+    assert set_export_power.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_sell_no_action_when_floored_raw_target_just_below_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A raw target just below the next whole point is infeasible (no sell)."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    strategy = _TestSellStrategy(hass, entry_id="entry-1", margin=1.0)
+    strategy.entry = entry
+    strategy.config = {}
+    strategy.battery_config = SimpleNamespace(
+        min_soc=20.0,
+        capacity_ah=37.0,
+        voltage=640.0,
+        efficiency=0.9,
+    )
+    strategy.current_soc = 23.0
+    strategy.prog_soc_entity = "number.prog5_soc"
+    strategy.original_prog_soc = 23.0
+    strategy.restore_hour = 18
+    strategy.integration_context = SimpleNamespace()
+
+    set_work_mode = AsyncMock()
+    set_program_soc = AsyncMock()
+    set_export_power = AsyncMock()
+    outcomes: list = []
+
+    async def _capture_log(_hass, _entry, outcome, **_kwargs) -> None:
+        outcomes.append(outcome)
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base."
+        "set_work_mode",
+        set_work_mode,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base."
+        "set_program_soc",
+        set_program_soc,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base."
+        "set_export_power",
+        set_export_power,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.sell_base."
+        "log_decision_unified",
+        _capture_log,
+    )
+
+    # Raw target 19.6 floors to 19, one point below the 20 floor.
+    await strategy._execute_sell(
+        SellRequest(
+            surplus_kwh=0.724608,
+            required_kwh=0.0,
+            build_outcome_fn=lambda *args: SimpleNamespace(
+                action_type="sell", details={}, entities_changed=[]
+            ),
+            build_no_action_fn=lambda _surplus: SimpleNamespace(
+                action_type="no_action", details={}, entities_changed=[]
+            ),
+        ),
+        skip_restore=True,
+    )
+
+    assert outcomes
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].reason == "insufficient battery energy above minimum SOC"
+    assert outcomes[-1].details["floored_raw_target_soc"] == 19.0
+    assert set_work_mode.await_count == 0
+    assert set_program_soc.await_count == 0
+    assert set_export_power.await_count == 0
+    assert "sell_restore" not in hass.data[DOMAIN]["entry-1"]
 
 
 @pytest.mark.asyncio

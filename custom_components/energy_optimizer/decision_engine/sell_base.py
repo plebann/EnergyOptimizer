@@ -455,10 +455,12 @@ class BaseSellStrategy(ABC):
         raw_target_soc = self.current_soc - (
             required_battery_energy_kwh / battery_capacity_kwh * 100.0
         )
-        target_soc = max(float(floor(raw_target_soc)), target_soc_floor)
+        floored_raw_target_soc = float(floor(raw_target_soc))
+        target_soc = max(floored_raw_target_soc, target_soc_floor)
 
         target_diagnostics = {
             "rt": round(raw_target_soc, 1),
+            "floored_raw_target_soc": floored_raw_target_soc,
             "planned_export_ac_kwh": round(surplus_kwh, 3),
             "export_limit_ac_kwh": round(export_limit_kwh, 3),
             "executable_export_ac_kwh": round(executable_export_kwh, 3),
@@ -484,10 +486,17 @@ class BaseSellStrategy(ABC):
             },
             result={
                 "raw_target_soc": raw_target_soc,
+                "floored_raw_target_soc": floored_raw_target_soc,
                 "target_soc": target_soc,
                 "required_battery_energy_dc_kwh": required_battery_energy_kwh,
             },
         )
+        if floored_raw_target_soc < target_soc_floor:
+            outcome = request.build_no_action_fn(executable_export_kwh)
+            outcome.reason = "insufficient battery energy above minimum SOC"
+            outcome.details.update(target_diagnostics)
+            await self._log_outcome(outcome)
+            return
         if target_soc >= self.current_soc:
             outcome = request.build_no_action_fn(executable_export_kwh)
             outcome.details.update(target_diagnostics)

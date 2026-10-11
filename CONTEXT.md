@@ -80,7 +80,7 @@ _Avoid_: Emptying the battery
 
 ### Safety SOC Floor
 
-The configured minimum battery state of charge that an EnergyOptimizer decision must preserve. `min_soc` is the default floor; `min_soc_pv` applies only when the decision confirms sufficient PV energy for the relevant horizon.
+The configured minimum battery state of charge that an EnergyOptimizer decision must preserve. `min_soc` is the default floor; `min_soc_pv` applies only when the decision confirms sufficient PV energy for the relevant horizon. For sell decisions the floor is also a feasibility boundary: a calculated target that would sell below it is refused as no action rather than converted into a valid sell.
 _Avoid_: Program SOC safety level
 
 ### Charge Base
