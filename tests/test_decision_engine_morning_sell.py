@@ -776,6 +776,117 @@ async def test_morning_sell_skips_when_required_reserve_exceeds_current_soc(
     set_program_soc.assert_awaited()
 
 
+@pytest.mark.asyncio
+async def test_morning_sell_no_action_when_battery_energy_below_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A sell whose floored raw target is below the safety floor exports nothing."""
+    config = _base_config()
+    states = _base_states()
+    states["sensor.battery_soc"] = "50"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+
+    set_work_mode = AsyncMock()
+    set_program_soc = AsyncMock()
+    set_export_power = AsyncMock()
+    set_discharge_current = AsyncMock()
+
+    async def _capture_log(hass, entry, outcome, context, logger):
+        outcomes.append(outcome)
+
+    class _FakeStore:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def async_load(self):
+            return None
+
+        async def async_save(self, data):
+            return None
+
+    monkeypatch.setattr(f"{SELL_BASE}.log_decision_unified", _capture_log)
+    monkeypatch.setattr(f"{SELL_BASE}.Store", _FakeStore)
+    monkeypatch.setattr(f"{SELL_BASE}.set_work_mode", set_work_mode)
+    monkeypatch.setattr(f"{SELL_BASE}.set_program_soc", set_program_soc)
+    monkeypatch.setattr(f"{SELL_BASE}.set_export_power", set_export_power)
+    monkeypatch.setattr(f"{SELL_BASE}.set_discharge_current", set_discharge_current)
+    monkeypatch.setattr(
+        f"{MORNING}.get_morning_pv_forecast",
+        lambda *_args, **_kwargs: MorningPVForecast(
+            total_kwh=2.0,
+            hourly_kwh={hour: 0.0 for hour in range(24)},
+            status="valid_hourly",
+            method="hourly",
+            source_entity="sensor.pv_forecast_today",
+            aggregate_kwh=2.0,
+            raw_hourly_kwh=2.0,
+            difference_kwh=0.0,
+            tolerance_kwh=0.25,
+            daylight_hours=[],
+            sufficiency_available=True,
+        ),
+    )
+    monkeypatch.setattr(
+        f"{SELL_BASE}.dt_util.utcnow",
+        lambda: datetime(2026, 2, 24, 7, 0, 0),
+    )
+    monkeypatch.setattr(
+        f"{SELL_BASE}.dt_util.as_local",
+        lambda _dt: SimpleNamespace(hour=7),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.build_hourly_usage_array",
+        lambda config, get_state, daily_load_fallback=None: [0.0] * 24,
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.resolve_tariff_end_hour",
+        lambda hass, config, default_hour=13: 13,
+    )
+
+    async def _hp(*args, **kwargs):
+        return 1.0, {}
+
+    monkeypatch.setattr(f"{MORNING}.get_heat_pump_forecast_window", _hp)
+    monkeypatch.setattr(
+        f"{MORNING}.get_pv_forecast_window",
+        lambda *args, **kwargs: (2.0, {}),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_losses",
+        lambda *args, **kwargs: (0.0, 0.0),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_sufficiency_window",
+        lambda **kwargs: (3.0, 2.0, 1.0, 13, False),
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_battery_reserve",
+        lambda *args, **kwargs: 10.0,
+    )
+    # Selected surplus 9.0 kWh (12.0 minus the 3.0 kWh battery free space) needs
+    # 10.0 kWh from the battery, which floors the raw target to 7.0, below the
+    # 20.0 safety floor.
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_surplus_energy",
+        lambda reserve, required, pv: 12.0,
+    )
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].reason == "insufficient battery energy above minimum SOC"
+    assert outcomes[-1].details["safety_soc_floor"] == 20.0
+    assert outcomes[-1].details["floored_raw_target_soc"] == 7.0
+    assert outcomes[-1].details["required_battery_energy_dc_kwh"] == pytest.approx(10.0)
+    # Infeasible sell: no inverter write of any regulator kind, no restore payload.
+    assert set_work_mode.await_count == 0
+    assert set_program_soc.await_count == 0
+    assert set_export_power.await_count == 0
+    assert set_discharge_current.await_count == 0
+    assert "sell_restore" not in hass.data[DOMAIN]["entry-1"]
+
+
 def test_morning_sell_discharge_current_uses_ceiling_and_entity_max() -> None:
     """Current regulator converts final sell energy to whole amps."""
     state = MagicMock()

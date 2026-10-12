@@ -21,6 +21,7 @@ from custom_components.energy_optimizer.const import (
     CONF_EXPORT_POWER_ENTITY,
     CONF_MAX_EXPORT_POWER,
     CONF_MIN_ARBITRAGE_PRICE,
+    CONF_MIN_SOC,
     CONF_PROG5_SOC_ENTITY,
     CONF_PV_PRODUCTION_SENSOR,
     CONF_TEST_MODE,
@@ -555,6 +556,68 @@ async def test_evening_sell_surplus_sell_success(monkeypatch: pytest.MonkeyPatch
     assert outcomes
     assert outcomes[-1].action_type == "sell"
     assert outcomes[-1].details["sufficiency_hour"] == 5
+
+
+@pytest.mark.asyncio
+async def test_evening_sell_no_action_when_battery_energy_below_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An evening sell whose floored raw target is below the floor exports nothing."""
+    config = _base_config()
+    config[CONF_MIN_SOC] = 18
+    states = _base_states()
+    states["sensor.evening_price"] = "350"
+    states["sensor.battery_soc"] = "19"
+    hass = _setup_hass(config, states)
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+
+    set_work_mode = AsyncMock()
+    set_program_soc = AsyncMock()
+    set_export_power = AsyncMock()
+    set_discharge_current = AsyncMock()
+    monkeypatch.setattr(f"{SELL_BASE}.set_work_mode", set_work_mode)
+    monkeypatch.setattr(f"{SELL_BASE}.set_program_soc", set_program_soc)
+    monkeypatch.setattr(f"{SELL_BASE}.set_export_power", set_export_power)
+    monkeypatch.setattr(f"{SELL_BASE}.set_discharge_current", set_discharge_current)
+
+    async def _hp(*args, **kwargs):
+        return 0.0, {}
+
+    monkeypatch.setattr(f"{EVENING}.get_heat_pump_forecast_window", _hp)
+    monkeypatch.setattr(
+        f"{EVENING}.get_pv_forecast_window",
+        lambda *args, **kwargs: (0.0, {}),
+    )
+    monkeypatch.setattr(
+        f"{EVENING}.calculate_losses",
+        lambda *args, **kwargs: (0.0, 0.0),
+    )
+    # 2.0 kWh sellable surplus above the 19% SOC needs 2.222 kWh from the
+    # battery, which floors the raw target to 9.0, below the 18.0 floor.
+    monkeypatch.setattr(
+        f"{EVENING}.calculate_battery_reserve",
+        lambda *args, **kwargs: 2.0,
+    )
+    monkeypatch.setattr(
+        f"{EVENING}.calculate_sufficiency_window",
+        lambda **kwargs: (1.0, 0.5, 0.5, 5, True),
+    )
+
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes
+    assert outcomes[-1].action_type == "no_action"
+    assert outcomes[-1].reason == "insufficient battery energy above minimum SOC"
+    assert outcomes[-1].details["safety_soc_floor"] == 18.0
+    assert outcomes[-1].details["floored_raw_target_soc"] == 9.0
+    assert outcomes[-1].details["required_battery_energy_dc_kwh"] == pytest.approx(2.222)
+    # Infeasible sell: no inverter write of any regulator kind, no restore payload.
+    assert set_work_mode.await_count == 0
+    assert set_program_soc.await_count == 0
+    assert set_export_power.await_count == 0
+    assert set_discharge_current.await_count == 0
+    assert "sell_restore" not in hass.data[DOMAIN]["entry-1"]
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Breaking change: renamed the balancing charge-current cap key `max_charge_current_entity` to `charge_current_entity` (constant `CONF_MAX_CHARGE_CURRENT_ENTITY` → `CONF_CHARGE_CURRENT_ENTITY`), reusing the historical grid key name that is no longer in use since the v4 → v5 migration. Existing entries are migrated automatically (config entry v5 → v6) with the value carried over under the new key. External references to the old key (e.g. automations or scripts reading `entry.data["max_charge_current_entity"]`) must be updated to the new name.
 
+### Fixed
+
+- Morning Sell and Evening Sell now skip export when the required battery energy would take the battery below the Safety SOC Floor: the run becomes `no_action` with reason "insufficient battery energy above minimum SOC" — no inverter work mode, Program SOC, or regulator write is issued and no sell-restore plan is created (issue #57).
+
+- The config flow and options flow now reject minimum/maximum SOC pairs with no whole percentage between them (e.g. minimum 95.4, maximum 95.5): the inverter can only write whole-percent Program SOC values, so such a configuration could never be satisfied and the charge target cap could silently fall below the Safety SOC Floor. Entries created before this validation may still persist such a pair; the integration now logs an error during entry setup and directs the user to correct the pair in the integration options.
+
 ### For Users
 
 - Existing Energy Optimizer entries using the old tariff hour sensor fields must be reconfigured in the UI because this rename is intentionally not migrated automatically.

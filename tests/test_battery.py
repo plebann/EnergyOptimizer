@@ -153,3 +153,10 @@ def test_calculate_charge_target_soc_capped_at_max_soc():
     """Issue #56 acceptance: rounded-plus-one exceeding max_soc is capped."""
     assert calculate_charge_target_soc(99.5, max_soc=95) == 95.0
     assert calculate_charge_target_soc(95.0, max_soc=95) == 95.0
+
+
+def test_calculate_charge_target_soc_fractional_max_soc_caps_at_whole_percent():
+    """A fractional max_soc caps at the greatest writable whole percentage."""
+    assert calculate_charge_target_soc(50.1, max_soc=95.5) == 52.0
+    assert calculate_charge_target_soc(93.2, max_soc=95.5) == 95.0
+    assert calculate_charge_target_soc(94.9, max_soc=95.5) == 95.0

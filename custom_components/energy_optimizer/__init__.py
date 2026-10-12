@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from math import floor
 from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
@@ -9,7 +10,14 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, SERVICE_OVERNIGHT_SCHEDULE
+from .const import (
+    CONF_MAX_SOC,
+    CONF_MIN_SOC,
+    DEFAULT_MAX_SOC,
+    DEFAULT_MIN_SOC,
+    DOMAIN,
+    SERVICE_OVERNIGHT_SCHEDULE,
+)
 from .coordinator import EnergyOptimizerCoordinator
 from .scheduler.action_scheduler import ActionScheduler
 from .services import async_register_services
@@ -124,6 +132,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id]["coordinator"] = coordinator
     emit_config_snapshot(hass, entry)
+
+    # Entries created before the in-UI SOC band validation may still persist
+    # a pair with no writable whole percent between the limits; the charge
+    # target is then capped below the Safety SOC Floor.
+    min_soc = entry.data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
+    max_soc = entry.data.get(CONF_MAX_SOC, DEFAULT_MAX_SOC)
+    if floor(max_soc) < min_soc:
+        _LOGGER.error(
+            "Infeasible SOC pair (minimum %.1f%%, maximum %.1f%%): no whole "
+            "percentage exists between the limits, and the inverter only "
+            "writes whole-percent Program SOC values. The charge target is "
+            "capped at %.0f%%, below the Safety SOC Floor. Correct the pair "
+            "in the integration options.",
+            min_soc,
+            max_soc,
+            floor(max_soc),
+        )
 
     # Forward entry setup to sensor platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

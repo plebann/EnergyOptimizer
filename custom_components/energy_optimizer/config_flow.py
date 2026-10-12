@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from math import floor
 from typing import Any
 
 import voluptuous as vol
@@ -654,6 +655,10 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Check min/max SOC relationship
         if user_input[CONF_MIN_SOC] >= user_input[CONF_MAX_SOC]:
             errors[CONF_MIN_SOC] = "min_greater_than_max"
+        elif floor(user_input[CONF_MAX_SOC]) < user_input[CONF_MIN_SOC]:
+            # No whole percentage exists between the limits, and the inverter
+            # only writes whole-percent Program SOC values.
+            errors[CONF_MIN_SOC] = "no_writable_soc_between_min_and_max"
 
         if user_input[CONF_MIN_SOC_PV] > user_input[CONF_MIN_SOC]:
             errors[CONF_MIN_SOC_PV] = "min_pv_greater_than_min"
@@ -901,6 +906,10 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             if user_input[CONF_MIN_SOC] >= user_input[CONF_MAX_SOC]:
                 errors["base"] = "min_greater_than_max"
+            elif floor(user_input[CONF_MAX_SOC]) < user_input[CONF_MIN_SOC]:
+                # No whole percentage exists between the limits, and the
+                # inverter only writes whole-percent Program SOC values.
+                errors["base"] = "no_writable_soc_between_min_and_max"
             elif user_input[CONF_MIN_SOC_PV] > user_input[CONF_MIN_SOC]:
                 errors["base"] = "min_pv_greater_than_min"
             else:

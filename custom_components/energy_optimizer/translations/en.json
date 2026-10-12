@@ -199,6 +199,7 @@
       "not_switch_entity": "Entity must be a switch entity.",
       "buy_or_sell_price_required": "Configure at least one of Buy Price Sensor or Sell Price Sensor.",
       "min_greater_than_max": "Minimum SOC must be less than maximum SOC.",
+      "no_writable_soc_between_min_and_max": "Minimum and maximum SOC are too close together: no whole percentage exists between them, and the inverter can only write whole-percent Program SOC values.",
       "no_target_configured": "You must configure either a single target SOC entity or at least one time-based program.",
       "cannot_connect": "Failed to connect.",
       "unknown": "Unexpected error occurred."
@@ -280,6 +281,7 @@
       "entity_not_found": "Entity not found. Please check the entity ID.",
       "not_time_entity": "Entity must be a time or input datetime entity.",
       "min_greater_than_max": "Minimum SOC must be less than maximum SOC.",
+      "no_writable_soc_between_min_and_max": "Minimum and maximum SOC are too close together: no whole percentage exists between them, and the inverter can only write whole-percent Program SOC values.",
       "min_pv_greater_than_min": "Morning sell minimum SOC must be less than or equal to minimum SOC."
     }
   },
