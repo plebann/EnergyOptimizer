@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Morning Sell and Evening Sell now skip export when the required battery energy would take the battery below the Safety SOC Floor: the run becomes `no_action` with reason "insufficient battery energy above minimum SOC" — no inverter work mode, Program SOC, or regulator write is issued and no sell-restore plan is created (issue #57).
 
+- The config flow and options flow now reject minimum/maximum SOC pairs with no whole percentage between them (e.g. minimum 95.4, maximum 95.5): the inverter can only write whole-percent Program SOC values, so such a configuration could never be satisfied and the charge target cap could silently fall below the Safety SOC Floor.
+
 ### For Users
 
 - Existing Energy Optimizer entries using the old tariff hour sensor fields must be reconfigured in the UI because this rename is intentionally not migrated automatically.

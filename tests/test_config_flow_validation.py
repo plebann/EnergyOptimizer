@@ -5,8 +5,14 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock
 
-from custom_components.energy_optimizer.config_flow import EnergyOptimizerConfigFlow
+from custom_components.energy_optimizer.config_flow import (
+    EnergyOptimizerConfigFlow,
+    EnergyOptimizerOptionsFlow,
+)
 from custom_components.energy_optimizer.const import (
+    CONF_MAX_SOC,
+    CONF_MIN_SOC,
+    CONF_MIN_SOC_PV,
     CONF_PROG2_SOC_ENTITY,
     CONF_PROG2_TIME_START_ENTITY,
 )
@@ -237,3 +243,68 @@ def test_program2_rejects_date_only_input_datetime() -> None:
     )
 
     assert result == {CONF_PROG2_TIME_START_ENTITY: "not_time_entity"}
+
+
+def _validate_battery_params(min_soc: float, max_soc: float) -> dict[str, str]:
+    return EnergyOptimizerConfigFlow()._validate_battery_params(
+        {CONF_MIN_SOC: min_soc, CONF_MIN_SOC_PV: 15.0, CONF_MAX_SOC: max_soc}
+    )
+
+
+def test_validate_battery_params_rejects_soc_band_without_writable_whole_percent() -> None:
+    """min_soc=95.4 / max_soc=95.5 has no writable whole-percent value."""
+    assert _validate_battery_params(95.4, 95.5) == {
+        CONF_MIN_SOC: "no_writable_soc_between_min_and_max"
+    }
+
+
+def test_validate_battery_params_accepts_band_containing_a_writable_whole_percent() -> None:
+    """95 is writable in [95.0, 95.5], so the band is valid."""
+    assert _validate_battery_params(95.0, 95.5) == {}
+
+
+def test_validate_battery_params_keeps_min_greater_than_max_precedence() -> None:
+    assert _validate_battery_params(95.5, 95.4) == {
+        CONF_MIN_SOC: "min_greater_than_max"
+    }
+
+
+def test_setup_battery_params_step_rejects_non_writable_soc_band() -> None:
+    flow = EnergyOptimizerConfigFlow()
+
+    result = asyncio.run(
+        flow.async_step_battery_params(
+            {
+                CONF_MIN_SOC: 95.4,
+                CONF_MIN_SOC_PV: 95.4,
+                CONF_MAX_SOC: 95.5,
+            }
+        )
+    )
+
+    assert result["step_id"] == "battery_params"
+    assert result["errors"] == {
+        CONF_MIN_SOC: "no_writable_soc_between_min_and_max"
+    }
+
+
+def test_options_battery_params_step_rejects_non_writable_soc_band() -> None:
+    entry = MagicMock(spec=["data", "options"])
+    entry.data = {}
+    entry.options = {}
+    flow = EnergyOptimizerOptionsFlow(entry)
+
+    result = asyncio.run(
+        flow.async_step_battery_params(
+            {
+                CONF_MIN_SOC: 95.4,
+                CONF_MIN_SOC_PV: 95.4,
+                CONF_MAX_SOC: 95.5,
+            }
+        )
+    )
+
+    assert result["step_id"] == "battery_params"
+    assert result["errors"] == {
+        "base": "no_writable_soc_between_min_and_max"
+    }
