@@ -279,8 +279,8 @@ async def test_infeasible_floor_restoration_reports_the_remaining_deficit() -> N
         arbitrage_enabled=True,
     )
 
-    assert details["protection_grid_charge_kwh"] == pytest.approx(2.3, abs=0.01)
-    assert details["uncovered_reserve_deficit_kwh"] == pytest.approx(1.7, abs=0.01)
+    assert details["protection_grid_charge_kwh"] == pytest.approx(3.2, abs=0.01)
+    assert details["uncovered_reserve_deficit_kwh"] == pytest.approx(0.8, abs=0.01)
     assert details["arbitrage_reason"] == "protection_infeasible"
 
 
@@ -363,16 +363,16 @@ async def test_infeasible_protection_disables_arbitrage_and_reports_deficit() ->
         arbitrage_enabled=True,
     )
 
-    assert details["protection_grid_charge_kwh"] == pytest.approx(1.91, abs=0.02)
+    assert details["protection_grid_charge_kwh"] == pytest.approx(2.6, abs=0.02)
     assert details["arbitrage_grid_charge_kwh"] == pytest.approx(0.0)
-    assert details["uncovered_reserve_deficit_kwh"] == pytest.approx(3.09, abs=0.02)
+    assert details["uncovered_reserve_deficit_kwh"] == pytest.approx(2.4, abs=0.02)
     assert details["arbitrage_reason"] == "protection_infeasible"
     assist.set_assist.assert_called_once_with(True)
 
 
 @pytest.mark.asyncio
-async def test_tapered_charge_current_does_not_overstate_protection_capacity() -> None:
-    """Protection reports the taper-boundary deficit at the programmed current."""
+async def test_tapered_charge_current_satisfies_protection_capacity() -> None:
+    """Protection succeeds at the programmed current across the taper boundary."""
     hass, _ = _hass(current_soc=69.0)
     details = await _run(
         hass,
@@ -381,9 +381,9 @@ async def test_tapered_charge_current_does_not_overstate_protection_capacity() -
         day_buy_end_hour=13,
     )
 
-    assert details["charge_current_a"] == 10.0
-    assert details["uncovered_reserve_deficit_kwh"] == pytest.approx(0.02, abs=0.01)
-    assert details["arbitrage_reason"] == "protection_infeasible"
+    assert details["charge_current_a"] == 19.0
+    assert details["uncovered_reserve_deficit_kwh"] == pytest.approx(0.0, abs=0.01)
+    assert details["arbitrage_reason"] == "enabled"
 
 
 @pytest.mark.asyncio

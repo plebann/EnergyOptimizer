@@ -226,9 +226,9 @@ The integration already implements multi-phase charging logic. If your YAML had 
 # Modify phases in get_expected_current_multi_phase()
 
 phases = [
-    (0, 70, 23),   # Phase 1: Customize currents here
-    (70, 90, 9),   # Phase 2
-    (90, 100, 4),  # Phase 3
+    (0, 70, 32),   # Phase 1: Customize currents here
+    (70, 90, 18),  # Phase 2
+    (90, 100, 11), # Phase 3
 ]
 ```
 
