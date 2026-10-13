@@ -78,8 +78,8 @@ def test_calculate_battery_space():
 
 def test_calculate_hourly_charge_capacity_respects_soc_profile_and_limit():
     """Test one-hour intake follows the SOC profile and inverter current limit."""
-    # At 70% the profile limits charging to 9 A: 9 A * 48 V = 0.432 kWh/h.
-    assert calculate_hourly_charge_capacity(70, 100, 200, 48) == pytest.approx(0.432)
+    # At 70% the profile limits charging to 18 A: 18 A * 48 V = 0.864 kWh/h.
+    assert calculate_hourly_charge_capacity(70, 100, 200, 48) == pytest.approx(0.864)
 
     # A lower inverter limit further restricts that same hourly capacity.
     assert calculate_hourly_charge_capacity(

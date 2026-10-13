@@ -541,9 +541,8 @@ def test_charge_action_below_floor_targets_charge_base_and_sizes_current_for_tot
     # Gap 1.0 kWh -> soc_delta 10, so the raw-SOC target would be ceil(5 + 10) = 15,
     # still below the floor. From the Charge Base (21) the target is ceil(21 + 10) = 31.
     # Fill-to-floor energy: soc_to_kwh(16, 200, 48) = 1.536 kWh; total window
-    # energy = 1.0 + 1.536 = 2.536 kWh -> phase-1 time 2536 / (48 * 23) = 2.30 h
-    # exceeds the 2.0 h window, so the current saturates at the level-1 23 A
-    # (the gap alone would have sized only 11 A).
+    # energy = 1.0 + 1.536 = 2.536 kWh -> 2536 / (48 * 2) = 26.42 A,
+    # rounded up to 27 A (the gap alone would have sized only 11 A).
     action = decision_common.calculate_charge_action(
         _battery_config(),
         gap_kwh=1.0,
@@ -553,7 +552,7 @@ def test_charge_action_below_floor_targets_charge_base_and_sizes_current_for_tot
     )
 
     assert action.target_soc == pytest.approx(32.0)
-    assert action.charge_current == 23
+    assert action.charge_current == 27
 
 
 def test_charge_action_at_or_above_floor_is_unchanged_by_explicit_floor() -> None:
@@ -582,7 +581,7 @@ def test_charge_action_default_target_floor_is_min_soc() -> None:
     )
 
     assert action.target_soc == pytest.approx(32.0)
-    assert action.charge_current == 23
+    assert action.charge_current == 27
 
 
 def test_charge_action_target_includes_safety_margin() -> None:
