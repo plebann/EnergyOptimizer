@@ -101,6 +101,22 @@ compatibility: Requires git and GitHub CLI (gh) authenticated for the repository
    - if useful, invite a decision or ask the reviewer for additional constraints.
 7. Do not post replies, resolve threads, push commits, or submit reviews without explicit user approval.
 
+### gh API gotchas for review comments
+
+- `-f` is string-only: no `@file` expansion, no type conversion. Post a file as a body with `-F body=@reply.md` (or `--input body.json`); `-F` converts integer literals to JSON numbers.
+- Every integer parameter (`in_reply_to`, `line`, `start_line`, `position`) must use `-F`. `-f in_reply_to=123` fails with 422.
+- Single-comment operations use the repo-level path: `gh api repos/{owner}/{repo}/pulls/comments/{comment_id}` (GET / PATCH / DELETE). `pulls/{number}/comments/{comment_id}` does not exist (404).
+- Reply: `gh api repos/{owner}/{repo}/pulls/{number}/comments/{top_level_comment_id}/replies -F body=@reply.md` (only `body`; no replies to replies).
+- The response field is `in_reply_to_id` (the request parameter is `in_reply_to`). Replies carry the parent comment id there; `jq .in_reply_to` is always null.
+- No REST thread endpoint exists. Use GraphQL for thread membership and resolved state:
+  `gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: N) { reviewThreads(first: 100) { nodes { id isResolved resolvedBy { login } comments(first: 100) { nodes { databaseId body } } } } } } }'`
+- Join REST comment `id` to GraphQL `comments.nodes[].databaseId`. Resolve a thread with
+  `gh api graphql -f query='mutation($t: ID!) { resolveReviewThread(input: { threadId: $t }) { thread { id isResolved } } }' -F threadId='PRRT_...'`
+  where the thread node ID comes from `reviewThreads[].id` (the REST `node_id` is the comment's own id, not the thread's).
+- Verify a posted comment with `gh api repos/{owner}/{repo}/pulls/comments/{comment_id}` (200, full object including `body`).
+- PowerShell: multi-line native output arrives as an **array of strings** (one per line). Parse raw JSON with `ConvertFrom-Json` and cast `[string]` (e.g. `[string](gh api ... | ConvertFrom-Json).body`).
+- PowerShell: a backtick before a quote in a double-quoted string escapes the quote and breaks the pattern. Use single-quoted strings (or `-Contains`) for regex/jq patterns containing quotes.
+
 ## Resolution policy
 
 Use this policy after the requested implementation and verification:
