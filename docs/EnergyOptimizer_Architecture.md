@@ -835,6 +835,11 @@ System wykorzystuje mechanizmy persystencji Home Assistant do zachowania stanu m
   - Ostatnie wartości valley_period, peaks
   - Aktualny mode systemu
 
+- **Config entry (`entry.data`)** - jedyne źródło parametrów konfiguracji w runtime
+  - Config flow i options flow persystują parametry do `entry.data` (options flow scalone i zapisywane przez `async_update_entry(data=...)`)
+  - Coordinator, scheduler i decision engine odczytują parametry z `entry.data` (`get_battery_config()` w `decision_engine/common.py` podstawia domyślne z `const.py` dla brakujących kluczy)
+  - `entry.options` nie jest miejscem przechowywania konfiguracji (pojawia się tylko w zrzucie diagnostycznym `utils/decision_dump.py`)
+
 ### 6.5. Diagnostyka i debugowanie
 
 Integracja dostarcza narzędzia diagnostyczne:
