@@ -210,7 +210,11 @@ class NightBuyWindowSensor(_BuyWindowBaseSensor):
             second=0,
             microsecond=0,
         )
-        raw_plan = plans.get("upcoming") if now < rotation_time else plans.get("current")
+        raw_plan = (
+            plans.get("upcoming") or plans.get("current")
+            if now < rotation_time
+            else plans.get("current")
+        )
         return _night_plan_to_result(raw_plan)
 
 

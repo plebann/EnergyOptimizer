@@ -148,3 +148,17 @@ async def test_claim_is_at_most_once() -> None:
     assert await manager.async_claim(start) is True
     assert await manager.async_claim(start) is False
     manager._async_save_snapshot.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_claim_save_failure_restores_execution_marker() -> None:
+    manager = NightBuyWindowPlanManager(MagicMock(), _entry())
+    manager._upcoming = NightBuyWindowPlan(
+        start=datetime(2026, 10, 27, 22, tzinfo=TZ),
+        end=datetime(2026, 10, 28, 6, tzinfo=TZ),
+        price=1.0,
+    )
+    manager._async_save_snapshot = AsyncMock(side_effect=OSError("store unavailable"))
+
+    assert await manager.async_claim(manager._upcoming.start) is False
+    assert manager._executed_start is None

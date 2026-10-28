@@ -90,6 +90,12 @@ class NightBuyWindowPlanManager:
         if candidate_upcoming is not None and current_time >= rotation_time:
             upcoming_end = candidate_upcoming.end.astimezone(local_tz)
             if upcoming_end.date() < current_time.date():
+                if (
+                    candidate_current is None
+                    or candidate_upcoming.end.astimezone(UTC)
+                    > candidate_current.end.astimezone(UTC)
+                ):
+                    candidate_current = candidate_upcoming
                 candidate_upcoming = None
                 candidate_executed_start = None
                 changed = True
@@ -146,12 +152,18 @@ class NightBuyWindowPlanManager:
         serialized_start = start.isoformat()
         if self._executed_start == serialized_start:
             return False
+        previous_executed_start = self._executed_start
         self._executed_start = serialized_start
-        await self._async_save_snapshot(
-            self._current,
-            self._upcoming,
-            self._executed_start,
-        )
+        try:
+            await self._async_save_snapshot(
+                self._current,
+                self._upcoming,
+                self._executed_start,
+            )
+        except Exception:
+            self._executed_start = previous_executed_start
+            _LOGGER.exception("Failed to persist Morning Charge execution claim")
+            return False
         return True
 
     def get_morning_charge_start(self) -> datetime | None:
