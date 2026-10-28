@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 import logging
 from typing import TYPE_CHECKING
 
@@ -13,6 +13,7 @@ from ..const import (
     CONF_PV_EFFICIENCY,
     CONF_PV_FORECAST_REMAINING,
     CONF_PV_FORECAST_TODAY,
+    CONF_PV_FORECAST_TOMORROW,
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_PRODUCTION_SENSOR,
     DEFAULT_PV_EFFICIENCY,
@@ -124,11 +125,19 @@ def get_morning_pv_forecast(
     start_hour: int,
     end_hour: int,
     apply_efficiency: bool = True,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
 ) -> MorningPVForecast:
     """Return validated hourly PV or a documented morning fallback."""
-    source_entity = config.get(CONF_PV_FORECAST_TODAY)
+    now = dt_util.as_local(dt_util.now())
+    target_date = start_at.date() if start_at is not None else now.date()
+    source_key = (
+        CONF_PV_FORECAST_TOMORROW
+        if target_date > now.date()
+        else CONF_PV_FORECAST_TODAY
+    )
+    source_entity = config.get(source_key)
     if not source_entity:
-        now = dt_util.as_local(dt_util.now())
         return _invalid_morning_forecast(
             source_entity=None,
             failure_reason="entity_missing",
@@ -136,7 +145,6 @@ def get_morning_pv_forecast(
         )
 
     pv_state = hass.states.get(source_entity)
-    now = dt_util.as_local(dt_util.now())
     snapshot_details = _snapshot_details(pv_state, now)
     if pv_state is None:
         _LOGGER.warning("Morning PV forecast sensor %s unavailable", source_entity)
@@ -146,7 +154,11 @@ def get_morning_pv_forecast(
             **snapshot_details,
         )
 
-    hourly_result = _collect_today_hourly_kwh(pv_state, now)
+    hourly_result = _collect_today_hourly_kwh(
+        pv_state,
+        now,
+        target_date=target_date,
+    )
     hourly_details = _hourly_audit_details(hourly_result)
     try:
         aggregate_kwh = float(pv_state.state)
@@ -282,7 +294,10 @@ def _invalid_morning_forecast(
 
 
 def _collect_today_hourly_kwh(
-    pv_state: object, now: datetime
+    pv_state: object,
+    now: datetime,
+    *,
+    target_date: date | None = None,
 ) -> _HourlyForecastParseResult:
     """Return raw hourly PV for today or a data-quality status."""
     attributes = getattr(pv_state, "attributes", {})
@@ -384,7 +399,7 @@ def _collect_today_hourly_kwh(
                 now=now,
             )
         local_period = dt_util.as_local(parsed)
-        if local_period.date() != now.date():
+        if local_period.date() != (target_date or now.date()):
             return _hourly_parse_failure(
                 "invalid_hourly",
                 "record_local_date_mismatch",

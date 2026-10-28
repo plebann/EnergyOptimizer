@@ -231,7 +231,7 @@ def _arb_config(
 
 def _internal_sensor_id(_hass, *, entry_id: str, unique_id_suffix: str, entity_domain: str = "sensor") -> str | None:
     mapping = {
-        "night_buy_window": "sensor.night_buy_window_internal",
+        "night_buy_window_tomorrow": "sensor.night_buy_window_tomorrow_internal",
         "day_buy_window": "sensor.day_buy_window_internal",
     }
     return mapping.get(unique_id_suffix)
@@ -251,7 +251,10 @@ def _arb_hass(
     if remaining is not None:
         states["sensor.pv_remaining"] = remaining
     if night_buy_price is not None:
-        states["sensor.night_buy_window_internal"] = ("02:00", {"price": night_buy_price})
+        states["sensor.night_buy_window_tomorrow_internal"] = (
+            "02:00",
+            {"price": night_buy_price},
+        )
     if day_buy_price is not None:
         states["sensor.day_buy_window_internal"] = ("13:00", {"price": day_buy_price})
     return _hass_with_states({}, states)
@@ -451,7 +454,7 @@ async def test_morning_charge_arbitrage_increases_gap(
         **base_states,
         "sensor.morning_price": "1.0",
         "sensor.pv_remaining": "1.5",
-        "sensor.night_buy_window_internal": ("02:00", {"price": 0.2}),
+        "sensor.night_buy_window_tomorrow_internal": ("02:00", {"price": 0.2}),
     }
     hass_arb = _hass_with_states(arb_config, arb_states)
     await async_run_morning_charge(hass_arb, entry_id="entry-1", margin=1.0)

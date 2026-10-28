@@ -48,7 +48,9 @@ def resolve_charge_window(
 ) -> tuple[datetime, datetime]:
     """Resolve a buy window to concrete local datetimes."""
     now = dt_util.now()
-    suffix = "night_buy_window" if charge_type == "morning" else "day_buy_window"
+    suffix = (
+        "night_buy_window_tomorrow" if charge_type == "morning" else "day_buy_window"
+    )
     entity_id = get_internal_sensor_entity_id(
         hass,
         entry_id=entry.entry_id,
@@ -356,7 +358,7 @@ async def async_restore_charge_completions(
         complete_at = dt_util.as_local(complete_at)
         window_start = dt_util.as_local(window_start)
         window_end = dt_util.as_local(window_end)
-        if complete_at <= now:
+        if dt_util.as_utc(complete_at) <= dt_util.as_utc(now):
             _plans(hass, entry)[charge_type] = plan
             await async_handle_charge_completion(hass, entry, charge_type)
         else:

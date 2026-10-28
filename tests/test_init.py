@@ -38,6 +38,7 @@ async def _setup_with_entry(data: dict) -> None:
         patch("custom_components.energy_optimizer.ActionScheduler"),
         patch("custom_components.energy_optimizer.emit_config_snapshot"),
     ):
+        coordinator_cls.return_value.async_restore_night_buy_window_plans = AsyncMock()
         coordinator_cls.return_value.async_config_entry_first_refresh = AsyncMock()
         assert await async_setup_entry(hass, _mock_entry(data)) is True
 

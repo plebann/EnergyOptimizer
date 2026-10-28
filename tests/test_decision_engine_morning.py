@@ -112,7 +112,7 @@ def test_morning_charge_uses_uncompensated_pv_forecast(
         lambda *args, **kwargs: 13,
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_night_buy_window_end_hour",
+        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_night_buy_window_tomorrow_end_hour",
         lambda *args, **kwargs: 5,
     )
     monkeypatch.setattr(
@@ -788,7 +788,7 @@ async def test_morning_charge_uses_night_buy_window_duration_for_current_sizing(
     captured: dict[str, float] = {}
 
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_night_buy_window_duration_hours",
+        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_night_buy_window_tomorrow_duration_hours",
         lambda *args, **kwargs: 4.0,
     )
     monkeypatch.setattr(
