@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+from datetime import datetime
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -89,6 +90,8 @@ class ForecastData:
     losses_kwh: float
     margin: float
     morning_pv_forecast: MorningPVForecast | None = None
+    start_at: datetime | None = None
+    end_at: datetime | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -149,6 +152,8 @@ async def gather_forecasts(
     apply_efficiency: bool = True,
     compensate: bool = True,
     use_morning_pv_fallback: bool = False,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
 ) -> ForecastData:
     """Gather all forecast data for a time window."""
     hour_window = build_hour_window(start_hour, end_hour)
@@ -170,12 +175,18 @@ async def gather_forecasts(
     morning_pv_forecast = None
     if use_morning_pv_fallback:
         if config.get(CONF_PV_FORECAST_TODAY):
+            pv_kwargs: dict[str, object] = {}
+            if start_at is not None:
+                pv_kwargs["start_at"] = start_at
+            if end_at is not None:
+                pv_kwargs["end_at"] = end_at
             morning_pv_forecast = get_morning_pv_forecast(
                 hass,
                 config,
                 start_hour=start_hour,
                 end_hour=end_hour,
                 apply_efficiency=apply_efficiency,
+                **pv_kwargs,
             )
             pv_forecast_kwh = morning_pv_forecast.total_kwh
             pv_forecast_hourly = morning_pv_forecast.hourly_kwh
@@ -215,6 +226,8 @@ async def gather_forecasts(
         losses_kwh=losses_kwh,
         margin=margin,
         morning_pv_forecast=morning_pv_forecast,
+        start_at=start_at,
+        end_at=end_at,
     )
 
 

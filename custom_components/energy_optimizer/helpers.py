@@ -875,6 +875,44 @@ def resolve_night_buy_window_tomorrow_start_hour(
     return default_hour
 
 
+def resolve_night_buy_window_tomorrow_start_datetime(
+    hass: HomeAssistant,
+    *,
+    entry_id: str,
+) -> datetime | None:
+    """Resolve the exact planned night-window start timestamp, if available."""
+    entity_id = get_internal_sensor_entity_id(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix="night_buy_window_tomorrow",
+    )
+    state = hass.states.get(str(entity_id)) if entity_id else None
+    attributes = getattr(state, "attributes", {}) if state is not None else {}
+    if not isinstance(attributes, dict):
+        return None
+    parsed = dt_util.parse_datetime(str(attributes.get("start_time")))
+    return dt_util.as_local(parsed) if parsed is not None else None
+
+
+def resolve_night_buy_window_tomorrow_end_datetime(
+    hass: HomeAssistant,
+    *,
+    entry_id: str,
+) -> datetime | None:
+    """Resolve the exact planned night-window end timestamp, if available."""
+    entity_id = get_internal_sensor_entity_id(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix="night_buy_window_tomorrow",
+    )
+    state = hass.states.get(str(entity_id)) if entity_id else None
+    attributes = getattr(state, "attributes", {}) if state is not None else {}
+    if not isinstance(attributes, dict):
+        return None
+    parsed = dt_util.parse_datetime(str(attributes.get("end_time")))
+    return dt_util.as_local(parsed) if parsed is not None else None
+
+
 def resolve_night_buy_window_duration_hours(
     hass: HomeAssistant,
     config: dict[str, object],
@@ -901,6 +939,36 @@ def resolve_night_buy_window_duration_hours(
 
     _LOGGER.warning(
         "Internal night buy window duration unavailable or invalid, using default %s",
+        default_hours,
+    )
+    return default_hours
+
+
+def resolve_night_buy_window_tomorrow_duration_hours(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    entry_id: str,
+    default_hours: float = 2.0,
+) -> float:
+    """Resolve the planned night buy-window duration with fallback."""
+    del config
+    entity_id = get_internal_sensor_entity_id(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix="night_buy_window_tomorrow",
+    )
+    state = hass.states.get(str(entity_id)) if entity_id else None
+    attributes = getattr(state, "attributes", {}) if state is not None else {}
+    if isinstance(attributes, dict):
+        try:
+            duration_hours = float(attributes.get("duration_hours"))
+        except (TypeError, ValueError):
+            duration_hours = 0.0
+        if duration_hours > 0:
+            return duration_hours
+    _LOGGER.warning(
+        "Internal planned night buy window duration unavailable or invalid, using default %s",
         default_hours,
     )
     return default_hours
@@ -948,6 +1016,23 @@ def resolve_night_buy_window_end_hour(
         hass,
         entry_id=entry_id,
         unique_id_suffix="night_buy_window",
+        default_hour=default_hour,
+    )
+
+
+def resolve_night_buy_window_tomorrow_end_hour(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    entry_id: str,
+    default_hour: int = 6,
+) -> int:
+    """Resolve the planned night buy-window end hour with fallback."""
+    del config
+    return _resolve_buy_window_end_hour(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix="night_buy_window_tomorrow",
         default_hour=default_hour,
     )
 

@@ -1,13 +1,14 @@
 """Price-related sensors for Energy Optimizer."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.util import dt as dt_util
 
 from ..base import EnergyOptimizerSensor
 from ...calculations.price_windows import (
+    BuyWindowResult,
     build_average_buy_price_result,
     build_best_buy_window_result,
     build_consume_window_result,
@@ -19,6 +20,8 @@ from ...const import (
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_SELL_PRICE_SENSOR,
     DEFAULT_MIN_ARBITRAGE_PRICE,
+    NIGHT_BUY_WINDOW_ROTATION_HOUR,
+    NIGHT_BUY_WINDOW_ROTATION_MINUTE,
     PRICE_UNIT_PLN_PER_KWH,
 )
 from ...helpers import resolve_morning_max_price_hour, resolve_tariff_end_hour
@@ -182,7 +185,7 @@ class _BuyWindowBaseSensor(EnergyOptimizerSensor):
 
 
 class NightBuyWindowSensor(_BuyWindowBaseSensor):
-    """Sensor publishing the best night buy window for today."""
+    """Sensor publishing the current or most recently completed night plan."""
 
     _attr_translation_key = "night_buy_window"
     _attr_unique_id = "night_buy_window"
@@ -190,6 +193,25 @@ class NightBuyWindowSensor(_BuyWindowBaseSensor):
     _range_key = "night"
     _range_start_hour = 0
     _range_end_hour = 6
+
+    def _get_result(self) -> BuyWindowResult | None:
+        """Return the active plan before rotation, otherwise the completed plan."""
+        plans = (
+            self.coordinator.data.get("night_buy_window_plans")
+            if isinstance(self.coordinator.data, dict)
+            else None
+        )
+        if not isinstance(plans, dict):
+            return None
+        now = dt_util.now()
+        rotation_time = now.replace(
+            hour=NIGHT_BUY_WINDOW_ROTATION_HOUR,
+            minute=NIGHT_BUY_WINDOW_ROTATION_MINUTE,
+            second=0,
+            microsecond=0,
+        )
+        raw_plan = plans.get("upcoming") if now < rotation_time else plans.get("current")
+        return _night_plan_to_result(raw_plan)
 
 
 class DayBuyWindowSensor(_BuyWindowBaseSensor):
@@ -204,7 +226,7 @@ class DayBuyWindowSensor(_BuyWindowBaseSensor):
 
 
 class NightBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
-    """Sensor publishing the best night buy window for tomorrow."""
+    """Sensor publishing the current-before-06:01 or next planned night."""
 
     _attr_translation_key = "night_buy_window_tomorrow"
     _attr_unique_id = "night_buy_window_tomorrow"
@@ -213,6 +235,30 @@ class NightBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
     _range_start_hour = 0
     _range_end_hour = 6
     _day_offset = 1
+
+    def _get_result(self) -> BuyWindowResult | None:
+        """Return the persisted upcoming night plan without recalculation."""
+        plans = (
+            self.coordinator.data.get("night_buy_window_plans")
+            if isinstance(self.coordinator.data, dict)
+            else None
+        )
+        return _night_plan_to_result(plans.get("upcoming")) if isinstance(plans, dict) else None
+
+
+def _night_plan_to_result(raw_plan: object) -> BuyWindowResult | None:
+    """Convert a persisted coordinator plan into the shared sensor result type."""
+    if not isinstance(raw_plan, dict):
+        return None
+    try:
+        start = datetime.fromisoformat(str(raw_plan["start_time"]))
+        end = datetime.fromisoformat(str(raw_plan["end_time"]))
+        price = float(raw_plan["price"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if start.tzinfo is None or end.tzinfo is None or end <= start:
+        return None
+    return BuyWindowResult(start_local=start, end_local=end, average_price=price)
 
 
 class DayBuyWindowTomorrowSensor(_BuyWindowBaseSensor):

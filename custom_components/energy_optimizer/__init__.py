@@ -129,6 +129,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     coordinator = EnergyOptimizerCoordinator(hass, entry)
+    await coordinator.async_restore_night_buy_window_plans()
     await coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id]["coordinator"] = coordinator
     emit_config_snapshot(hass, entry)
@@ -158,7 +159,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await async_register_services(hass)
 
     # Start scheduler for fixed actions
-    scheduler = ActionScheduler(hass, entry)
+    scheduler = ActionScheduler(hass, entry, coordinator)
     scheduler.start()
     hass.data[DOMAIN][entry.entry_id]["scheduler"] = scheduler
 

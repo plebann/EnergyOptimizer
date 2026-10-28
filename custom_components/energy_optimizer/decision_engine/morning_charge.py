@@ -47,9 +47,10 @@ from ..helpers import (
     is_balancing_ongoing,
     resolve_day_buy_window_start_hour,
     resolve_morning_max_price_hour,
-    resolve_night_buy_window_end_hour,
-    resolve_night_buy_window_duration_hours,
-    resolve_night_buy_window_start_hour,
+    resolve_night_buy_window_tomorrow_duration_hours,
+    resolve_night_buy_window_tomorrow_end_hour,
+    resolve_night_buy_window_tomorrow_end_datetime,
+    resolve_night_buy_window_tomorrow_start_hour,
     resolve_tariff_end_hour,
     set_balancing_ongoing,
 )
@@ -83,20 +84,35 @@ class MorningChargeStrategy(BaseChargeStrategy):
     def _resolve_forecast_params(self) -> tuple[int, int, dict[str, object]]:
         """Resolve morning forecast time window and kwargs."""
         tariff_end_hour = resolve_tariff_end_hour(self.hass, self.config)
-        return (
-            resolve_night_buy_window_end_hour(
+        end_datetime = resolve_night_buy_window_tomorrow_end_datetime(
+            self.hass,
+            entry_id=self.entry.entry_id,
+        )
+        end_hour = (
+            end_datetime.hour
+            if end_datetime is not None
+            else resolve_night_buy_window_tomorrow_end_hour(
                 self.hass,
                 self.config,
                 entry_id=self.entry.entry_id,
                 default_hour=6,
-            ),
+            )
+        )
+        forecast_kwargs: dict[str, object] = {
+            "compensate": False,
+            "use_morning_pv_fallback": True,
+        }
+        if end_datetime is not None:
+            forecast_kwargs["start_at"] = end_datetime
+        return (
+            end_hour,
             resolve_day_buy_window_start_hour(
                 self.hass,
                 self.config,
                 entry_id=self.entry.entry_id,
                 default_hour=tariff_end_hour,
             ),
-            {"compensate": False, "use_morning_pv_fallback": True},
+            forecast_kwargs,
         )
 
     async def _check_early_exit(self) -> bool:
@@ -144,7 +160,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
 
     def _resolve_charge_time_hours(self) -> float:
         """Use the resolved night buy window duration for charge-current sizing."""
-        return resolve_night_buy_window_duration_hours(
+        return resolve_night_buy_window_tomorrow_duration_hours(
             self.hass,
             self.config,
             entry_id=self.entry.entry_id,
@@ -159,13 +175,13 @@ class MorningChargeStrategy(BaseChargeStrategy):
 
     def _resolve_completion_window(self) -> tuple[datetime, datetime]:
         """Resolve the concrete night buy window used by this run."""
-        start_hour = resolve_night_buy_window_start_hour(
+        start_hour = resolve_night_buy_window_tomorrow_start_hour(
             self.hass,
             self.config,
             entry_id=self.entry.entry_id,
             default_hour=4,
         )
-        end_hour = resolve_night_buy_window_end_hour(
+        end_hour = resolve_night_buy_window_tomorrow_end_hour(
             self.hass,
             self.config,
             entry_id=self.entry.entry_id,
@@ -569,8 +585,8 @@ def _calculate_morning_arbitrage_kwh(
         entry_id=entry_id,
         sell_price=sell_price,
         min_arbitrage_price=min_arbitrage_price,
-        buy_reference_unique_id_suffix="night_buy_window",
-        buy_reference_entity_name="Night buy window",
+        buy_reference_unique_id_suffix="night_buy_window_tomorrow",
+        buy_reference_entity_name="Planned night buy window",
     )
     details.update(margin_details)
     if not margin_ok:

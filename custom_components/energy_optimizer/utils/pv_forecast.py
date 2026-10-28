@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 import logging
 from typing import TYPE_CHECKING
 
@@ -124,6 +124,8 @@ def get_morning_pv_forecast(
     start_hour: int,
     end_hour: int,
     apply_efficiency: bool = True,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
 ) -> MorningPVForecast:
     """Return validated hourly PV or a documented morning fallback."""
     source_entity = config.get(CONF_PV_FORECAST_TODAY)
@@ -146,7 +148,11 @@ def get_morning_pv_forecast(
             **snapshot_details,
         )
 
-    hourly_result = _collect_today_hourly_kwh(pv_state, now)
+    hourly_result = _collect_today_hourly_kwh(
+        pv_state,
+        now,
+        target_date=start_at.date() if start_at is not None else None,
+    )
     hourly_details = _hourly_audit_details(hourly_result)
     try:
         aggregate_kwh = float(pv_state.state)
@@ -282,7 +288,10 @@ def _invalid_morning_forecast(
 
 
 def _collect_today_hourly_kwh(
-    pv_state: object, now: datetime
+    pv_state: object,
+    now: datetime,
+    *,
+    target_date: date | None = None,
 ) -> _HourlyForecastParseResult:
     """Return raw hourly PV for today or a data-quality status."""
     attributes = getattr(pv_state, "attributes", {})
@@ -384,7 +393,7 @@ def _collect_today_hourly_kwh(
                 now=now,
             )
         local_period = dt_util.as_local(parsed)
-        if local_period.date() != now.date():
+        if local_period.date() != (target_date or now.date()):
             return _hourly_parse_failure(
                 "invalid_hourly",
                 "record_local_date_mismatch",

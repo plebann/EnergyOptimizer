@@ -3,10 +3,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, tzinfo
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Any
 
 from homeassistant.util import dt as dt_util
+
+from ..const import (
+    DAY_BUY_WINDOW_EXPANSION_MULTIPLIER,
+    NIGHT_BUY_WINDOW_EXPANSION_MULTIPLIER,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +66,16 @@ class HourlyBuyPriceEntry:
     business_date: date
     buy_price_value: float
     source_entity_id: str
+
+    @property
+    def start_utc(self) -> datetime:
+        """Return the unambiguous UTC instant for this entry."""
+        return self.start_local.astimezone(UTC)
+
+    @property
+    def end_utc(self) -> datetime:
+        """Return the next elapsed hour in UTC."""
+        return self.start_utc + HOUR_DURATION
 
 
 @dataclass
@@ -118,6 +133,13 @@ def _parse_entry_time(raw_time: Any, local_tz: tzinfo) -> datetime | None:
         return parsed.replace(tzinfo=local_tz)
 
     return parsed.astimezone(local_tz)
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Convert an aware datetime to an unambiguous UTC instant."""
+    if value.tzinfo is None:
+        raise ValueError("Timestamp must be timezone-aware")
+    return value.astimezone(UTC)
 
 
 def find_first_arbitrage_buy_hour(
@@ -376,7 +398,7 @@ def _expand_buy_window(
     stop_right = False
 
     while not (stop_left and stop_right):
-        threshold = seed_average * 1.02
+        threshold = seed_average * DAY_BUY_WINDOW_EXPANSION_MULTIPLIER
         add_left: HourlyBuyPriceEntry | None = None
         add_right: HourlyBuyPriceEntry | None = None
 
@@ -431,6 +453,25 @@ def _expand_buy_window(
     )
 
 
+def _build_adjacent_buy_window_candidates(
+    entries_by_start: dict[datetime, HourlyBuyPriceEntry],
+) -> list[BuyWindowResult]:
+    """Build two-hour candidates from adjacent normalized hourly entries."""
+    candidates: list[BuyWindowResult] = []
+    for start, entry in entries_by_start.items():
+        second_entry = entries_by_start.get(start + HOUR_DURATION)
+        if second_entry is None:
+            continue
+        candidates.append(
+            BuyWindowResult(
+                start_local=entry.start_local,
+                end_local=second_entry.end_local,
+                average_price=(entry.buy_price_value + second_entry.buy_price_value) / 2,
+            )
+        )
+    return candidates
+
+
 def build_best_buy_window_result(
     prices: list[dict[str, Any]],
     entity_id: str,
@@ -455,32 +496,17 @@ def build_best_buy_window_result(
         return None
 
     entries_by_start = {entry.start_local: entry for entry in entries}
-    candidates: list[BuyWindowResult] = []
-    for entry in entries:
-        second_entry = entries_by_start.get(entry.start_local + HOUR_DURATION)
-        if second_entry is None:
-            continue
-
-        end_local = second_entry.end_local
-        if not _is_window_within_range(
-            entry.start_local,
-            end_local,
+    candidates = [
+        candidate
+        for candidate in _build_adjacent_buy_window_candidates(entries_by_start)
+        if _is_window_within_range(
+            candidate.start_local,
+            candidate.end_local,
             reference_now.date(),
             range_start_hour,
             range_end_hour,
-        ):
-            continue
-
-        candidates.append(
-            BuyWindowResult(
-                start_local=entry.start_local,
-                end_local=end_local,
-                average_price=(
-                    entry.buy_price_value + second_entry.buy_price_value
-                )
-                / 2,
-            )
         )
+    ]
 
     if not candidates:
         return None
@@ -524,6 +550,139 @@ def build_best_buy_window_result(
         range_start_hour=range_start_hour,
         range_end_hour=range_end_hour,
         current_day=reference_now.date(),
+    )
+
+
+def build_best_buy_window_result_for_period(
+    prices: list[dict[str, Any]],
+    entity_id: str,
+    *,
+    range_start: datetime,
+    range_end: datetime,
+    expansion_multiplier: float = NIGHT_BUY_WINDOW_EXPANSION_MULTIPLIER,
+) -> BuyWindowResult | None:
+    """Select and expand the cheapest buy window inside an absolute period.
+
+    Unlike the legacy day-scoped selector, this function accepts concrete,
+    timezone-aware boundaries.  It therefore supports the continuous night
+    period crossing midnight without treating either side as a special case.
+    Invalid or duplicate records in the evaluated period fail closed.
+    """
+    if range_start.tzinfo is None or range_end.tzinfo is None:
+        raise ValueError("Buy-window period boundaries must be timezone-aware")
+    if range_end <= range_start:
+        return None
+
+    range_start_utc = _as_utc(range_start)
+    range_end_utc = _as_utc(range_end)
+    entries_by_start: dict[datetime, HourlyBuyPriceEntry] = {}
+    for raw_entry in prices:
+        if not isinstance(raw_entry, dict):
+            continue
+        raw_time = raw_entry.get("time")
+        raw_price = raw_entry.get("price")
+        if raw_time is None or raw_price is None:
+            continue
+        start_local = _parse_entry_time(raw_time, range_start.tzinfo)
+        if start_local is None:
+            continue
+        start_utc = _as_utc(start_local)
+        end_utc = start_utc + HOUR_DURATION
+        if not (range_start_utc <= start_utc and end_utc <= range_end_utc):
+            continue
+        if (
+            start_local.minute != 0
+            or start_local.second != 0
+            or start_local.microsecond != 0
+        ):
+            continue
+        try:
+            price = float(raw_price)
+        except (TypeError, ValueError):
+            continue
+        if start_utc in entries_by_start:
+            _LOGGER.debug(
+                "Duplicate buy-price entry detected for %s at %s",
+                entity_id,
+                start_local,
+            )
+            return None
+        entries_by_start[start_utc] = HourlyBuyPriceEntry(
+            start_local=start_local,
+            end_local=end_utc.astimezone(range_start.tzinfo),
+            business_date=start_local.date(),
+            buy_price_value=price,
+            source_entity_id=entity_id,
+        )
+
+    candidates: list[BuyWindowResult] = []
+    for entry in entries_by_start.values():
+        second_entry = entries_by_start.get(entry.start_local + HOUR_DURATION)
+        if second_entry is None:
+            continue
+        candidates.append(
+            BuyWindowResult(
+                start_local=entry.start_local,
+                end_local=second_entry.end_local,
+                average_price=(entry.buy_price_value + second_entry.buy_price_value) / 2,
+            )
+        )
+    if not candidates:
+        return None
+
+    seed = min(
+        candidates,
+        key=lambda candidate: (
+            candidate.average_price,
+            abs((range_end_utc - _as_utc(candidate.end_local)).total_seconds()),
+            -_as_utc(candidate.end_local).timestamp(),
+        ),
+    )
+    window_start_utc = _as_utc(seed.start_local)
+    window_end_utc = _as_utc(seed.end_local)
+    total_price = seed.average_price * 2
+    hour_count = 2
+    threshold = seed.average_price * expansion_multiplier
+    stop_left = False
+    stop_right = False
+    while not (stop_left and stop_right):
+        add_left: HourlyBuyPriceEntry | None = None
+        add_right: HourlyBuyPriceEntry | None = None
+        if not stop_left:
+            left = entries_by_start.get(window_start_utc - HOUR_DURATION)
+            if (
+                left is None
+                or left.start_utc < range_start_utc
+                or left.end_utc > range_end_utc
+                or left.buy_price_value > threshold
+            ):
+                stop_left = True
+            else:
+                add_left = left
+        if not stop_right:
+            right = entries_by_start.get(window_end_utc)
+            if (
+                right is None
+                or right.start_utc < range_start_utc
+                or right.end_utc > range_end_utc
+                or right.buy_price_value > threshold
+            ):
+                stop_right = True
+            else:
+                add_right = right
+        if add_left is not None:
+            window_start_utc = add_left.start_utc
+            total_price += add_left.buy_price_value
+            hour_count += 1
+        if add_right is not None:
+            window_end_utc = add_right.end_utc
+            total_price += add_right.buy_price_value
+            hour_count += 1
+
+    return BuyWindowResult(
+        start_local=window_start_utc.astimezone(range_start.tzinfo),
+        end_local=window_end_utc.astimezone(range_start.tzinfo),
+        average_price=total_price / hour_count,
     )
 
 

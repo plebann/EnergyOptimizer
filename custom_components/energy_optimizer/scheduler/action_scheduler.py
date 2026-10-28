@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Callable
 
 from homeassistant.helpers.event import (
+    async_track_point_in_time,
     async_track_state_change_event,
     async_track_sunrise,
     async_track_sunset,
@@ -28,6 +29,9 @@ from ..const import (
     CONF_PROG4_TIME_START_ENTITY,
     CONF_SELL_PRICE_SENSOR,
     DOMAIN,
+    NIGHT_BUY_WINDOW_ROTATION_HOUR,
+    NIGHT_BUY_WINDOW_ROTATION_MINUTE,
+    NIGHT_BUY_WINDOW_START_HOUR,
     SUN_ABOVE_HORIZON,
     SUN_ENTITY,
 )
@@ -58,7 +62,6 @@ from ..helpers import (
     resolve_evening_max_price_hour,
     resolve_evening_second_max_price_hour,
     resolve_morning_max_price_hour,
-    resolve_night_buy_window_start_hour,
     resolve_prog4_start_time,
     resolve_tariff_start_hour,
 )
@@ -73,10 +76,18 @@ _LOGGER = logging.getLogger(__name__)
 class ActionScheduler:
     """Scheduler for fixed and dynamic actions."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        coordinator: Any | None = None,
+    ) -> None:
         """Initialize the scheduler."""
         self.hass = hass
         self.entry = entry
+        self.coordinator = coordinator or (
+            hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("coordinator")
+        )
         self._listeners: list[Callable[[], None]] = []
         self._morning_charge_listener: Callable[[], None] | None = None
         self._afternoon_listener: Callable[[], None] | None = None
@@ -91,6 +102,17 @@ class ActionScheduler:
         self._sunrise_listener: Callable[[], None] | None = None
         self._sunset_listener: Callable[[], None] | None = None
         self._charge_completion_restore_task: asyncio.Task[None] | None = None
+        self._tasks: set[asyncio.Task[Any]] = set()
+
+    def _create_task(self, coro) -> asyncio.Task[Any] | None:
+        """Create and own a scheduler background task until it finishes."""
+        task = self.hass.async_create_task(coro)
+        if task is None:
+            coro.close()
+            return None
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return task
 
     def start(self) -> None:
         """Start scheduling fixed actions."""
@@ -99,7 +121,11 @@ class ActionScheduler:
         self._schedule_program4_solar_reset()
         self._listeners.append(
             async_track_time_change(
-                self.hass, self._handle_evening_behavior, hour=22, minute=0, second=1
+                self.hass,
+                self._handle_evening_behavior,
+                hour=NIGHT_BUY_WINDOW_START_HOUR,
+                minute=0,
+                second=1,
             )
         )
         self._listeners.append(
@@ -122,7 +148,7 @@ class ActionScheduler:
         entry_data["charge_completion_snapshot_callback"] = (
             self._publish_schedule_snapshot
         )
-        self._charge_completion_restore_task = self.hass.async_create_task(
+        self._charge_completion_restore_task = self._create_task(
             async_restore_charge_completions(self.hass, self.entry)
         )
 
@@ -192,7 +218,7 @@ class ActionScheduler:
         night_buy_window_entity = get_internal_sensor_entity_id(
             self.hass,
             entry_id=self.entry.entry_id,
-            unique_id_suffix="night_buy_window",
+            unique_id_suffix="night_buy_window_tomorrow",
         )
         if night_buy_window_entity:
             self._listeners.append(
@@ -202,6 +228,16 @@ class ActionScheduler:
                     self._handle_night_buy_window_change,
                 )
             )
+
+        self._listeners.append(
+            async_track_time_change(
+                self.hass,
+                self._handle_night_buy_window_rotation,
+                hour=NIGHT_BUY_WINDOW_ROTATION_HOUR,
+                minute=NIGHT_BUY_WINDOW_ROTATION_MINUTE,
+                second=0,
+            )
+        )
 
         day_buy_window_entity = get_internal_sensor_entity_id(
             self.hass,
@@ -286,6 +322,9 @@ class ActionScheduler:
         if self._charge_completion_restore_task is not None:
             self._charge_completion_restore_task.cancel()
             self._charge_completion_restore_task = None
+        for task in tuple(self._tasks):
+            task.cancel()
+        self._tasks.clear()
         entry_data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {})
         if isinstance(entry_data, dict):
             entry_data.pop("charge_completion_snapshot_callback", None)
@@ -309,6 +348,17 @@ class ActionScheduler:
     async def _handle_morning_charge(self, now: datetime) -> None:
         """Run morning charge routine at the resolved night buy window start."""
         if self._skip_if_automation_disabled(AUTOMATION_MORNING_CHARGE):
+            return
+        planned_start = (
+            self.coordinator.get_morning_charge_start()
+            if self.coordinator is not None
+            else None
+        )
+        if planned_start is None:
+            return
+        if self.coordinator is None or not await self.coordinator.async_claim_night_buy_window_execution(
+            planned_start
+        ):
             return
         _LOGGER.info("Scheduler triggering morning grid charge")
         await async_run_morning_charge(
@@ -417,6 +467,13 @@ class ActionScheduler:
     async def _handle_night_buy_window_change(self, event) -> None:
         """Reschedule morning charge when the night buy window changes."""
         self._schedule_morning_charge()
+
+    async def _handle_night_buy_window_rotation(self, now: datetime) -> None:
+        """Rotate persisted night plans at 06:01 even without a source update."""
+        if self.coordinator is not None:
+            await self.coordinator.async_request_refresh()
+        self._schedule_morning_charge()
+        self._publish_schedule_snapshot()
 
     async def _handle_day_buy_window_change(self, event) -> None:
         """Reschedule afternoon charge when the day buy window changes."""
@@ -584,24 +641,27 @@ class ActionScheduler:
         self._publish_schedule_snapshot()
 
     def _schedule_morning_charge(self) -> None:
-        """Schedule morning charge at the night buy window start hour."""
+        """Schedule morning charge at the concrete planned window timestamp."""
         if self._morning_charge_listener is not None:
             self._morning_charge_listener()
             self._morning_charge_listener = None
 
-        hour = resolve_night_buy_window_start_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-            default_hour=4,
+        start = (
+            self.coordinator.get_morning_charge_start()
+            if self.coordinator is not None
+            else None
         )
-        self._morning_charge_listener = async_track_time_change(
-            self.hass,
-            self._handle_morning_charge,
-            hour=hour,
-            minute=0,
-            second=1,
-        )
+        if start is not None:
+            now = dt_util.now()
+            if start > now:
+                self._morning_charge_listener = async_track_point_in_time(
+                    self.hass,
+                    self._handle_morning_charge,
+                    start,
+                )
+            else:
+                if self.coordinator.missed_morning_charge_is_eligible(now):
+                    self._create_task(self._handle_morning_charge(now))
         self._publish_schedule_snapshot()
 
     def _schedule_evening_sell(self) -> None:
@@ -764,7 +824,7 @@ class ActionScheduler:
         )
         self._publish_schedule_snapshot()
 
-        self.hass.async_create_task(
+        self._create_task(
             async_check_pending_sell_restore(self.hass, self.entry)
         )
 
@@ -807,18 +867,13 @@ class ActionScheduler:
             self._build_action_entry(
                 key="morning_charge",
                 label="Morning grid charge",
-                scheduled_for=self._resolve_local_datetime(
-                    hour=resolve_night_buy_window_start_hour(
-                        self.hass,
-                        self.entry.data,
-                        entry_id=self.entry.entry_id,
-                        default_hour=4,
-                    ),
-                    minute=0,
-                    now=now,
+                scheduled_for=(
+                    self.coordinator.get_morning_charge_start()
+                    if self.coordinator is not None
+                    else None
                 ),
                 kind="dynamic",
-                source="night_buy_window_sensor",
+                source="night_buy_window_tomorrow_sensor",
                 order=10,
             )
         )
