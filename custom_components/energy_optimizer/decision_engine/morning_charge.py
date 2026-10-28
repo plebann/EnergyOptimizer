@@ -54,6 +54,7 @@ from ..helpers import (
     resolve_night_buy_window_tomorrow_end_hour,
     resolve_night_buy_window_tomorrow_end_datetime,
     resolve_night_buy_window_tomorrow_start_hour,
+    resolve_night_buy_window_tomorrow_start_datetime,
     resolve_tariff_end_hour,
     set_balancing_ongoing,
 )
@@ -169,6 +170,24 @@ class MorningChargeStrategy(BaseChargeStrategy):
 
     def _resolve_charge_time_hours(self) -> float:
         """Use the resolved night buy window duration for charge-current sizing."""
+        start = resolve_night_buy_window_tomorrow_start_datetime(
+            self.hass,
+            entry_id=self.entry.entry_id,
+        )
+        end = resolve_night_buy_window_tomorrow_end_datetime(
+            self.hass,
+            entry_id=self.entry.entry_id,
+        )
+        now = dt_util.now()
+        if (
+            start is not None
+            and end is not None
+            and dt_util.as_utc(start) <= dt_util.as_utc(now) < dt_util.as_utc(end)
+        ):
+            return max(
+                (dt_util.as_utc(end) - dt_util.as_utc(now)).total_seconds() / 3600,
+                0.0,
+            )
         return resolve_night_buy_window_tomorrow_duration_hours(
             self.hass,
             self.config,

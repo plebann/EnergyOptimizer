@@ -765,8 +765,16 @@ def _compute_arbitrage_from_cap(
     current_energy_kwh = soc_to_kwh(current_soc, bc.capacity_ah, bc.voltage)
     free_after = capacity_kwh - (current_energy_kwh + required_kwh)
 
-    now_hour = dt_util.as_local(dt_util.utcnow()).hour
-    surplus_start = max(forecasts.start_hour, now_hour)
+    now = dt_util.as_local(dt_util.utcnow())
+    forecast_starts_later = (
+        forecasts.start_at is not None
+        and dt_util.as_local(forecasts.start_at).date() > now.date()
+    )
+    surplus_start = (
+        forecasts.start_hour
+        if forecast_starts_later
+        else max(forecasts.start_hour, now.hour)
+    )
     surplus_end = min(sell_start_hour, forecasts.end_hour)
     if surplus_end <= surplus_start:
         surplus_kwh = 0.0
