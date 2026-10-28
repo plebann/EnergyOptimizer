@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -29,6 +29,8 @@ from ..const import (
     CONF_PROG4_TIME_START_ENTITY,
     CONF_SELL_PRICE_SENSOR,
     DOMAIN,
+    EVENING_BEHAVIOR_PREPARE_HOUR,
+    EVENING_BEHAVIOR_PREPARE_MINUTE,
     NIGHT_BUY_WINDOW_ROTATION_HOUR,
     NIGHT_BUY_WINDOW_ROTATION_MINUTE,
     NIGHT_BUY_WINDOW_START_HOUR,
@@ -123,8 +125,8 @@ class ActionScheduler:
             async_track_time_change(
                 self.hass,
                 self._handle_evening_behavior,
-                hour=NIGHT_BUY_WINDOW_START_HOUR,
-                minute=0,
+                hour=EVENING_BEHAVIOR_PREPARE_HOUR,
+                minute=EVENING_BEHAVIOR_PREPARE_MINUTE,
                 second=1,
             )
         )
@@ -369,7 +371,7 @@ class ActionScheduler:
         self._publish_schedule_snapshot()
 
     async def _handle_evening_behavior(self, now: datetime) -> None:
-        """Run evening behavior routine at 22:00."""
+        """Run evening preparation before a possible 22:00 charge start."""
         if self._skip_if_automation_disabled(AUTOMATION_EVENING_BEHAVIOR):
             return
         _LOGGER.info("Scheduler triggering evening behavior")
@@ -653,7 +655,7 @@ class ActionScheduler:
         )
         if start is not None:
             now = dt_util.now()
-            if start > now:
+            if start.astimezone(UTC) > now.astimezone(UTC):
                 self._morning_charge_listener = async_track_point_in_time(
                     self.hass,
                     self._handle_morning_charge,

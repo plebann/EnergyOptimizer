@@ -616,8 +616,8 @@ def build_best_buy_window_result_for_period(
         )
 
     candidates: list[BuyWindowResult] = []
-    for entry in entries_by_start.values():
-        second_entry = entries_by_start.get(entry.start_local + HOUR_DURATION)
+    for start_utc, entry in entries_by_start.items():
+        second_entry = entries_by_start.get(start_utc + HOUR_DURATION)
         if second_entry is None:
             continue
         candidates.append(

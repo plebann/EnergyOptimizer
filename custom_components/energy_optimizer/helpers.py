@@ -823,6 +823,22 @@ def resolve_morning_max_price_hour(
     return morning_peak_hour
 
 
+def resolve_morning_sell_tomorrow_hour(
+    hass: HomeAssistant,
+    *,
+    entry_id: str,
+    default_hour: int = 7,
+) -> int:
+    """Resolve the next-day internal morning sell window start hour."""
+    entity_id = get_internal_sensor_entity_id(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix="morning_sell_window_tomorrow",
+    )
+    resolved_time = _resolve_time_from_state_or_attribute(hass, entity_id)
+    return resolved_time.hour if resolved_time is not None else default_hour
+
+
 def resolve_night_buy_window_start_hour(
     hass: HomeAssistant,
     config: dict[str, object],
@@ -1056,6 +1072,30 @@ def resolve_day_buy_window_start_hour(
 
     _LOGGER.warning(
         "Internal day buy window unavailable or invalid, using default %s",
+        default_hour,
+    )
+    return default_hour
+
+
+def resolve_day_buy_window_tomorrow_start_hour(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    entry_id: str,
+    default_hour: int,
+) -> int:
+    """Resolve the next-day internal day buy-window start hour with fallback."""
+    del config
+    entity_id = get_internal_sensor_entity_id(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix="day_buy_window_tomorrow",
+    )
+    resolved_time = _resolve_time_from_state_or_attribute(hass, entity_id)
+    if resolved_time is not None:
+        return resolved_time.hour
+    _LOGGER.warning(
+        "Internal tomorrow day buy window unavailable or invalid, using default %s",
         default_hour,
     )
     return default_hour

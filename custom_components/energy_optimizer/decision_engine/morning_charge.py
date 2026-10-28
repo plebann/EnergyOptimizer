@@ -20,6 +20,7 @@ from ..const import (
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_PROG2_TIME_START_ENTITY,
+    CONF_PV_FORECAST_TOMORROW,
     CONF_PV_FORECAST_REMAINING,
 )
 from ..controllers.inverter import (
@@ -46,7 +47,9 @@ from ..helpers import (
     get_internal_window_price,
     is_balancing_ongoing,
     resolve_day_buy_window_start_hour,
+    resolve_day_buy_window_tomorrow_start_hour,
     resolve_morning_max_price_hour,
+    resolve_morning_sell_tomorrow_hour,
     resolve_night_buy_window_tomorrow_duration_hours,
     resolve_night_buy_window_tomorrow_end_hour,
     resolve_night_buy_window_tomorrow_end_datetime,
@@ -104,9 +107,15 @@ class MorningChargeStrategy(BaseChargeStrategy):
         }
         if end_datetime is not None:
             forecast_kwargs["start_at"] = end_datetime
+        day_buy_start_resolver = (
+            resolve_day_buy_window_tomorrow_start_hour
+            if end_datetime is not None
+            and end_datetime.date() > dt_util.now().date()
+            else resolve_day_buy_window_start_hour
+        )
         return (
             end_hour,
-            resolve_day_buy_window_start_hour(
+            day_buy_start_resolver(
                 self.hass,
                 self.config,
                 entry_id=self.entry.entry_id,
@@ -566,15 +575,34 @@ def _calculate_morning_arbitrage_kwh(
     details: dict[str, float | str] = {"arbitrage_reason": "not_applicable"}
 
     min_arbitrage_price = float(config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0)
-    remaining_entity = config.get(CONF_PV_FORECAST_REMAINING)
+    plan_end = resolve_night_buy_window_tomorrow_end_datetime(
+        hass,
+        entry_id=entry_id,
+    )
+    plan_is_for_tomorrow = (
+        plan_end is not None and plan_end.date() > dt_util.now().date()
+    )
+    remaining_entity = config.get(
+        CONF_PV_FORECAST_TOMORROW
+        if plan_is_for_tomorrow
+        else CONF_PV_FORECAST_REMAINING
+    )
 
     sell_price = get_internal_window_price(
         hass,
         entry_id=entry_id,
-        unique_id_suffix="morning_sell_window",
-        entity_name="Morning sell price",
+        unique_id_suffix=(
+            "morning_sell_window_tomorrow"
+            if plan_is_for_tomorrow
+            else "morning_sell_window"
+        ),
+        entity_name=(
+            "Tomorrow morning sell price" if plan_is_for_tomorrow else "Morning sell price"
+        ),
         attribute_name="price",
-        fallback_entity_id=config.get(CONF_MORNING_MAX_PRICE_SENSOR),
+        fallback_entity_id=(
+            None if plan_is_for_tomorrow else config.get(CONF_MORNING_MAX_PRICE_SENSOR)
+        ),
     )
     if sell_price is None:
         details["arbitrage_reason"] = "missing_morning_sell_price"
@@ -602,10 +630,15 @@ def _calculate_morning_arbitrage_kwh(
         details["arbitrage_reason"] = "invalid_remaining_forecast"
         return 0.0, details
 
+    effective_sell_start_hour = (
+        resolve_morning_sell_tomorrow_hour(hass, entry_id=entry_id, default_hour=sell_start_hour)
+        if plan_is_for_tomorrow
+        else sell_start_hour
+    )
     arbitrage_kwh, metrics = _compute_arbitrage_from_cap(
         bc=bc,
         forecasts=forecasts,
-        sell_start_hour=sell_start_hour,
+        sell_start_hour=effective_sell_start_hour,
         current_soc=current_soc,
         required_kwh=required_kwh,
         cap_kwh=cap_kwh,

@@ -42,6 +42,7 @@ from ..helpers import (
     resolve_evening_max_price_hour,
     resolve_evening_second_max_price_hour,
     resolve_night_buy_window_tomorrow_start_hour,
+    resolve_night_buy_window_tomorrow_start_datetime,
     resolve_tariff_end_hour,
     resolve_tariff_start_hour,
 )
@@ -237,6 +238,10 @@ class EveningSellStrategy(BaseSellStrategy):
             }
             return await self._surplus_sell(require_sufficiency=True)
 
+        night_buy_start = resolve_night_buy_window_tomorrow_start_datetime(
+            self.hass,
+            entry_id=self.entry.entry_id,
+        )
         night_buy_start_hour = resolve_night_buy_window_tomorrow_start_hour(
             self.hass,
             self.config,
@@ -260,7 +265,7 @@ class EveningSellStrategy(BaseSellStrategy):
             time((self._current_window_hour + 1) % 24),
             tzinfo=local_now.tzinfo,
         )
-        search_end = datetime.combine(
+        search_end = night_buy_start or datetime.combine(
             local_now.date() + timedelta(days=1),
             time(night_buy_start_hour),
             tzinfo=local_now.tzinfo,

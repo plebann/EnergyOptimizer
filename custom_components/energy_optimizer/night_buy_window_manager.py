@@ -1,7 +1,7 @@
 """Lifecycle manager for persisted night buy-window plans."""
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 import logging
 from typing import Any, TYPE_CHECKING
 
@@ -160,7 +160,14 @@ class NightBuyWindowPlanManager:
 
     def missed_morning_charge_is_eligible(self, now: datetime) -> bool:
         """Return whether a missed start remains inside its plan."""
-        return self._upcoming is not None and self._upcoming.start <= now < self._upcoming.end
+        if self._upcoming is None:
+            return False
+        now_utc = now.astimezone(UTC)
+        return (
+            self._upcoming.start.astimezone(UTC)
+            <= now_utc
+            < self._upcoming.end.astimezone(UTC)
+        )
 
     def snapshot(self) -> dict[str, dict[str, object] | None]:
         """Return the serializable coordinator projection."""
