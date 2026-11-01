@@ -544,7 +544,7 @@ nie_sprzedawaj()
 - Aktualny SoC magazynu, min/max SOC
 - `afternoon_grid_assist`
 - Prognozy zużycia (20:00–04:00) oraz straty falownika
-- Programy SOC: prog1/prog2/prog6 oraz max charge current
+- Programy SOC 1/2 oraz max charge current; odczyt SOC Programu 6 do bramki przywracania
 
 **Algorytm:**
 
@@ -555,7 +555,7 @@ zaktualizuj_pv_compensation()
 # 2. Balansowanie
 balancing_due = brak_ostatniego_balansu LUB dni_od_ostatniego_balansu >= balancing_interval_days
 IF balancing_due AND pv_forecast_tomorrow < balancing_pv_threshold:
-    ustaw_prog1_prog2_prog6_na_100%
+    ustaw_prog1_prog2_na_100%
     ustaw_max_charge_current
     ustaw_balancing_ongoing
     RETURN
@@ -567,13 +567,16 @@ battery_space = pojemność - energia_bieżąca
 pv_with_efficiency = pv_forecast_tomorrow × 0.9
 
 IF afternoon_grid_assist OR reserve_kwh < required_to_04 OR pv_with_efficiency < battery_space:
-    ustaw_prog1_i_prog6_na_bieżący_SOC
+    ustaw_prog1_na_docelowy_SOC
     RETURN
 
 # 4. Przywrócenie trybu normalnego
 IF prog6_soc > min_soc:
-    ustaw_prog1_prog2_prog6_na_min_soc
+    ustaw_prog1_prog2_na_min_soc
 ```
+
+Evening behavior nie zapisuje automatycznie SOC Programu 6. Jego bieżąca wartość może
+być odczytana wyłącznie jako bramka przywrócenia normalnego działania.
 
 **Akcje:**
 - `ładuj_do_100%_i_utrzymuj_do_06:00()` - force charge do 100%, potem blokada rozładowania do 6:00 rano

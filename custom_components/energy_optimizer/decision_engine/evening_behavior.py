@@ -171,7 +171,6 @@ async def _handle_balancing(
     days_since_balancing: int | None,
     prog1_soc: str | None,
     prog2_soc: str | None,
-    prog6_soc: str | None,
     max_soc: float,
     charge_current_entity: str | None,
     max_charge_current: int,
@@ -216,14 +215,6 @@ async def _handle_balancing(
         logger=_LOGGER,
         context=integration_context,
     )
-    await set_program_soc(
-        hass,
-        prog6_soc,
-        max_soc,
-        entry=entry,
-        logger=_LOGGER,
-        context=integration_context,
-    )
     await set_max_charge_current(
         hass,
         charge_current_entity,
@@ -250,7 +241,6 @@ async def _handle_balancing(
         entities_changed=[
             {"entity_id": prog1_soc, "value": max_soc},
             {"entity_id": prog2_soc, "value": max_soc},
-            {"entity_id": prog6_soc, "value": max_soc},
             {"entity_id": charge_current_entity, "value": max_charge_current},
         ],
     )
@@ -271,7 +261,6 @@ async def _handle_preservation(
     pv_with_efficiency: float,
     battery_space: float,
     prog1_soc: str | None,
-    prog6_soc: str | None,
     current_soc: float,
     morning_target_soc: float,
     morning_needed_reserve_kwh: float,
@@ -329,15 +318,6 @@ async def _handle_preservation(
         logger=_LOGGER,
         context=integration_context,
     )
-    await set_program_soc(
-        hass,
-        prog6_soc,
-        morning_target_soc,
-        entry=entry,
-        logger=_LOGGER,
-        context=integration_context,
-    )
-
     summary = "Battery preservation mode"
     outcome = DecisionOutcome(
         scenario="Evening behavior",
@@ -372,7 +352,6 @@ async def _handle_preservation(
         },
         entities_changed=[
             {"entity_id": prog1_soc, "value": morning_target_soc},
-            {"entity_id": prog6_soc, "value": morning_target_soc},
         ],
     )
     await log_decision_unified(
@@ -440,15 +419,6 @@ async def _handle_normal_restoration(
         logger=_LOGGER,
         context=integration_context,
     )
-    await set_program_soc(
-        hass,
-        prog6_soc,
-        min_soc,
-        entry=entry,
-        logger=_LOGGER,
-        context=integration_context,
-    )
-
     summary = "Normal operation restored"
     outcome = DecisionOutcome(
         scenario="Evening behavior",
@@ -476,7 +446,6 @@ async def _handle_normal_restoration(
         entities_changed=[
             {"entity_id": prog1_soc, "value": min_soc},
             {"entity_id": prog2_soc, "value": min_soc - 4},
-            {"entity_id": prog6_soc, "value": min_soc},
         ],
     )
     await log_decision_unified(
@@ -721,7 +690,6 @@ async def _run_non_balancing_flow(
     battery_config,
     prog1_soc: str | None,
     prog2_soc: str | None,
-    prog6_soc: str | None,
     balancing_data: BalancingData,
     pv_compensation_details: dict[str, float | None],
     afternoon_grid_assist_sensor,
@@ -762,7 +730,6 @@ async def _run_non_balancing_flow(
         pv_with_efficiency=balancing_data.pv_with_efficiency,
         battery_space=preservation.battery_space,
         prog1_soc=prog1_soc,
-        prog6_soc=prog6_soc,
         current_soc=current_soc,
         morning_target_soc=preservation.morning_target_soc,
         morning_needed_reserve_kwh=preservation.morning_needed_reserve_kwh,
@@ -904,7 +871,6 @@ async def _async_run_evening_behavior(
         days_since_balancing=balancing_data.days_since_balancing,
         prog1_soc=prog1_soc,
         prog2_soc=prog2_soc,
-        prog6_soc=prog6_soc,
         max_soc=bc.max_soc,
         charge_current_entity=charge_current_entity,
         max_charge_current=int(bc.max_charge_current),
@@ -922,7 +888,6 @@ async def _async_run_evening_behavior(
         battery_config=bc,
         prog1_soc=prog1_soc,
         prog2_soc=prog2_soc,
-        prog6_soc=prog6_soc,
         balancing_data=balancing_data,
         pv_compensation_details=pv_compensation_details,
         afternoon_grid_assist_sensor=afternoon_grid_assist_sensor,

@@ -19,16 +19,16 @@ Zapobieganie nieefektywnemu rozładowaniu magazynu w nocy oraz wymuszenie pełne
 - Polityki SOC (limity minimalne/maksymalne)
 - Przewidywane zapotrzebowanie na energię elektryczną (20:00–04:00)
 - Flaga wsparcia sieci po południu (afternoon grid assist)
-- Encje prog1/prog2/prog6 SOC oraz max charge current
+- Programy SOC 1/2 oraz max charge current; bieżący SOC Programu 6 jako sygnał bramki przywracania
 
 ## Przebieg decyzji (wysoki poziom)
 
 1. **Aktualizacja sensora kompensacji PV**: Przepisz wartości „dzisiaj” do „wczoraj”, zapisz bieżącą prognozę i produkcję PV jako „dzisiaj”, zaktualizuj wartość sensora.
 2. **Sprawdzenie balansowania**: Balansowanie jest wymagane, jeśli brak ostatniego balansu lub minął interwał dni oraz prognoza PV na jutro jest poniżej progu.
-3. **Balansowanie wymagane**: Ustaw cel 100% SOC na noc (programy 1/2/6) oraz maksymalny prąd ładowania; ustaw flagę „balancing ongoing”.
+3. **Balansowanie wymagane**: Ustaw cel 100% SOC na noc (programy 1/2) oraz maksymalny prąd ładowania; ustaw flagę „balancing ongoing”. Program 6 nie jest zapisywany.
 4. **Balansowanie niewymagane**: Oblicz rezerwę i zapotrzebowanie do 04:00 (20:00–24:00 oraz 00:00–04:00) z uwzględnieniem strat i marginesu. Wyznacz przestrzeń magazynu oraz prognozę PV z efektywnością 0.9.
-5. **Tryb ochrony (preservation)**: Jeśli włączone wsparcie z sieci po południu **lub** rezerwa jest niewystarczająca **lub** prognoza PV < przestrzeń magazynu, zamroź SOC (programy 1 i 6 na bieżący SOC).
-6. **Tryb normalny**: Jeśli brak przesłanek do ochrony i program 6 jest powyżej minimalnego SOC, przywróć normalny minimalny SOC (programy 1/2/6).
+5. **Tryb ochrony (preservation)**: Jeśli włączone wsparcie z sieci po południu **lub** rezerwa jest niewystarczająca **lub** prognoza PV < przestrzeń magazynu, ustaw SOC Programu 1 na wyliczonym celu.
+6. **Tryb normalny**: Jeśli brak przesłanek do ochrony i program 6 jest powyżej minimalnego SOC, przywróć normalny minimalny SOC Programów 1/2. Program 6 jest tylko odczytywany jako bramka.
 
 ## Diagram (Mermaid)
 
@@ -43,10 +43,10 @@ flowchart TD
 	EB_preserve -->|no| EB_restore{Prog6 > min?}
 	EB_restore -->|yes| EB_normal[Normal behavior]
 	EB_restore -->|no| EB_no_action[No action]
-	EB_balancing -.-> EB_balancing_note[Note: set prog1/2/6 SOC to max and max charge current]
+	EB_balancing -.-> EB_balancing_note[Note: set prog1/2 SOC to max and max charge current]
 	EB_inputs -.-> EB_inputs_note[Note: reserve, battery space, required to 04:00]
-	EB_freeze -.-> EB_freeze_note[Note: set prog1/prog6 SOC to current]
-	EB_normal -.-> EB_normal_note[Note: set prog1/2/6 SOC to min]
+	EB_freeze -.-> EB_freeze_note[Note: set prog1 SOC to target]
+	EB_normal -.-> EB_normal_note[Note: set prog1/2 SOC to min]
 	EB_no_action -.-> EB_no_action_note[Note: log no-action]
 ```
 
@@ -65,7 +65,7 @@ flowchart TD
 ## Efekty sterowania (koncepcyjne)
 
 - Ustaw tryb pracy falownika pod bezpieczne zachowanie nocne.
-- Ustaw cele SOC programów dla balansowania (program 6 oraz odzwierciedlony program 1, jeśli potrzebne).
+- Ustaw cele SOC Programów 1/2 dla balansowania.
 - Włącz lub wyłącz ładowanie z sieci zgodnie z decyzją.
 - Przy zamrożeniu SOC ustaw minimalny SOC równy bieżącemu SOC, aby zablokować rozładowanie.
 
