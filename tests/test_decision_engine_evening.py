@@ -23,6 +23,7 @@ from custom_components.energy_optimizer.const import (
 )
 from custom_components.energy_optimizer.decision_engine.evening_behavior import (
     _calculate_preservation_context,
+    _handle_normal_restoration,
     _handle_preservation,
     async_run_evening_behavior,
 )
@@ -102,8 +103,20 @@ async def test_evening_behavior_balancing_triggers_program_updates() -> None:
     entities = {call.args[2]["entity_id"] for call in number_calls}
     assert "number.prog1_soc" in entities
     assert "number.prog2_soc" in entities
-    assert "number.prog6_soc" in entities
+    assert "number.prog6_soc" not in entities
     assert "number.max_charge_current" in entities
+
+    action_events = [
+        call.args[1]
+        for call in hass.bus.async_fire.call_args_list
+        if call.args[0] == "energy_optimizer_action"
+    ]
+    assert action_events
+    changed_entities = {
+        change["entity_id"]
+        for change in action_events[-1]["entities_changed"]
+    }
+    assert "number.prog6_soc" not in changed_entities
 
 
 def _base_preservation_config() -> dict[str, object]:
@@ -352,7 +365,6 @@ async def test_handle_preservation_grid_assist_uses_morning_target_soc(
         pv_with_efficiency=50.0,
         battery_space=1.0,
         prog1_soc="number.prog1_soc",
-        prog6_soc="number.prog6_soc",
         current_soc=68.0,
         morning_target_soc=35.0,
         morning_needed_reserve_kwh=3.52,
@@ -371,9 +383,9 @@ async def test_handle_preservation_grid_assist_uses_morning_target_soc(
     )
 
     assert activated is True
-    assert set_program_soc_mock.await_count == 2
+    assert set_program_soc_mock.await_count == 1
     assert set_program_soc_mock.await_args_list[0].args[2] == 35.0
-    assert set_program_soc_mock.await_args_list[1].args[2] == 35.0
+    assert set_program_soc_mock.await_args_list[0].args[1] == "number.prog1_soc"
 
     assert captured_outcomes
     details = captured_outcomes[-1].details
@@ -381,3 +393,61 @@ async def test_handle_preservation_grid_assist_uses_morning_target_soc(
     assert details["target_soc"] == 35.0
     assert details["morning_target_soc"] == 35.0
     assert details["morning_needed_reserve_kwh"] == 3.52
+    assert captured_outcomes[-1].entities_changed == [
+        {"entity_id": "number.prog1_soc", "value": 35.0}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_normal_restoration_does_not_write_program_6(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = _setup_hass(
+        {},
+        {"number.prog6_soc": "50", "sensor.pv_forecast": "5"},
+    )
+    entry = hass.config_entries.async_get_entry("entry-1")
+    captured_outcomes = []
+
+    async def _capture_log(hass, entry, outcome, context, logger):
+        captured_outcomes.append(outcome)
+
+    set_program_soc_mock = AsyncMock()
+    monkeypatch.setattr(f"{EVENING}.set_program_soc", set_program_soc_mock)
+    monkeypatch.setattr(f"{EVENING}.log_decision_unified", _capture_log)
+
+    activated = await _handle_normal_restoration(
+        hass,
+        entry,
+        integration_context=MagicMock(),
+        prog1_soc="number.prog1_soc",
+        prog2_soc="number.prog2_soc",
+        prog6_soc="number.prog6_soc",
+        min_soc=20.0,
+        pv_forecast=5.0,
+        heat_pump_window_kwh=1.0,
+        heat_pump_to_sufficiency_kwh=0.5,
+        battery_space=10.0,
+        pv_with_efficiency=4.5,
+        reserve_kwh=8.0,
+        required_sufficiency_kwh=4.0,
+        pv_sufficiency_kwh=2.0,
+        needed_reserve_sufficiency_kwh=2.0,
+        required_kwh=6.0,
+        reserve_insufficient=False,
+        grid_assist_on=False,
+        sufficiency_hour=8,
+        sufficiency_reached=True,
+    )
+
+    assert activated is True
+    assert set_program_soc_mock.await_count == 2
+    assert [call.args[1] for call in set_program_soc_mock.await_args_list] == [
+        "number.prog1_soc",
+        "number.prog2_soc",
+    ]
+    assert [call.args[2] for call in set_program_soc_mock.await_args_list] == [20.0, 16.0]
+    assert captured_outcomes[-1].entities_changed == [
+        {"entity_id": "number.prog1_soc", "value": 20.0},
+        {"entity_id": "number.prog2_soc", "value": 16.0},
+    ]

@@ -135,3 +135,17 @@ boundary hour at a time on either side while each boundary hour's price stays wi
 average price (recomputed after every accepted hour). Expansion stops permanently on a side once its next boundary
 hour exceeds the 10% threshold or falls outside 00:00-06:00; a Night Buy Window may end up spanning the full 6-hour
 range. Morning Charge starts at the Night Buy Window's start hour and charges for its full (variable) duration.
+
+### Secure Energy
+
+A decision that sets the relevant inverter program SOC above the current battery SOC to preserve a calculated energy
+reserve through its decision horizon, without scheduling grid charging. It requires an independent reserve-protection
+target; a target produced only by technical SOC rounding or a safety margin is not Secure Energy. At the end of the
+window it restores only the program SOC; it never changes the grid-charge current.
+
+### Charge Decision Type
+
+The business classification of a Morning Charge or Afternoon Charge decision: `charge` for an effective energy gap
+above the common 0.001 kWh epsilon, `secure_energy` for a no-grid-charge decision that raises SOC to an independent
+reserve-protection target, or `no_action` when no write can improve energy security. Avoid technical write-oriented
+labels such as `charge_scheduled`, `program_soc_updated`, and `program_settings_updated` for these decisions.
