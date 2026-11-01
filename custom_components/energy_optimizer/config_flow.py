@@ -313,7 +313,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_BEV_CHARGING_POWER_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor", device_class="power")
                 ),
-                vol.Optional(CONF_GRID_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
+                vol.Required(CONF_GRID_CHARGE_CURRENT_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_DISCHARGE_CURRENT_ENTITY): selector.EntitySelector(
@@ -758,7 +758,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 # Warn if start time not configured (optional but recommended)
                 if not start_time:
-                    if soc_key == CONF_PROG2_SOC_ENTITY:
+                    if soc_key in (CONF_PROG2_SOC_ENTITY, CONF_PROG4_SOC_ENTITY):
                         errors[start_key] = "entity_not_found"
                     else:
                         _LOGGER.warning(
@@ -766,7 +766,10 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             soc_key
                         )
 
-            if start_time and start_key == CONF_PROG2_TIME_START_ENTITY:
+            if start_time and start_key in (
+                CONF_PROG2_TIME_START_ENTITY,
+                CONF_PROG4_TIME_START_ENTITY,
+            ):
                 state = self._validate_entity(
                     entity_id=start_time,
                     field=start_key,
@@ -1042,9 +1045,8 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor", device_class="power")
                 ),
-                vol.Optional(
+                vol.Required(
                     CONF_GRID_CHARGE_CURRENT_ENTITY,
-                    default=self._config_entry.data.get(CONF_GRID_CHARGE_CURRENT_ENTITY),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
