@@ -1,7 +1,7 @@
 """Morning grid charge decision logic."""
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import logging
 from typing import TYPE_CHECKING
 
@@ -10,6 +10,7 @@ from homeassistant.util import dt as dt_util
 
 from ..calculations.battery import (
     calculate_battery_reserve,
+    soc_to_kwh,
 )
 from ..calculations.energy import (
     calculate_needed_reserve,
@@ -17,6 +18,8 @@ from ..calculations.energy import (
 )
 from ..const import (
     CONF_GRID_CHARGE_CURRENT_ENTITY,
+    CONF_ENABLE_HEAT_PUMP,
+    CONF_BUY_PRICE_SENSOR,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_PROG2_TIME_START_ENTITY,
@@ -44,6 +47,7 @@ from ..decision_engine.common import (
     resolve_entry,
 )
 from ..helpers import (
+    get_buy_price_payload,
     get_internal_window_price,
     is_balancing_ongoing,
     resolve_day_buy_window_start_hour,
@@ -58,6 +62,7 @@ from ..helpers import (
     resolve_tariff_end_hour,
     set_balancing_ongoing,
 )
+from ..night_buy_window import build_night_buy_window_plan
 from ..service_handlers.charge_completion import (
     async_schedule_charge_completion,
     resolve_charge_window,
@@ -71,6 +76,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+_PRICE_EQUALITY_TOLERANCE = 0.001
 
 
 class MorningChargeStrategy(BaseChargeStrategy):
@@ -114,6 +120,34 @@ class MorningChargeStrategy(BaseChargeStrategy):
             and end_datetime.date() > dt_util.now().date()
             else resolve_day_buy_window_start_hour
         )
+        self._price_comparison = _resolve_morning_price_comparison(
+            self.hass,
+            entry_id=self.entry.entry_id,
+            night_end=end_datetime,
+        )
+        self._extended_horizon = self._price_comparison["relation"] == "night_lower"
+        self._extended_horizon_fallback = False
+        next_night_start = None
+        if self._extended_horizon and end_datetime is not None:
+            next_night_start = _resolve_next_night_start(
+                self.hass,
+                self.config,
+                entry_id=self.entry.entry_id,
+                after=end_datetime,
+            )
+            if next_night_start is None:
+                self._extended_horizon_fallback = True
+
+        if next_night_start is not None:
+            self._next_night_start = next_night_start
+            return (
+                end_hour,
+                next_night_start.hour,
+                {
+                    **forecast_kwargs,
+                    "end_at": next_night_start,
+                },
+            )
         return (
             end_hour,
             day_buy_start_resolver(
@@ -143,6 +177,12 @@ class MorningChargeStrategy(BaseChargeStrategy):
 
     def _post_forecast_setup(self) -> None:
         """Compute sufficiency and morning arbitrage after shared forecast gathering."""
+        if self._extended_horizon and not self._extended_horizon_fallback:
+            pv_forecast = self.forecasts.morning_pv_forecast
+            if pv_forecast is None or pv_forecast.status != "valid_hourly":
+                self._extended_horizon_fallback = True
+            elif self.config.get(CONF_ENABLE_HEAT_PUMP) and not self.forecasts.heat_pump_hourly:
+                self._extended_horizon_fallback = True
         self._sufficiency = compute_sufficiency(self.forecasts)
         if self._sufficiency.required_kwh <= 0.0:
             _LOGGER.info("Required morning energy is zero or negative")
@@ -429,7 +469,43 @@ class MorningChargeStrategy(BaseChargeStrategy):
             pv_compensation_factor=self.pv_compensation_factor,
         )
         self._total_gap_kwh = max(balance.gap_kwh, 0.0) + self._arbitrage_kwh
+        if self._extended_horizon_fallback:
+            self._total_gap_kwh = max(self._total_gap_kwh, 1.0)
         return self._total_gap_kwh, balance
+
+    def _calculate_charge_action(
+        self,
+        *,
+        total_gap: float,
+        balance: EnergyBalance,
+    ) -> ChargeAction:
+        """Use the maximum safe night target when the extended plan is uncertain."""
+        if not self._extended_horizon_fallback:
+            action = super()._calculate_charge_action(total_gap=total_gap, balance=balance)
+            if self._extended_horizon and action.target_soc >= self.bc.max_soc - 0.01:
+                return ChargeAction(
+                    gap_to_charge_kwh=action.gap_to_charge_kwh,
+                    soc_delta=action.soc_delta,
+                    target_soc=action.target_soc,
+                    charge_current=float(self.bc.max_charge_current),
+                )
+            return action
+
+        del total_gap, balance
+        gap_kwh = max(
+            soc_to_kwh(
+                self.bc.max_soc - self.current_soc,
+                self.bc.capacity_ah,
+                self.bc.voltage,
+            ),
+            0.0,
+        )
+        return ChargeAction(
+            gap_to_charge_kwh=gap_kwh,
+            soc_delta=max(self.bc.max_soc - self.current_soc, 0.0),
+            target_soc=self.bc.max_soc,
+            charge_current=float(self.bc.max_charge_current),
+        )
 
     def _build_charge_outcome(
         self,
@@ -458,6 +534,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
                 "program_soc": action.target_soc,
                 "window_start": window_start.isoformat(),
                 "window_end": window_end.isoformat(),
+                **_morning_price_details(self),
             }
         )
         return outcome
@@ -730,3 +807,104 @@ def _build_balancing_ongoing_outcome() -> DecisionOutcome:
             "balancing_ongoing": True,
         },
     )
+
+
+def _resolve_morning_price_comparison(
+    hass: HomeAssistant,
+    *,
+    entry_id: str,
+    night_end: datetime | None,
+) -> dict[str, float | str | None]:
+    """Compare the planned night window with the next chronological day window."""
+    night_price = get_internal_window_price(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix="night_buy_window_tomorrow",
+        entity_name="Planned night buy window",
+    )
+    if night_end is None:
+        return {
+            "night_price": night_price,
+            "day_price": None,
+            "relation": "unavailable",
+        }
+
+    day_suffix = (
+        "day_buy_window_tomorrow"
+        if night_end.date() > dt_util.now().date()
+        else "day_buy_window"
+    )
+    day_price = get_internal_window_price(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix=day_suffix,
+        entity_name="Next day buy window",
+    )
+    if night_price is None or day_price is None:
+        relation = "unavailable"
+    elif night_price + _PRICE_EQUALITY_TOLERANCE < day_price:
+        relation = "night_lower"
+    elif day_price + _PRICE_EQUALITY_TOLERANCE < night_price:
+        relation = "night_higher"
+    else:
+        relation = "equal_within_tolerance"
+    return {
+        "night_price": night_price,
+        "day_price": day_price,
+        "relation": relation,
+    }
+
+
+def _resolve_next_night_start(
+    hass: HomeAssistant,
+    config: dict[str, object],
+    *,
+    entry_id: str,
+    after: datetime,
+) -> datetime | None:
+    """Resolve the next night start from the complete future buy-price payload."""
+    prices = get_buy_price_payload(hass, config, entry_id=entry_id)
+    if not prices:
+        return None
+    local_tz = after.tzinfo or dt_util.DEFAULT_TIME_ZONE
+    next_plan = build_night_buy_window_plan(
+        prices,
+        str(config.get(CONF_BUY_PRICE_SENSOR, "buy_price")),
+        end_date=after.date() + timedelta(days=1),
+        local_tz=local_tz,
+    )
+    if next_plan is None or next_plan.start <= after:
+        return None
+    return next_plan.start
+
+
+def _morning_price_details(strategy: MorningChargeStrategy) -> dict[str, object]:
+    """Return price comparison diagnostics for Morning Charge outcomes."""
+    comparison = getattr(strategy, "_price_comparison", {})
+    details: dict[str, object] = {
+        "night_buy_price": comparison.get("night_price"),
+        "day_buy_price": comparison.get("day_price"),
+        "price_relation": comparison.get("relation", "unavailable"),
+        "horizon_mode": (
+            "extended_fallback_max_soc"
+            if getattr(strategy, "_extended_horizon_fallback", False)
+            else (
+                "extended_to_next_night"
+                if getattr(strategy, "_extended_horizon", False)
+                else "current"
+            )
+        ),
+        "extended_horizon_fallback": getattr(
+            strategy, "_extended_horizon_fallback", False
+        ),
+    }
+    next_night_start = getattr(strategy, "_next_night_start", None)
+    if next_night_start is not None:
+        details["next_night_start"] = next_night_start.isoformat()
+    forecasts = getattr(strategy, "forecasts", None)
+    if forecasts is not None:
+        if forecasts.start_at is not None:
+            details["horizon_start"] = forecasts.start_at.isoformat()
+        if forecasts.end_at is not None:
+            details["horizon_end"] = forecasts.end_at.isoformat()
+    return details
