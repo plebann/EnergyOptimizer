@@ -240,6 +240,11 @@ def test_scheduler_publishes_structured_daily_snapshot(
         assert any(action["key"] == "daytime_min_price_restore" and action["time_local"] == "12:30" for action in actions)
         assert any(action["key"] == "evening_sell_second" and action["time_local"] == "20:00" for action in actions)
         assert any(
+            action["key"] == "evening_behavior"
+            and action["time_local"] == "21:59"
+            for action in actions
+        )
+        assert any(
             action["key"] == "evening_sell_restore"
             and action["time_local"] == "21:00"
             and action["source"] == "evening_second_max_price_hour_sensor_plus_1h"

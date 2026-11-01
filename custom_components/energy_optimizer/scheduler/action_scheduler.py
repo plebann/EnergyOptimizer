@@ -1043,7 +1043,11 @@ class ActionScheduler:
             self._build_action_entry(
                 key="evening_behavior",
                 label="Evening behavior",
-                scheduled_for=self._resolve_local_datetime(hour=22, minute=0, now=now),
+                scheduled_for=self._resolve_local_datetime(
+                    hour=EVENING_BEHAVIOR_PREPARE_HOUR,
+                    minute=EVENING_BEHAVIOR_PREPARE_MINUTE,
+                    now=now,
+                ),
                 kind="fixed",
                 source="fixed",
                 order=140,

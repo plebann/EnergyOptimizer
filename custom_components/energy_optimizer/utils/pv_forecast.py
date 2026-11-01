@@ -235,7 +235,7 @@ def get_morning_pv_forecast(
             **hourly_details,
         )
 
-    daylight_hours = _get_daylight_hours(hass, now)
+    daylight_hours = _get_daylight_hours(hass, now, target_date=target_date)
     if daylight_hours:
         fallback_method = "daylight_uniform"
         hourly_value = aggregate_kwh / len(daylight_hours)
@@ -526,8 +526,28 @@ def _hourly_audit_details(
     }
 
 
-def _get_daylight_hours(hass: HomeAssistant, now: datetime) -> list[int]:
+def _get_daylight_hours(
+    hass: HomeAssistant,
+    now: datetime,
+    *,
+    target_date: date | None = None,
+) -> list[int]:
     """Return full local daylight hours when both sun boundaries are available."""
+    target_date = target_date or now.date()
+
+    if target_date != now.date():
+        target_rising = get_astral_event_date(hass, "sunrise", target_date)
+        target_setting = get_astral_event_date(hass, "sunset", target_date)
+        if target_rising is None or target_setting is None:
+            return []
+        local_rising = dt_util.as_local(target_rising)
+        local_setting = dt_util.as_local(target_setting)
+        if local_rising.date() != target_date or local_setting.date() != target_date:
+            return []
+        if local_setting.hour <= local_rising.hour:
+            return []
+        return list(range(local_rising.hour + (local_rising.minute > 0), local_setting.hour))
+
     sun_state = hass.states.get("sun.sun")
     if sun_state is None:
         return []
@@ -538,12 +558,12 @@ def _get_daylight_hours(hass: HomeAssistant, now: datetime) -> list[int]:
 
     local_rising = dt_util.as_local(next_rising)
     local_setting = dt_util.as_local(next_setting)
-    if local_rising.date() != now.date():
-        current_rising = get_astral_event_date(hass, "sunrise", now.date())
+    if local_rising.date() != target_date:
+        current_rising = get_astral_event_date(hass, "sunrise", target_date)
         if current_rising is None:
             return []
         local_rising = dt_util.as_local(current_rising)
-    if local_rising.date() != now.date() or local_setting.date() != now.date():
+    if local_rising.date() != target_date or local_setting.date() != target_date:
         return []
     if local_setting.hour <= local_rising.hour:
         return []

@@ -348,6 +348,50 @@ def test_morning_pv_forecast_uses_todays_sunrise_after_dawn(
 
 
 @pytest.mark.unit
+def test_morning_pv_forecast_uses_target_date_daylight_before_midnight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use tomorrow's daylight boundaries for a pre-midnight forecast run."""
+    now = datetime(2026, 8, 14, 23, 0, tzinfo=timezone.utc)
+    target_date = datetime(2026, 8, 15, 5, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "now", lambda: now)
+
+    def _astral_event(_hass, event, event_date):
+        hour = 6 if event == "sunrise" else 20
+        return datetime(
+            event_date.year,
+            event_date.month,
+            event_date.day,
+            hour,
+            tzinfo=timezone.utc,
+        )
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.utils.pv_forecast.get_astral_event_date",
+        _astral_event,
+    )
+    hass = MagicMock()
+    aggregate = MagicMock()
+    aggregate.state = "120"
+    aggregate.attributes = {}
+    aggregate.last_updated = now
+    hass.states.get.return_value = aggregate
+
+    forecast = get_morning_pv_forecast(
+        hass,
+        {CONF_PV_FORECAST_TOMORROW: "sensor.pv_tomorrow"},
+        start_hour=5,
+        end_hour=12,
+        apply_efficiency=False,
+        start_at=target_date,
+        end_at=target_date.replace(hour=12),
+    )
+
+    assert forecast.method == "daylight_uniform"
+    assert forecast.total_kwh == pytest.approx(46.153846)
+
+
+@pytest.mark.unit
 def test_morning_pv_forecast_rejects_negative_aggregate() -> None:
     """Continue safely without PV when the aggregate forecast is negative."""
     hass = MagicMock()
