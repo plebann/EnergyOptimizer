@@ -1,7 +1,9 @@
 """Tests for morning decision engine logic."""
 from __future__ import annotations
 
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -125,6 +127,88 @@ def test_morning_charge_uses_uncompensated_pv_forecast(
         12,
         {"compensate": False, "use_morning_pv_fallback": True},
     )
+
+
+def test_morning_charge_extends_horizon_when_night_buy_is_cheaper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cheaper night plans the continuous horizon through the next night."""
+    strategy = MorningChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
+    strategy.entry = MagicMock(entry_id="entry-1")
+    strategy.config = {}
+    night_end = datetime(2026, 2, 7, 6, tzinfo=ZoneInfo("Europe/Warsaw"))
+    next_night_start = datetime(2026, 2, 7, 22, tzinfo=ZoneInfo("Europe/Warsaw"))
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_tariff_end_hour",
+        lambda *args, **kwargs: 13,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_night_buy_window_tomorrow_end_datetime",
+        lambda *args, **kwargs: night_end,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_night_buy_window_tomorrow_end_hour",
+        lambda *args, **kwargs: 6,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.get_internal_window_price",
+        lambda _hass, **kwargs: (
+            0.2 if kwargs["unique_id_suffix"] == "night_buy_window_tomorrow" else 0.5
+        ),
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge._resolve_next_night_start",
+        lambda *args, **kwargs: next_night_start,
+    )
+
+    assert strategy._resolve_forecast_params() == (
+        6,
+        22,
+        {
+            "compensate": False,
+            "use_morning_pv_fallback": True,
+            "start_at": night_end,
+            "end_at": next_night_start,
+        },
+    )
+    assert strategy._extended_horizon is True
+    assert strategy._extended_horizon_fallback is False
+
+
+@pytest.mark.parametrize(
+    ("night_price", "day_price", "expected_relation"),
+    [
+        (0.502, 0.500, "night_higher"),
+        (0.500, 0.5005, "equal_within_tolerance"),
+        (0.500, 0.502, "night_lower"),
+    ],
+)
+def test_morning_price_comparison_uses_strict_tolerance(
+    monkeypatch: pytest.MonkeyPatch,
+    night_price: float,
+    day_price: float,
+    expected_relation: str,
+) -> None:
+    """Only a difference of at least 0.001 selects the extended strategy."""
+    from custom_components.energy_optimizer.decision_engine.morning_charge import (
+        _resolve_morning_price_comparison,
+    )
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.get_internal_window_price",
+        lambda _hass, **kwargs: (
+            night_price
+            if kwargs["unique_id_suffix"] == "night_buy_window_tomorrow"
+            else day_price
+        ),
+    )
+    result = _resolve_morning_price_comparison(
+        MagicMock(),
+        entry_id="entry-1",
+        night_end=datetime(2026, 2, 7, 6, tzinfo=ZoneInfo("Europe/Warsaw")),
+    )
+
+    assert result["relation"] == expected_relation
 
 
 @pytest.mark.asyncio
