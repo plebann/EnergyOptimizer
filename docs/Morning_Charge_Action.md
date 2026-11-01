@@ -12,19 +12,6 @@ samowystarczalność nie wystąpi, koniec stanowi początek `day_buy_window`.
 Przy niedostępnych sensorach okien zachowany jest fallback `06:00` do końca
 wysokiej taryfy.
 
-Jeżeli cena aktualnego `night_buy_window_tomorrow` jest niższa od ceny
-chronologicznie następnego `day_buy_window` o więcej niż `0.001 PLN/kWh`,
-Morning Charge przełącza się na rozszerzony horyzont. Wtedy bilans obejmuje
-ciągły okres od końca aktualnego okna nocnego do początku następnego okna
-nocnego. Następne ładowanie dzienne nie jest zakładane jako źródło energii w
-tym obliczeniu — Afternoon Charge pozostaje niezależną akcją zabezpieczającą.
-
-Porównanie korzysta z atrybutu `price` obu okien. Przy braku ceny, błędnej
-cenie lub braku możliwości rozstrzygnięcia kolejnego okna nocnego zachowane
-jest obecne zachowanie, z wyjątkiem potwierdzonego przypadku tańszej nocy bez
-pełnych danych: wtedy Program 2 otrzymuje `max_soc`, a prąd ładowania jest
-ustawiany na maksymalną bezpieczną wartość.
-
 ## Wyzwalacz
 
 - Konkretny, timezone-aware `start_time` trwałego planu
@@ -50,11 +37,7 @@ ustawiany na maksymalną bezpieczną wartość.
 - Sensor godziny końca wysokiej taryfy: `high_tariff_end_hour_sensor` (używany do wyznaczenia okna obliczeń)
 - `min_arbitrage_price` (PLN/kWh) – minimalny **Arbitrage Margin**
 - Arbitrage Buy Reference: cena `night_buy_window_tomorrow` (średnia cena
-   zaplanowanego nocnego okna zakupu)
-- Cena kolejnego dziennego okna zakupu (`day_buy_window` lub
-  `day_buy_window_tomorrow`) — wyłącznie do decyzji o rozszerzeniu horyzontu
-- Cena i granice następnego nocnego okna — wymagane do pełnego horyzontu w
-  przypadku tańszej nocy
+  zaplanowanego nocnego okna zakupu)
 - Ustawienie włączenia Pompy Ciepła (jeśli wyłączone, zużycie PC = 0)
 
 ## Przebieg decyzji (wysoki poziom)
@@ -75,13 +58,7 @@ ustawiany na maksymalną bezpieczną wartość.
     - liczony jest tylko, gdy `Arbitrage Margin = morning_sell_price - night_buy_window_tomorrow_price`
     **ściśle przekracza** `min_arbitrage_price`
    - brak ceny sprzedaży albo brak ceny Arbitrage Buy Reference → arbitraż jest wyłączony (fail-closed)
-    - próg działa wyłącznie jako bramka on/off; nie skaluje wolumenu `arbitrage_kwh`
-
-   Przed obliczeniem horyzontu wykonywane jest porównanie ceny nocnego i
-   następnego dziennego okna. Gdy `night_price + 0.001 < day_price`, kroki
-   4–6 są liczone dla okresu do początku następnego `night_buy_window`.
-   Gdy pełnej prognozy lub granicy następnego okna nie można wiarygodnie
-   ustalić, bezpieczny fallback ustawia target Programu 2 na `max_soc`.
+   - próg działa wyłącznie jako bramka on/off; nie skaluje wolumenu `arbitrage_kwh`
 
 ## Diagram (Mermaid)
 
