@@ -17,6 +17,7 @@ from custom_components.energy_optimizer.const import (
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MIN_SOC,
     CONF_PROG4_SOC_ENTITY,
+    CONF_PROG4_TIME_START_ENTITY,
     CONF_TEST_MODE,
     DOMAIN,
 )
@@ -78,6 +79,7 @@ def _hass(
     """Build a minimal Home Assistant harness with observable outputs."""
     config = {
         CONF_PROG4_SOC_ENTITY: "number.program4_soc",
+        CONF_PROG4_TIME_START_ENTITY: "time.program4_start",
         CONF_GRID_CHARGE_CURRENT_ENTITY: "number.charge_current",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_BATTERY_CAPACITY_AH: capacity_ah,
@@ -91,6 +93,7 @@ def _hass(
     }
     states = {
         "number.program4_soc": str(current_soc),
+        "time.program4_start": "11:00:00",
         "number.charge_current": "0",
         "sensor.battery_soc": str(current_soc),
         "sensor.evening_price": "1.0",
@@ -250,6 +253,12 @@ async def test_protection_charge_sets_program_current_and_grid_assist() -> None:
         call["entity_id"] == "number.charge_current" and call["value"] > 0
         for call in number_calls
     )
+    time_calls = [
+        call.args[2]
+        for call in hass.services.async_call.call_args_list
+        if call.args[:2] == ("time", "set_value")
+    ]
+    assert time_calls == [{"entity_id": "time.program4_start", "time": "12:00:00"}]
 
 
 @pytest.mark.asyncio

@@ -88,7 +88,7 @@ flowchart TD
        AC_base -.-> AC_base_note[Note: base deficit is required minus reserve and PV, clamped to zero]
       AC_total -.-> AC_total_note[Note: total deficit = base + arbitrage]
    AC_reset -.-> AC_reset_note[Note: no-action; optional prog4 SOC correction to computed target and log]
-    AC_charge -.-> AC_charge_note[Note: set prog4 SOC and charge current]
+   AC_charge -.-> AC_charge_note[Note: set Program 4 start, SOC and charge current]
 ```
 
 ### Szczegóły decyzyjne
@@ -130,15 +130,21 @@ flowchart TD
 
 ## Efekty sterowania (koncepcyjne)
 
+- Ustaw czas startu Programu 4 na początek rozstrzygniętego `day_buy_window`.
+  Zmiana jest wykonywana tylko, gdy godzina lub minuta różni się od bieżącej
+  wartości, i pozostaje ustawieniem trwałym.
 - Ustaw docelowy SOC programu 4 (ładowanie z sieci) na obliczoną wartość
-- Ustaw prąd ładowania z sieci na obliczoną wartość (okno do 22:00)
+- Ustaw prąd ładowania z sieci na obliczoną wartość (okno do 22:00).
+   Czas Programu 4 jest zapisywany przed SOC i prądem, aby falownik
+   nie oczekiwał na wcześniejszy, przyszły start programu.
 - Uwzględnij arbitraż: docelowy SOC i prąd ładowania bazują na `required_kwh + arb_kwh`
 - Falownik automatycznie rozpocznie ładowanie do osiągnięcia docelowego SOC
 - Stan wsparcia z sieci po południu jest ustawiany na podstawie bazowego deficytu (bez arbitrażu)
-- Jeśli brak deficytu (po arbitrażu), możliwa jest korekta `prog4_soc` do wyliczonego `target_soc` (tylko gdy różni się od wartości bieżącej)
+- Jeśli brak deficytu (po arbitrażu), możliwa jest korekta `prog4_soc` do wyliczonego `target_soc` (tylko gdy różni się od wartości bieżącej); czas startu Programu 4 jest synchronizowany również w tej ścieżce
 - Zgłoszone zakończenie akcji zeruje prąd ładowania (`grid_charge_current_entity`)
-  na **0 A** i trwale przywraca cel Programu 4 do `min(SOC baterii, min_soc_pv)`
-  na końcu `day_buy_window`; reset przetrwa restart Home Assistant.
+  na **0 A** i trwale przywraca cel Programu 4 do `min(SOC baterii, min_soc_pv)`.
+  Czasu startu Programu 4 nie przywraca.
+  Reset następuje na końcu `day_buy_window` i przetrwa restart Home Assistant.
 
 ## Zakończenie akcji (reset)
 

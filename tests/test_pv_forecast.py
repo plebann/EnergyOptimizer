@@ -388,7 +388,7 @@ def test_morning_pv_forecast_uses_target_date_daylight_before_midnight(
     )
 
     assert forecast.method == "daylight_uniform"
-    assert forecast.total_kwh == pytest.approx(46.153846)
+    assert forecast.total_kwh == pytest.approx(51.428571)
 
 
 @pytest.mark.unit

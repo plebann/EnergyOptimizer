@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time
 from math import ceil
 import logging
 from typing import TYPE_CHECKING, Any, Callable
+
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.util import dt as dt_util
 
 from ..calculations.battery import (
     calculate_charge_target_soc,
@@ -16,7 +19,10 @@ from ..calculations.energy import hourly_demand
 from ..const import (
     CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_MIN_ARBITRAGE_PRICE,
+    CONF_GRID_CHARGE_CURRENT_ENTITY,
+    CONF_PROG4_TIME_START_ENTITY,
 )
+from ..controllers.inverter import set_program_start_time
 from ..decision_engine.common import (
     BatteryConfig,
     ChargeAction,
@@ -144,6 +150,93 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             fallback_end_hour=self._day_buy_end_hour,
         )
 
+    def _current_program_start_time(self, entity_id: str) -> time | None:
+        """Read the configured Program 4 start time."""
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return None
+        parsed = dt_util.parse_time(str(state.state))
+        if parsed is not None:
+            return parsed.replace(second=0, microsecond=0)
+        parsed_dt = dt_util.parse_datetime(str(state.state))
+        return parsed_dt.time().replace(second=0, microsecond=0) if parsed_dt else None
+
+    async def _log_write_failure(self, reason: str) -> None:
+        """Log a failed afternoon control write."""
+        self._charge_failure_reported = True
+        details: dict[str, Any] = {}
+        if hasattr(self, "_day_buy_start_hour"):
+            window_start, window_end = self._resolve_completion_window()
+            details = {
+                "window_start": window_start.isoformat(),
+                "window_end": window_end.isoformat(),
+            }
+        outcome = DecisionOutcome(
+            scenario=self.scenario_name,
+            action_type="charge_failed",
+            summary="Afternoon charge inverter write failed",
+            reason=reason,
+            details=details,
+        )
+        await log_decision_unified(
+            self.hass,
+            self.entry,
+            outcome,
+            context=self.integration_context,
+            logger=_LOGGER,
+        )
+
+    async def _prepare_program_start_time(self) -> list[dict[str, float | str]] | None:
+        """Set Program 4 start before any other afternoon control write."""
+        entity_id = self.config.get(CONF_PROG4_TIME_START_ENTITY)
+        if not entity_id:
+            await self._log_write_failure("Program 4 start-time control is unavailable")
+            return None
+        entity_id = str(entity_id)
+        previous = self._current_program_start_time(entity_id)
+        if previous is None:
+            await self._log_write_failure(
+                "Program 4 start-time control is unavailable or invalid"
+            )
+            return None
+        window_start, _ = self._resolve_completion_window()
+        target = window_start.time().replace(second=0, microsecond=0)
+        if previous == target:
+            return []
+        try:
+            await set_program_start_time(
+                self.hass,
+                entity_id,
+                target,
+                entry=self.entry,
+                logger=_LOGGER,
+                context=self.integration_context,
+            )
+        except (HomeAssistantError, ValueError) as err:
+            await self._log_write_failure(str(err))
+            return None
+        return [{"entity_id": entity_id, "value": target.isoformat()}]
+
+    async def _prepare_charge_action(
+        self,
+        action: ChargeAction,
+    ) -> list[dict[str, float | str]] | None:
+        """Set Program 4 start before shared positive-charge controls."""
+        del action
+        return await self._prepare_program_start_time()
+
+    async def _check_early_exit(self) -> bool:
+        """Reject incomplete afternoon control configuration before writes."""
+        if not self.config.get(CONF_GRID_CHARGE_CURRENT_ENTITY):
+            await self._log_write_failure(
+                "Grid charge current control is required for Afternoon Charge"
+            )
+            return True
+        if not self.config.get(CONF_PROG4_TIME_START_ENTITY):
+            await self._log_write_failure("Program 4 start-time control is required")
+            return True
+        return False
+
     async def _schedule_completion(self) -> None:
         """Schedule Program 4 completion at the day buy window end."""
         window_start, window_end = self._resolve_completion_window()
@@ -162,9 +255,11 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
         *,
         program_soc_changed: bool,
     ) -> None:
-        """Schedule completion only after an actual Program 4 SOC write."""
-        del action
-        if program_soc_changed:
+        """Schedule completion for an active charge or temporary SOC update."""
+        charge_current = getattr(action, "charge_current", 0)
+        if program_soc_changed or (
+            isinstance(charge_current, (int, float)) and charge_current > 0
+        ):
             await self._schedule_completion()
 
     def _history_window_kinds(self) -> tuple[str, str]:
@@ -334,9 +429,27 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
     async def _handle_no_action(self, balance: EnergyBalance) -> None:
         """Apply the zero plan and publish the physical forecast result."""
         action = self._calculate_charge_action(total_gap=0.0, balance=balance)
+        start_time_changed = await self._prepare_program_start_time()
+        if start_time_changed is None:
+            return
         entities_changed = await self._apply_charge_action(action)
         if entities_changed is None:
+            outcome = self._build_charge_outcome(action, balance)
+            outcome.action_type = "charge_failed"
+            outcome.summary = "Afternoon charge inverter write failed"
+            outcome.reason = (
+                self._last_charge_write_error or "Afternoon charge inverter write failed"
+            )
+            outcome.entities_changed = start_time_changed
+            await log_decision_unified(
+                self.hass,
+                self.entry,
+                outcome,
+                context=self.integration_context,
+                logger=_LOGGER,
+            )
             return
+        entities_changed = start_time_changed + entities_changed
         program_soc_changed = any(
             change["entity_id"] == self.prog_soc_entity
             for change in entities_changed
@@ -347,7 +460,10 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
         outcome = self._build_charge_outcome(action, balance)
         outcome.history_windows = self._history_windows()
         outcome.entities_changed = entities_changed
-        if entities_changed:
+        if any(
+            change["entity_id"] == self.prog_soc_entity
+            for change in entities_changed
+        ):
             outcome.action_type = "program_settings_updated"
         await log_decision_unified(
             self.hass,

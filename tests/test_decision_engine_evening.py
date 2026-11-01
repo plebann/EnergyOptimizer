@@ -404,7 +404,12 @@ async def test_normal_restoration_does_not_write_program_6(
 ) -> None:
     hass = _setup_hass(
         {},
-        {"number.prog6_soc": "50", "sensor.pv_forecast": "5"},
+        {
+            "number.prog1_soc": "50",
+            "number.prog2_soc": "30",
+            "number.prog6_soc": "20",
+            "sensor.pv_forecast": "5",
+        },
     )
     entry = hass.config_entries.async_get_entry("entry-1")
     captured_outcomes = []

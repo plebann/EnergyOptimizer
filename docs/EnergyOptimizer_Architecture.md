@@ -629,7 +629,7 @@ async def get_battery_state() -> BatteryState:
 | Sprzedaż w szczycie (wieczorny szczyt) | `select.inverter_work_mode`<br>`number.inverter_program_5_soc`<br>`number.inverter_battery_max_discharging_current`<br>`number.inverter_grid_max_export_power` | `Selling First`<br>Docelowy SOC programu 5 (P5 start ~17:00, okno szczytu 17-21)<br>Limit prądu rozładowania (A)<br>Limit eksportu (W) |
 | Blokada rozładowania | `number.inverter_program_<n>_soc` | Ustaw na aktualny SOC (freeze) |
 | Balansowanie (22:00) | `select.inverter_work_mode`<br>`number.inverter_program_6_soc` **oraz** `number.inverter_program_1_soc` (opcjonalnie `number.inverter_program_2_soc`)<br>`number.inverter_battery_max_charging_current`<br>`select.inverter_program_6_charging` **oraz** `select.inverter_program_1_charging` (opcjonalnie `select.inverter_program_2_charging`) | `Zero Export to Load`<br>`100` w programie 6 i odzwierciedlony cel SOC w programie 1 (opcjonalnie w 2)<br>Domyślne max (np. 23 A)<br>`grid` |
-| Korekta + doładowanie w niskiej taryfie dziennej | `select.inverter_work_mode`<br>`number.inverter_program_4_soc` (start korygowany inną automatyzacją)<br>`select.inverter_program_4_charging`<br>`number.inverter_battery_grid_charging_current` | `Zero Export to Load`<br>Docelowy SOC programu 4<br>`grid`<br>Prąd z sieci (A) według zapotrzebowania |
+| Korekta + doładowanie w niskiej taryfie dziennej | `select.inverter_work_mode`<br>`time.inverter_program_4_start`<br>`number.inverter_program_4_soc`<br>`select.inverter_program_4_charging`<br>`number.inverter_battery_grid_charging_current` | `Zero Export to Load`<br>Początek bieżącego okna Afternoon Charge<br>Docelowy SOC programu 4<br>`grid`<br>Prąd z sieci (A) według zapotrzebowania |
 
 ### 5.2. Scheduler
 

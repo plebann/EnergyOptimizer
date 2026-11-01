@@ -386,39 +386,42 @@ async def _handle_normal_restoration(
     sufficiency_reached: bool,
 ) -> bool:
     """Handle normal restoration scenario and return whether it was activated."""
-    current_prog6_soc = None
-    if prog6_soc:
-        prog6_value, prog6_raw, prog6_error = get_float_state_info(hass, prog6_soc)
-        if prog6_error is None and prog6_value is not None:
-            current_prog6_soc = prog6_value
-        elif prog6_error == "invalid":
-            _LOGGER.warning("Could not parse prog6 SOC: %s", prog6_raw)
+    del prog6_soc
+    restore_targets = (
+        (prog1_soc, min_soc, "Program 1"),
+        (prog2_soc, min_soc - 4, "Program 2"),
+    )
+    current_targets: list[tuple[str, float, str, float]] = []
+    for entity_id, target, label in restore_targets:
+        if not entity_id:
+            continue
+        current_value, raw_value, error = get_float_state_info(hass, entity_id)
+        if error is None and current_value is not None and current_value > target:
+            current_targets.append((entity_id, target, label, current_value))
+        elif error == "invalid":
+            _LOGGER.warning("Could not parse %s SOC: %s", label, raw_value)
 
-    if current_prog6_soc is None or current_prog6_soc <= min_soc:
+    if not current_targets:
         return False
 
     _LOGGER.info(
-        "Restoring normal operation (current: %.0f%%, restoring to: %.0f%%)",
-        current_prog6_soc,
-        min_soc,
+        "Restoring normal operation for %s",
+        ", ".join(label for _, _, label, _ in current_targets),
     )
 
-    await set_program_soc(
-        hass,
-        prog1_soc,
-        min_soc,
-        entry=entry,
-        logger=_LOGGER,
-        context=integration_context,
-    )
-    await set_program_soc(
-        hass,
-        prog2_soc,
-        min_soc - 4,
-        entry=entry,
-        logger=_LOGGER,
-        context=integration_context,
-    )
+    for entity_id, target, _, _ in current_targets:
+        await set_program_soc(
+            hass,
+            entity_id,
+            target,
+            entry=entry,
+            logger=_LOGGER,
+            context=integration_context,
+        )
+    previous_details = {
+        label: round(current_value, 1)
+        for _, _, label, current_value in current_targets
+    }
     summary = "Normal operation restored"
     outcome = DecisionOutcome(
         scenario="Evening behavior",
@@ -427,8 +430,8 @@ async def _handle_normal_restoration(
         reason=f"PV within normal range, SOC minimum {min_soc:.0f}%",
         details={
             "result": summary,
-            "previous": f"{current_prog6_soc:.0f}%",
-            "previous_soc": round(current_prog6_soc, 1),
+            "previous": previous_details,
+            "previous_soc": previous_details,
             "target_soc": min_soc,
             "pv_forecast_kwh": round(pv_forecast, 2),
             "heat_pump_window_kwh": round(heat_pump_window_kwh, 2),
@@ -444,8 +447,8 @@ async def _handle_normal_restoration(
             "afternoon_grid_assist": grid_assist_on,
         },
         entities_changed=[
-            {"entity_id": prog1_soc, "value": min_soc},
-            {"entity_id": prog2_soc, "value": min_soc - 4},
+            {"entity_id": entity_id, "value": target}
+            for entity_id, target, _, _ in current_targets
         ],
     )
     await log_decision_unified(

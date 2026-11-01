@@ -288,8 +288,8 @@ async def test_morning_completion_scheduled_when_target_is_already_present(
 
 
 @pytest.mark.asyncio
-async def test_afternoon_schedules_completion_only_after_program_soc_write() -> None:
-    """A charge-current-only afternoon action does not create a completion."""
+async def test_afternoon_schedules_completion_for_active_charge() -> None:
+    """An active afternoon charge creates completion even without SOC change."""
     strategy = AfternoonChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
     strategy._schedule_completion = AsyncMock()
     action = MagicMock()
@@ -298,6 +298,11 @@ async def test_afternoon_schedules_completion_only_after_program_soc_write() -> 
     strategy._schedule_completion.assert_not_awaited()
 
     await strategy._after_charge_action(action, program_soc_changed=True)
+    strategy._schedule_completion.assert_awaited_once()
+
+    strategy._schedule_completion.reset_mock()
+    action.charge_current = 8
+    await strategy._after_charge_action(action, program_soc_changed=False)
     strategy._schedule_completion.assert_awaited_once()
 
 

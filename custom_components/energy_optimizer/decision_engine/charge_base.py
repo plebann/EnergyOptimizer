@@ -66,6 +66,8 @@ class BaseChargeStrategy(ABC):
         self.integration_context: Context
         self.forecasts: ForecastData
         self.pv_compensation_factor: float | None
+        self._last_charge_write_error: str | None = None
+        self._charge_failure_reported = False
 
     @property
     @abstractmethod
@@ -149,6 +151,7 @@ class BaseChargeStrategy(ABC):
         action: ChargeAction,
     ) -> list[dict[str, float | str]] | None:
         """Apply shared charge writes and return the entities actually written."""
+        self._last_charge_write_error = None
         entities_changed: list[dict[str, float | str]] = []
         if abs(action.target_soc - self.prog_soc_value) > 0.01:
             await set_program_soc(
@@ -175,6 +178,7 @@ class BaseChargeStrategy(ABC):
                     context=self.integration_context,
                 )
             except HomeAssistantError as err:
+                self._last_charge_write_error = str(err)
                 if any(
                     change["entity_id"] == self.prog_soc_entity
                     for change in entities_changed
@@ -217,9 +221,18 @@ class BaseChargeStrategy(ABC):
     ) -> None:
         """Run scenario-specific work after successful charge writes."""
 
+    async def _prepare_charge_action(
+        self,
+        action: ChargeAction,
+    ) -> list[dict[str, float | str]] | None:
+        """Run scenario-specific writes before shared charge controls."""
+        del action
+        return []
+
     async def run(self) -> None:
         """Execute common charge workflow and delegate strategy specifics."""
         self.integration_context = Context()
+        self._charge_failure_reported = False
 
         entry = resolve_entry(self.hass, self._entry_id)
         if entry is None:
@@ -270,6 +283,10 @@ class BaseChargeStrategy(ABC):
             balance=balance,
         )
 
+        prepared_changes = await self._prepare_charge_action(action)
+        if prepared_changes is None:
+            return
+
         grid_charge_current_entity = self.config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
         charge_current_entity = self.config.get(CONF_CHARGE_CURRENT_ENTITY)
         max_charge_current_changed = False
@@ -295,7 +312,22 @@ class BaseChargeStrategy(ABC):
 
         entities_changed = await self._apply_charge_action(action)
         if entities_changed is None:
+            if self._charge_failure_reported:
+                return
+            outcome = self._build_charge_outcome(action, balance)
+            outcome.action_type = "charge_failed"
+            outcome.summary = "Charge inverter write failed"
+            outcome.reason = self._last_charge_write_error or "Charge inverter write failed"
+            outcome.entities_changed = prepared_changes
+            await log_decision_unified(
+                self.hass,
+                self.entry,
+                outcome,
+                context=self.integration_context,
+                logger=_LOGGER,
+            )
             return
+        entities_changed = prepared_changes + entities_changed
         if max_charge_current_changed:
             entities_changed.insert(
                 0,
