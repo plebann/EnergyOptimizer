@@ -67,6 +67,7 @@ class BaseChargeStrategy(ABC):
         self.forecasts: ForecastData
         self.pv_compensation_factor: float | None
         self._last_charge_write_error: str | None = None
+        self._charge_failure_reported = False
 
     @property
     @abstractmethod
@@ -231,6 +232,7 @@ class BaseChargeStrategy(ABC):
     async def run(self) -> None:
         """Execute common charge workflow and delegate strategy specifics."""
         self.integration_context = Context()
+        self._charge_failure_reported = False
 
         entry = resolve_entry(self.hass, self._entry_id)
         if entry is None:
@@ -310,6 +312,8 @@ class BaseChargeStrategy(ABC):
 
         entities_changed = await self._apply_charge_action(action)
         if entities_changed is None:
+            if self._charge_failure_reported:
+                return
             outcome = self._build_charge_outcome(action, balance)
             outcome.action_type = "charge_failed"
             outcome.summary = "Charge inverter write failed"

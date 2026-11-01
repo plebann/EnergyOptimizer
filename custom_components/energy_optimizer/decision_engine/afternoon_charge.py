@@ -163,6 +163,7 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
 
     async def _log_write_failure(self, reason: str) -> None:
         """Log a failed afternoon control write."""
+        self._charge_failure_reported = True
         details: dict[str, Any] = {}
         if hasattr(self, "_day_buy_start_hour"):
             window_start, window_end = self._resolve_completion_window()

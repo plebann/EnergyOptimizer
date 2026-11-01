@@ -118,7 +118,6 @@ class ActionScheduler:
 
     def start(self) -> None:
         """Start scheduling fixed actions."""
-        self._schedule_morning_charge()
         self._schedule_afternoon_charge()
         self._schedule_program4_solar_reset()
         self._listeners.append(
@@ -151,8 +150,15 @@ class ActionScheduler:
             self._publish_schedule_snapshot
         )
         self._charge_completion_restore_task = self._create_task(
-            async_restore_charge_completions(self.hass, self.entry)
+            self._restore_completions_then_schedule_morning_charge()
         )
+
+        if self.coordinator is not None:
+            remove_coordinator_listener = self.coordinator.async_add_listener(
+                self._handle_coordinator_update
+            )
+            if callable(remove_coordinator_listener):
+                self._listeners.append(remove_coordinator_listener)
 
         self._sunrise_listener = async_track_sunrise(
             self.hass,
@@ -281,6 +287,11 @@ class ActionScheduler:
 
         self._publish_schedule_snapshot()
         _LOGGER.info("Energy Optimizer scheduler started for entry %s", self.entry.entry_id)
+
+    async def _restore_completions_then_schedule_morning_charge(self) -> None:
+        """Restore completions before scheduling a possible startup charge."""
+        await async_restore_charge_completions(self.hass, self.entry)
+        self._schedule_morning_charge()
 
     def stop(self) -> None:
         """Stop all scheduled listeners."""
@@ -468,6 +479,15 @@ class ActionScheduler:
 
     async def _handle_night_buy_window_change(self, event) -> None:
         """Reschedule morning charge when the night buy window changes."""
+        self._schedule_morning_charge()
+
+    def _handle_coordinator_update(self) -> None:
+        """Reschedule Morning Charge when a persisted plan is created or changed."""
+        if (
+            self._charge_completion_restore_task is not None
+            and not self._charge_completion_restore_task.done()
+        ):
+            return
         self._schedule_morning_charge()
 
     async def _handle_night_buy_window_rotation(self, now: datetime) -> None:

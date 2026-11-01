@@ -371,7 +371,7 @@ class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="number")
                 ),
                 vol.Optional(CONF_PROG4_TIME_START_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "time"])
                 ),
                 vol.Optional(CONF_PROG5_SOC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
@@ -1085,21 +1085,27 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
         """Handle time program options."""
         if user_input is not None:
             errors = {}
-            prog2_soc = user_input.get(CONF_PROG2_SOC_ENTITY)
-            prog2_start = user_input.get(CONF_PROG2_TIME_START_ENTITY)
-            if prog2_soc and not prog2_start:
-                errors[CONF_PROG2_TIME_START_ENTITY] = "entity_not_found"
-            elif prog2_start:
-                state = self.hass.states.get(prog2_start)
+            for soc_key, start_key in (
+                (CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START_ENTITY),
+                (CONF_PROG4_SOC_ENTITY, CONF_PROG4_TIME_START_ENTITY),
+            ):
+                soc_entity = user_input.get(soc_key)
+                start_entity = user_input.get(start_key)
+                if soc_entity and not start_entity:
+                    errors[start_key] = "entity_not_found"
+                    continue
+                if not start_entity:
+                    continue
+                state = self.hass.states.get(start_entity)
                 if state is None:
-                    errors[CONF_PROG2_TIME_START_ENTITY] = "entity_not_found"
+                    errors[start_key] = "entity_not_found"
                 elif state.domain not in ("input_datetime", "time"):
-                    errors[CONF_PROG2_TIME_START_ENTITY] = "not_time_entity"
+                    errors[start_key] = "not_time_entity"
                 elif (
                     state.domain == "input_datetime"
                     and not state.attributes.get("has_time", False)
                 ):
-                    errors[CONF_PROG2_TIME_START_ENTITY] = "not_time_entity"
+                    errors[start_key] = "not_time_entity"
             if not errors:
                 self._data.update(user_input)
                 return await self.async_step_pv_load_config()
@@ -1154,7 +1160,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                     CONF_PROG4_TIME_START_ENTITY,
                     default=self._config_entry.data.get(CONF_PROG4_TIME_START_ENTITY),
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["input_datetime", "sensor", "time"])
+                    selector.EntitySelectorConfig(domain=["input_datetime", "time"])
                 ),
                 vol.Optional(
                     CONF_PROG5_SOC_ENTITY,

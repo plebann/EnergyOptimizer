@@ -337,6 +337,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
 
     async def _log_write_failure(self, reason: str) -> None:
         """Emit an explicit morning charge write failure."""
+        self._charge_failure_reported = True
         window_start, window_end = self._resolve_completion_window()
         outcome = DecisionOutcome(
             scenario=self.scenario_name,
