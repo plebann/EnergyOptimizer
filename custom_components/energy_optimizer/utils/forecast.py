@@ -14,11 +14,12 @@ async def get_heat_pump_forecast_window(
     *,
     start_hour: int,
     end_hour: int,
+    hours_ahead: int | None = None,
 ) -> tuple[float, dict[int, float]]:
     """Return heat pump forecast for a window, respecting wrap."""
-    hours_ahead = max(len(build_hour_window(start_hour, end_hour)), 1)
+    resolved_hours = hours_ahead or max(len(build_hour_window(start_hour, end_hour)), 1)
     return await get_heat_pump_forecast(
-        hass, config, starting_hour=start_hour, hours_ahead=hours_ahead
+        hass, config, starting_hour=start_hour, hours_ahead=resolved_hours
     )
 
 

@@ -40,6 +40,9 @@ from custom_components.energy_optimizer.decision_engine.morning_charge import (
     async_run_morning_charge,
 )
 from custom_components.energy_optimizer.decision_engine import common as decision_common
+from custom_components.energy_optimizer.decision_engine.common import (
+    build_forecast_hour_window,
+)
 from custom_components.energy_optimizer.utils.pv_forecast import MorningPVForecast
 
 pytestmark = pytest.mark.enable_socket
@@ -209,6 +212,70 @@ def test_morning_price_comparison_uses_strict_tolerance(
     )
 
     assert result["relation"] == expected_relation
+
+
+def test_forecast_window_preserves_a_26_hour_absolute_span() -> None:
+    """A midnight end boundary does not truncate the following calendar day."""
+    start = datetime(2026, 2, 7, 0, tzinfo=ZoneInfo("Europe/Warsaw"))
+    end = datetime(2026, 2, 8, 2, tzinfo=ZoneInfo("Europe/Warsaw"))
+
+    window = build_forecast_hour_window(0, 2, start_at=start, end_at=end)
+
+    assert len(window) == 26
+    assert window[:2] == [0, 1]
+    assert window[-2:] == [0, 1]
+
+
+def test_next_night_falls_back_to_following_midnight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Before the next price rotation, the forecast boundary is next midnight."""
+    from custom_components.energy_optimizer.decision_engine.morning_charge import (
+        _resolve_next_night_start,
+    )
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.get_buy_price_payload",
+        lambda *args, **kwargs: None,
+    )
+    after = datetime(2026, 2, 7, 22, tzinfo=ZoneInfo("Europe/Warsaw"))
+
+    assert _resolve_next_night_start(
+        MagicMock(), {}, entry_id="entry-1", after=after
+    ) == datetime(2026, 2, 8, 0, tzinfo=ZoneInfo("Europe/Warsaw"))
+
+
+def test_next_night_prefers_combined_price_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The combined coordinator snapshot is used before split price payloads."""
+    from custom_components.energy_optimizer.decision_engine.morning_charge import (
+        _resolve_next_night_start,
+    )
+    captured: dict[str, object] = {}
+    planned_start = datetime(2026, 2, 8, 1, tzinfo=ZoneInfo("Europe/Warsaw"))
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.get_buy_price_payload",
+        lambda *args, **kwargs: [{"time": "combined", "price": 1.0}],
+    )
+
+    def _build(prices, *args, **kwargs):
+        captured["prices"] = prices
+        return MagicMock(start=planned_start)
+
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.build_night_buy_window_plan",
+        _build,
+    )
+
+    result = _resolve_next_night_start(
+        MagicMock(), {}, entry_id="entry-1",
+        after=datetime(2026, 2, 7, 6, tzinfo=ZoneInfo("Europe/Warsaw")),
+    )
+
+    assert result == planned_start
+    assert captured["prices"] == [{"time": "combined", "price": 1.0}]
 
 
 @pytest.mark.asyncio

@@ -40,6 +40,7 @@ from ..decision_engine.common import (
     _compute_arbitrage_from_cap,
     build_no_action_outcome,
     build_morning_charge_outcome,
+    build_forecast_hour_window,
     calculate_target_soc_from_needed_reserve,
     compute_sufficiency,
     get_required_prog2_soc_state,
@@ -181,8 +182,28 @@ class MorningChargeStrategy(BaseChargeStrategy):
             pv_forecast = self.forecasts.morning_pv_forecast
             if pv_forecast is None or pv_forecast.status != "valid_hourly":
                 self._extended_horizon_fallback = True
-            elif self.config.get(CONF_ENABLE_HEAT_PUMP) and not self.forecasts.heat_pump_hourly:
+            elif (
+                self.forecasts.start_at is not None
+                and self.forecasts.end_at is not None
+                and (
+                    self.forecasts.end_at - self.forecasts.start_at
+                ).total_seconds()
+                >= 24 * 3600
+            ):
+                # The current PV parser is day-scoped. Do not reuse the first
+                # calendar day's hourly values for a second calendar day.
                 self._extended_horizon_fallback = True
+            elif self.config.get(CONF_ENABLE_HEAT_PUMP):
+                expected_hours = set(
+                    build_forecast_hour_window(
+                        self.forecasts.start_hour,
+                        self.forecasts.end_hour,
+                        start_at=self.forecasts.start_at,
+                        end_at=self.forecasts.end_at,
+                    )
+                )
+                if set(self.forecasts.heat_pump_hourly) != expected_hours:
+                    self._extended_horizon_fallback = True
         self._sufficiency = compute_sufficiency(self.forecasts)
         if self._sufficiency.required_kwh <= 0.0:
             _LOGGER.info("Required morning energy is zero or negative")
@@ -864,18 +885,24 @@ def _resolve_next_night_start(
 ) -> datetime | None:
     """Resolve the next night start from the complete future buy-price payload."""
     prices = get_buy_price_payload(hass, config, entry_id=entry_id)
-    if not prices:
-        return None
     local_tz = after.tzinfo or dt_util.DEFAULT_TIME_ZONE
-    next_plan = build_night_buy_window_plan(
-        prices,
-        str(config.get(CONF_BUY_PRICE_SENSOR, "buy_price")),
-        end_date=after.date() + timedelta(days=1),
-        local_tz=local_tz,
+    if prices:
+        next_plan = build_night_buy_window_plan(
+            prices,
+            str(config.get(CONF_BUY_PRICE_SENSOR, "buy_price")),
+            end_date=after.date() + timedelta(days=1),
+            local_tz=local_tz,
+        )
+        if next_plan is not None and next_plan.start > after:
+            return next_plan.start
+
+    # The next-night price window is not available before its daily rotation.
+    # Midnight of the following day is the conservative forecast boundary.
+    return datetime.combine(
+        after.date() + timedelta(days=1),
+        time.min,
+        tzinfo=local_tz,
     )
-    if next_plan is None or next_plan.start <= after:
-        return None
-    return next_plan.start
 
 
 def _morning_price_details(strategy: MorningChargeStrategy) -> dict[str, object]:

@@ -68,7 +68,11 @@ async def get_heat_pump_forecast(
         return 0.0, {}
 
     total_kwh = float(response.get("total_energy_kwh", 0.0) or 0.0)
-    window_hours = set(build_hour_window(starting_hour, (starting_hour + hours_ahead) % 24))
+    window_hours = (
+        set(range(24))
+        if hours_ahead >= 24
+        else set(build_hour_window(starting_hour, (starting_hour + hours_ahead) % 24))
+    )
     hourly_kwh: dict[int, float] = {}
     hours_list = response.get("hours")
     if isinstance(hours_list, list):
