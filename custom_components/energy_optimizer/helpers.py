@@ -428,11 +428,26 @@ def get_buy_price_payload(
     if not isinstance(payload, dict):
         return None
 
-    prices: list[dict[str, object]] = []
+    combined = payload.get("prices")
+    if isinstance(combined, list):
+        prices = [value for value in combined if isinstance(value, dict)]
+        return prices or None
+
+    prices = []
+    seen_times: set[str] = set()
     for key in ("prices_today", "prices_tomorrow"):
         values = payload.get(key)
-        if isinstance(values, list):
-            prices.extend(value for value in values if isinstance(value, dict))
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            raw_time = value.get("time")
+            time_key = str(raw_time)
+            if time_key in seen_times:
+                continue
+            seen_times.add(time_key)
+            prices.append(value)
     return prices or None
 
 

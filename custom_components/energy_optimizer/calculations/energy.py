@@ -134,9 +134,10 @@ def calculate_sufficiency_window(
     losses_hourly: float,
     margin: float,
     pv_forecast_hourly: dict[int, float],
+    hour_window: list[int] | None = None,
 ) -> tuple[float, float, float, int, bool]:
     """Calculate required energy and PV sufficiency window details."""
-    hour_window = build_hour_window(start_hour, end_hour)
+    resolved_hour_window = hour_window or build_hour_window(start_hour, end_hour)
     required_kwh = sum(
         hourly_demand(
             hour,
@@ -145,11 +146,11 @@ def calculate_sufficiency_window(
             losses_hourly=losses_hourly,
             margin=margin,
         )
-        for hour in hour_window
+        for hour in resolved_hour_window
     )
 
     sufficiency_hour: int | None = None
-    for hour in hour_window:
+    for hour in resolved_hour_window:
         if pv_forecast_hourly.get(hour, 0.0) >= hourly_demand(
             hour,
             hourly_usage=hourly_usage,
@@ -166,7 +167,7 @@ def calculate_sufficiency_window(
 
     required_sufficiency_kwh = 0.0
     pv_sufficiency_kwh = 0.0
-    for hour in hour_window:
+    for hour in resolved_hour_window:
         if sufficiency_reached and hour == sufficiency_hour:
             break
         required_sufficiency_kwh += hourly_demand(

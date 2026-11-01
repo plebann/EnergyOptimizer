@@ -126,6 +126,23 @@ class ChargeAction:
     charge_current: float
 
 
+def build_forecast_hour_window(
+    start_hour: int,
+    end_hour: int,
+    *,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+) -> list[int]:
+    """Build an hourly sequence, preserving absolute spans across midnight."""
+    if start_at is not None and end_at is not None:
+        duration_hours = int(
+            (dt_util.as_utc(end_at) - dt_util.as_utc(start_at)).total_seconds() // 3600
+        )
+        if duration_hours > 0:
+            return [(start_hour + offset) % 24 for offset in range(duration_hours)]
+    return build_hour_window(start_hour, end_hour)
+
+
 def get_battery_config(config: dict[str, Any]) -> BatteryConfig:
     """Extract battery configuration from config entry data."""
     return BatteryConfig(
@@ -156,7 +173,12 @@ async def gather_forecasts(
     end_at: datetime | None = None,
 ) -> ForecastData:
     """Gather all forecast data for a time window."""
-    hour_window = build_hour_window(start_hour, end_hour)
+    hour_window = build_forecast_hour_window(
+        start_hour,
+        end_hour,
+        start_at=start_at,
+        end_at=end_at,
+    )
     hours = max(len(hour_window), 1)
 
     hourly_usage = build_hourly_usage_array(
@@ -171,6 +193,7 @@ async def gather_forecasts(
         config,
         start_hour=start_hour,
         end_hour=end_hour,
+        hours_ahead=hours,
     )
     morning_pv_forecast = None
     if use_morning_pv_fallback:
@@ -251,6 +274,12 @@ def compute_sufficiency(
         losses_hourly=forecasts.losses_hourly,
         margin=forecasts.margin,
         pv_forecast_hourly=forecasts.pv_forecast_hourly,
+        hour_window=build_forecast_hour_window(
+            forecasts.start_hour,
+            forecasts.end_hour,
+            start_at=forecasts.start_at,
+            end_at=forecasts.end_at,
+        ),
     )
     result = SufficiencyResult(
         required_kwh=required_kwh,

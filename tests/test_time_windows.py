@@ -113,6 +113,40 @@ async def test_heat_pump_forecast_wraps_midnight() -> None:
     assert hourly_kwh[1] == pytest.approx(2.0)
 
 
+@pytest.mark.asyncio
+async def test_heat_pump_forecast_requests_and_accepts_a_26_hour_window() -> None:
+    """A 24-hour-plus request must not be reduced to its ending hour."""
+    hass = MagicMock()
+    hass.services.has_service.return_value = True
+    hass.services.async_call = AsyncMock(
+        return_value={
+            "total_energy_kwh": 24.0,
+            "hours": [
+                {
+                    "datetime": f"2026-02-07T{hour:02d}:00:00+01:00",
+                    "energy_kwh": 1.0,
+                }
+                for hour in range(24)
+            ],
+        }
+    )
+    config = {
+        CONF_ENABLE_HEAT_PUMP: True,
+        CONF_HEAT_PUMP_FORECAST_DOMAIN: DEFAULT_HEAT_PUMP_FORECAST_DOMAIN,
+        CONF_HEAT_PUMP_FORECAST_SERVICE: DEFAULT_HEAT_PUMP_FORECAST_SERVICE,
+    }
+
+    total_kwh, hourly_kwh = await get_heat_pump_forecast(
+        hass, config, starting_hour=0, hours_ahead=26
+    )
+
+    assert total_kwh == pytest.approx(24.0)
+    assert set(hourly_kwh) == set(range(24))
+    call = hass.services.async_call.await_args
+    assert call.args[2]["starting_hour"] == 0
+    assert call.args[2]["hours_ahead"] == 26
+
+
 @pytest.mark.unit
 def test_calculate_sufficiency_window_wraps_midnight() -> None:
     hourly_usage = [1.0] * 24
