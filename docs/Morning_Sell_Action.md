@@ -1,5 +1,12 @@
 # Sprzedaż w szczycie porannym — Opis akcji
 
+## Semantyka planu
+
+`day_buy_window` i `day_buy_next_window` są wybierane po dacie docelowego planu,
+a nie po zegarze. To samo dzienne okno dostarcza granicę horyzontu i cenę
+referencyjną arbitrażu. `morning_sell_buy_reference` pozostaje niezależną
+średnią ceną w przedziale `[restore_hour, tariff_end_hour)`.
+
 ## Cel
 
 Sprzedaż nadwyżki energii z magazynu w oknie porannego szczytu cenowego, gdy bateria dysponuje

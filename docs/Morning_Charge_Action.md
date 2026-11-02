@@ -1,4 +1,11 @@
-# Zachowanie poranne (start `night_buy_window_tomorrow`) — Opis akcji
+# Zachowanie poranne (start `night_buy_next_window`) — Opis akcji
+
+## Semantyka planu
+
+`night_buy_next_window` oznacza zapisany plan nocny 22:00 dnia poprzedniego–06:00
+dnia poranka. Wybór planu odbywa się po dacie planu, nie po północy ani po
+godzinie wykonania akcji. O 06:01 następuje atomowa rotacja planów `next` do
+`window`; brak kompletnego planu pozostawia sensor niedostępny.
 
 ## Cel
 
@@ -6,13 +13,13 @@ Zapewnienie wystarczającej ilości energii w magazynie na pokrycie zapotrzebowa
 
 ## Aktualna granica horyzontu zapotrzebowania
 
-Bilans jest liczony od końca `night_buy_window_tomorrow` do wcześniejszej z pierwszej
+Bilans jest liczony od końca `night_buy_next_window` do wcześniejszej z pierwszej
 godziny samowystarczalności PV oraz początku `day_buy_window`. Gdy
 samowystarczalność nie wystąpi, koniec stanowi początek `day_buy_window`.
 Przy niedostępnych sensorach okien zachowany jest fallback `06:00` do końca
 wysokiej taryfy.
 
-Jeżeli cena aktualnego `night_buy_window_tomorrow` jest niższa od ceny
+Jeżeli cena aktualnego `night_buy_next_window` jest niższa od ceny
 chronologicznie następnego `day_buy_window` o więcej niż `0.001 PLN/kWh`,
 Morning Charge przełącza się na rozszerzony horyzont. Wtedy bilans obejmuje
 ciągły okres od końca aktualnego okna nocnego do początku następnego okna
@@ -28,7 +35,7 @@ ustawiany na maksymalną bezpieczną wartość.
 ## Wyzwalacz
 
 - Konkretny, timezone-aware `start_time` trwałego planu
-  `night_buy_window_tomorrow`. Scheduler odzyskuje pominięty start dokładnie
+  `night_buy_next_window`. Scheduler odzyskuje pominięty start dokładnie
   raz, jeżeli Home Assistant uruchomi się w trakcie okna.
 - Możliwość ręcznego wywołania przez serwis `energy_optimizer.morning_grid_charge`
 
@@ -49,10 +56,10 @@ ustawiany na maksymalną bezpieczną wartość.
 - Margines bezpieczeństwa (domyślnie 1.1 = +10%)
 - Sensor godziny końca wysokiej taryfy: `high_tariff_end_hour_sensor` (używany do wyznaczenia okna obliczeń)
 - `min_arbitrage_price` (PLN/kWh) – minimalny **Arbitrage Margin**
-- Arbitrage Buy Reference: cena `night_buy_window_tomorrow` (średnia cena
+- Arbitrage Buy Reference: cena `night_buy_next_window` (średnia cena
    zaplanowanego nocnego okna zakupu)
 - Cena kolejnego dziennego okna zakupu (`day_buy_window` lub
-  `day_buy_window_tomorrow`) — wyłącznie do decyzji o rozszerzeniu horyzontu
+  `day_buy_next_window`) — wyłącznie do decyzji o rozszerzeniu horyzontu
 - Cena i granice następnego nocnego okna — wymagane do pełnego horyzontu w
   przypadku tańszej nocy
 - Ustawienie włączenia Pompy Ciepła (jeśli wyłączone, zużycie PC = 0)
@@ -72,7 +79,7 @@ ustawiany na maksymalną bezpieczną wartość.
    - Jeśli **rezerwa + prognoza PV >= zapotrzebowanie**: Brak akcji, energia wystarczy
    - Jeśli **deficyt > 0**: Oblicz ile energii załadować uwzględniając sprawność magazynu i zaplanuj doładowanie
 7. **Opcjonalny arbitraż**:
-    - liczony jest tylko, gdy `Arbitrage Margin = morning_sell_price - night_buy_window_tomorrow_price`
+    - liczony jest tylko, gdy `Arbitrage Margin = morning_sell_price - night_buy_next_window_price`
     **ściśle przekracza** `min_arbitrage_price`
    - brak ceny sprzedaży albo brak ceny Arbitrage Buy Reference → arbitraż jest wyłączony (fail-closed)
     - próg działa wyłącznie jako bramka on/off; nie skaluje wolumenu `arbitrage_kwh`
@@ -136,7 +143,7 @@ Algorytm:
 1. Oblicz docelowy SOC na podstawie deficytu energii
 2. Podziel ładowanie na fazy odpowiadające zakresom SOC
 3. Dla każdej fazy oblicz ile energii będzie ładowane oraz czas przy maksymalnym prądzie
-4. Sprawdź czy można załadować całość w czasie pełnego, rozstrzygniętego okna `night_buy_window_tomorrow` przy maksymalnych prądach:
+4. Sprawdź czy można załadować całość w czasie pełnego, rozstrzygniętego okna `night_buy_next_window` przy maksymalnych prądach:
    - **Jeśli TAK**: oblicz wymagany średni prąd = `(deficyt × 1000) / (czas_okna × napięcie)`
      - Wybierz mniejszą wartość z: wymagany średni prąd lub maksymalny prąd dla aktualnego zakresu SOC
    - **Jeśli NIE**: ustaw maksymalny prąd (23A) - ładowanie zajmie więcej niż bieżące okno
@@ -156,21 +163,21 @@ Ten algorytm zapewnia:
 ## Efekty sterowania (koncepcyjne)
 
 - Przy rzeczywistej zmianie SOC najpierw ustaw start programu 2 na początek
-   rozstrzygniętego `night_buy_window_tomorrow`, a następnie ustaw docelowy SOC programu 2.
+   rozstrzygniętego `night_buy_next_window`, a następnie ustaw docelowy SOC programu 2.
 - Jeśli zapis SOC nie powiedzie się po zmianie czasu, przywróć poprzedni czas
   programu 2 i nie planuj zakończenia.
 - Ustaw prąd ładowania z sieci na obliczoną wartość (2h okno ładowania)
 - Falownik automatycznie rozpocznie ładowanie do osiągnięcia docelowego SOC
 - Zgłoszone zakończenie akcji zeruje prąd ładowania (`grid_charge_current_entity`)
   na **0 A** i trwale resetuje tymczasowy cel Programu 2 do `min_soc` na końcu
-   `night_buy_window_tomorrow`; reset przetrwa restart Home Assistant i wykona się po
+   `night_buy_next_window`; reset przetrwa restart Home Assistant i wykona się po
   starcie, jeśli termin już minął.
 - W ścieżce bez deficytu rzeczywista korekta `prog2_soc` ma wynik
   `program_soc_updated`; `no_action` oznacza, że nie zmieniono żadnej encji.
 
 ## Zakończenie akcji (reset)
 
-Po osiągnięciu zakończenia rozstrzygniętego okna `night_buy_window_tomorrow`
+Po osiągnięciu zakończenia rozstrzygniętego okna `night_buy_next_window`
 zakończona akcja ładowania trwale przywraca stan bazowy:
 
 1. **Prąd ładowania na 0 A** — jeśli skonfigurowano `grid_charge_current_entity`,

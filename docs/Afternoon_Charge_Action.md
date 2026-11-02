@@ -1,5 +1,12 @@
 # Zachowanie popołudniowe (przed startem taryfy) — Opis akcji
 
+## Semantyka planu
+
+Ładowanie używa bieżącego `day_buy_window`. Granicą ochronnego horyzontu jest
+start planu `night_buy_next_window`; gdy plan nie jest jeszcze dostępny, używana
+jest stała granica 22:00. Planowanie następnego dnia startuje po 14:00, a
+rotacja obu typów planów jest atomowa o 06:01.
+
 ## Cel
 
 Zapewnienie odpowiedniego poziomu energii w magazynie na wieczór i noc (do 22:00) poprzez planowanie ładowania z sieci uruchamianego 2 godziny przed startem taryfy dziennej.
@@ -7,7 +14,7 @@ Zapewnienie odpowiedniego poziomu energii w magazynie na wieczór i noc (do 22:0
 ## Aktualna granica horyzontu zapotrzebowania
 
 Bilans jest liczony od końca `day_buy_window` do początku
-`night_buy_window_tomorrow`. Samowystarczalność PV nie skraca tego horyzontu.
+`night_buy_next_window`. Samowystarczalność PV nie skraca tego horyzontu.
 Przy niedostępnych sensorach okien zachowany jest fallback od początku wysokiej
 taryfy do 22:00.
 

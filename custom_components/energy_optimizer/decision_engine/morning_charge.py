@@ -48,6 +48,7 @@ from ..decision_engine.common import (
     resolve_entry,
 )
 from ..helpers import (
+    get_buy_plan,
     get_buy_price_payload,
     get_internal_window_price,
     is_balancing_ongoing,
@@ -115,12 +116,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
         }
         if end_datetime is not None:
             forecast_kwargs["start_at"] = end_datetime
-        day_buy_start_resolver = (
-            resolve_day_buy_window_tomorrow_start_hour
-            if end_datetime is not None
-            and end_datetime.date() > dt_util.now().date()
-            else resolve_day_buy_window_start_hour
-        )
+        day_buy_for_date = end_datetime.date() if end_datetime is not None else None
         self._price_comparison = _resolve_morning_price_comparison(
             self.hass,
             entry_id=self.entry.entry_id,
@@ -149,14 +145,24 @@ class MorningChargeStrategy(BaseChargeStrategy):
                     "end_at": next_night_start,
                 },
             )
-        return (
-            end_hour,
-            day_buy_start_resolver(
+        if day_buy_for_date is not None:
+            day_buy_start = resolve_day_buy_window_tomorrow_start_hour(
                 self.hass,
                 self.config,
                 entry_id=self.entry.entry_id,
                 default_hour=tariff_end_hour,
-            ),
+                for_date=day_buy_for_date,
+            )
+        else:
+            day_buy_start = resolve_day_buy_window_start_hour(
+                self.hass,
+                self.config,
+                entry_id=self.entry.entry_id,
+                default_hour=tariff_end_hour,
+            )
+        return (
+            end_hour,
+            day_buy_start,
             forecast_kwargs,
         )
 
@@ -268,7 +274,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
             self.hass,
             self.config,
             entry_id=self.entry.entry_id,
-            default_hour=4,
+            default_hour=22,
         )
         end_hour = resolve_night_buy_window_tomorrow_end_hour(
             self.hass,
@@ -731,7 +737,7 @@ def _calculate_morning_arbitrage_kwh(
         entry_id=entry_id,
         sell_price=sell_price,
         min_arbitrage_price=min_arbitrage_price,
-        buy_reference_unique_id_suffix="night_buy_window_tomorrow",
+        buy_reference_unique_id_suffix="night_buy_next_window",
         buy_reference_entity_name="Planned night buy window",
     )
     details.update(margin_details)
@@ -841,7 +847,7 @@ def _resolve_morning_price_comparison(
     night_price = get_internal_window_price(
         hass,
         entry_id=entry_id,
-        unique_id_suffix="night_buy_window_tomorrow",
+        unique_id_suffix="night_buy_next_window",
         entity_name="Planned night buy window",
     )
     if night_end is None:
@@ -851,17 +857,18 @@ def _resolve_morning_price_comparison(
             "relation": "unavailable",
         }
 
-    day_suffix = (
-        "day_buy_window_tomorrow"
-        if night_end.date() > dt_util.now().date()
-        else "day_buy_window"
+    day_plan = get_buy_plan(
+        hass, entry_id=entry_id, kind="day", for_date=night_end.date()
     )
-    day_price = get_internal_window_price(
-        hass,
-        entry_id=entry_id,
-        unique_id_suffix=day_suffix,
-        entity_name="Next day buy window",
-    )
+    if day_plan is not None:
+        day_price = round(day_plan.price, 3)
+    else:
+        day_price = get_internal_window_price(
+            hass,
+            entry_id=entry_id,
+            unique_id_suffix="day_buy_next_window",
+            entity_name="Next day buy window",
+        )
     if night_price is None or day_price is None:
         relation = "unavailable"
     elif night_price + _PRICE_EQUALITY_TOLERANCE < day_price:

@@ -31,7 +31,7 @@ class _TestSellStrategy(BaseSellStrategy):
 
     @property
     def arbitrage_buy_reference_suffix(self) -> str:
-        return "night_buy_window_tomorrow"
+        return "night_buy_next_window"
 
     @property
     def arbitrage_buy_reference_name(self) -> str:

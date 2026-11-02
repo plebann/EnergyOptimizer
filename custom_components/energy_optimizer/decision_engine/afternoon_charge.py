@@ -21,6 +21,7 @@ from ..const import (
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_GRID_CHARGE_CURRENT_ENTITY,
     CONF_PROG4_TIME_START_ENTITY,
+    NIGHT_BUY_WINDOW_START_HOUR,
 )
 from ..controllers.inverter import set_program_start_time
 from ..decision_engine.common import (
@@ -127,11 +128,12 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             self.hass,
             self.config,
             entry_id=self.entry.entry_id,
-            default_hour=None,
+            default_hour=NIGHT_BUY_WINDOW_START_HOUR,
         )
         if tomorrow_night_start is None:
-            self._forecast_end_kind = "day_e"
-            return self._day_buy_start_hour, 24, {"apply_efficiency": False}
+            tomorrow_night_start = NIGHT_BUY_WINDOW_START_HOUR
+            self._forecast_end_kind = "night_start_fallback"
+            return self._day_buy_start_hour, tomorrow_night_start, {"apply_efficiency": False}
 
         self._forecast_end_kind = "nb_t_s"
         return (

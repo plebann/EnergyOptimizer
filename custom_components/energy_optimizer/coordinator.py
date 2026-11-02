@@ -55,6 +55,9 @@ class EnergyOptimizerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.hass = hass
         self.entry = entry
         self._night_buy_window_manager = NightBuyWindowPlanManager(hass, entry)
+        hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})[
+            "buy_window_manager"
+        ] = self._night_buy_window_manager
 
     async def async_restore_night_buy_window_plans(self) -> None:
         """Restore only validated persisted night-window plans."""
@@ -129,6 +132,8 @@ class EnergyOptimizerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 data["price_payloads"][price_entity_id] = payload
 
         await self._night_buy_window_manager.async_reconcile(data["price_payloads"])
-        data["night_buy_window_plans"] = self._night_buy_window_manager.snapshot()
+        data["buy_window_plans"] = self._night_buy_window_manager.snapshot()
+        # Compatibility projection for old automations and restored dashboards.
+        data["night_buy_window_plans"] = data["buy_window_plans"]
 
         return data

@@ -114,7 +114,7 @@ def create_selector(min_val: float, max_val: float, step_size: float, unit: str,
 class EnergyOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Energy Optimizer."""
 
-    VERSION = 6
+    VERSION = 7
 
     def __init__(self) -> None:
         """Initialize config flow."""

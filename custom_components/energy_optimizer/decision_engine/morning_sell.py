@@ -39,6 +39,7 @@ from ..decision_engine.common import (
     resolve_entry,
 )
 from ..helpers import (
+    get_plan_for_today,
     get_float_state_info,
     get_buy_price_payload,
     get_internal_window_price,
@@ -553,11 +554,20 @@ class MorningSellStrategy(BaseSellStrategy):
         arbitrage_hour: int | None = None
         margin_achievable = False
         if has_dynamic_buy_prices and prices:
-            buy_window_reference_price = get_internal_window_price(
+            day_plan = get_plan_for_today(
                 self.hass,
                 entry_id=self.entry.entry_id,
-                unique_id_suffix="day_buy_window",
-                entity_name="Day buy window sensor",
+                kind="day",
+            )
+            buy_window_reference_price = (
+                day_plan.price
+                if day_plan is not None
+                else get_internal_window_price(
+                    self.hass,
+                    entry_id=self.entry.entry_id,
+                    unique_id_suffix="day_buy_window",
+                    entity_name="Day buy window sensor",
+                )
             )
             if buy_window_reference_price is None:
                 horizon_details["arbitrage_reason"] = "missing_buy_window_reference"
@@ -571,13 +581,14 @@ class MorningSellStrategy(BaseSellStrategy):
                 )
                 horizon_details["buy_window_price_limit"] = round(buy_window_price_limit, 2)
                 local_now = dt_util.as_local(dt_util.utcnow())
+                plan_date = day_plan.plan_date if day_plan is not None else local_now.date()
                 search_start = datetime.combine(
-                    local_now.date(),
+                    plan_date,
                     time(sell_window_end_hour),
                     tzinfo=local_now.tzinfo,
                 )
                 search_end = datetime.combine(
-                    local_now.date(),
+                    plan_date,
                     time(base_end_hour),
                     tzinfo=local_now.tzinfo,
                 )

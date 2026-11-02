@@ -25,6 +25,7 @@ from ..const import (
     CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
     DEFAULT_MAX_EXPORT_POWER,
     DOMAIN,
+    NIGHT_BUY_WINDOW_START_HOUR,
 )
 from ..const import CONF_MIN_ARBITRAGE_PRICE
 from ..decision_engine.common import (
@@ -97,7 +98,7 @@ class EveningSellStrategy(BaseSellStrategy):
     @property
     def arbitrage_buy_reference_suffix(self) -> str:
         """Return the evening sell Arbitrage Buy Reference sensor suffix."""
-        return "night_buy_window_tomorrow"
+        return "night_buy_next_window"
 
     @property
     def arbitrage_buy_reference_name(self) -> str:
@@ -246,12 +247,12 @@ class EveningSellStrategy(BaseSellStrategy):
             self.hass,
             self.config,
             entry_id=self.entry.entry_id,
-            default_hour=4,
+            default_hour=NIGHT_BUY_WINDOW_START_HOUR,
         )
         buy_window_reference_price = get_internal_window_price(
             self.hass,
             entry_id=self.entry.entry_id,
-            unique_id_suffix="night_buy_window_tomorrow",
+            unique_id_suffix="night_buy_next_window",
             entity_name="Tomorrow night buy window sensor",
         )
         buy_window_price_limit = (

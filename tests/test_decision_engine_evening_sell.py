@@ -172,7 +172,7 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, outcomes: list) -> None:
         f"{HELPERS}.get_internal_sensor_entity_id",
         lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": (
             "sensor.night_buy_window_tomorrow_internal"
-            if unique_id_suffix == "night_buy_window_tomorrow"
+            if unique_id_suffix == "night_buy_next_window"
             else None
         ),
     )

@@ -53,7 +53,7 @@ _CONSUME_WINDOW_ENTITY_MIGRATIONS = (
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate an Energy Optimizer config entry."""
-    if entry.version >= 6:
+    if entry.version >= 7:
         return True
 
     registry = er.async_get(hass)
@@ -89,29 +89,61 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # v3 -> v4: drop the legacy max_sell_energy option (kWh). Units changed to kW
     # (max_discharge_power) so no value is carried over; users re-enter the limit.
-    data = dict(entry.data)
-    if data.pop("max_sell_energy", None) is not None:
-        hass.config_entries.async_update_entry(entry, data=data, version=4)
-    else:
-        hass.config_entries.async_update_entry(entry, version=4)
+    if entry.version < 4:
+        data = dict(entry.data)
+        if data.pop("max_sell_energy", None) is not None:
+            hass.config_entries.async_update_entry(entry, data=data, version=4)
+        else:
+            hass.config_entries.async_update_entry(entry, version=4)
 
     # v4 -> v5: rename charge_current_entity key to grid_charge_current_entity.
     # The entity reference is preserved, only the config key name changes.
-    data = dict(entry.data)
-    if "charge_current_entity" in data:
-        data["grid_charge_current_entity"] = data.pop("charge_current_entity")
-        hass.config_entries.async_update_entry(entry, data=data, version=5)
-    else:
-        hass.config_entries.async_update_entry(entry, version=5)
+    if entry.version < 5:
+        data = dict(entry.data)
+        if "charge_current_entity" in data:
+            data["grid_charge_current_entity"] = data.pop("charge_current_entity")
+            hass.config_entries.async_update_entry(entry, data=data, version=5)
+        else:
+            hass.config_entries.async_update_entry(entry, version=5)
 
     # v5 -> v6: rename max_charge_current_entity key to charge_current_entity.
     # The entity reference is preserved, only the config key name changes.
-    data = dict(entry.data)
-    if "max_charge_current_entity" in data:
-        data["charge_current_entity"] = data.pop("max_charge_current_entity")
-        hass.config_entries.async_update_entry(entry, data=data, version=6)
-    else:
-        hass.config_entries.async_update_entry(entry, version=6)
+    if entry.version < 6:
+        data = dict(entry.data)
+        if "max_charge_current_entity" in data:
+            data["charge_current_entity"] = data.pop("max_charge_current_entity")
+            hass.config_entries.async_update_entry(entry, data=data, version=6)
+        else:
+            hass.config_entries.async_update_entry(entry, version=6)
+
+    # v6 -> v7: rename the upcoming buy-window entities.
+    for old_suffix, new_suffix in (
+        ("night_buy_window_tomorrow", "night_buy_next_window"),
+        ("day_buy_window_tomorrow", "day_buy_next_window"),
+    ):
+        old_unique_id = f"{entry.entry_id}_{old_suffix}"
+        entity_id = registry.async_get_entity_id("sensor", DOMAIN, old_unique_id)
+        if entity_id is None:
+            continue
+        new_unique_id = f"{entry.entry_id}_{new_suffix}"
+        default_old = f"sensor.energy_optimizer_{old_suffix}"
+        default_new = f"sensor.energy_optimizer_{new_suffix}"
+        new_entity_id = (
+            registry.async_generate_entity_id(
+                "sensor", default_new.removeprefix("sensor.")
+            )
+            if entity_id == default_old
+            else None
+        )
+        if new_entity_id is not None:
+            registry.async_update_entity(
+                entity_id,
+                new_entity_id=new_entity_id,
+                new_unique_id=new_unique_id,
+            )
+        else:
+            registry.async_update_entity(entity_id, new_unique_id=new_unique_id)
+    hass.config_entries.async_update_entry(entry, version=7)
     return True
 
 

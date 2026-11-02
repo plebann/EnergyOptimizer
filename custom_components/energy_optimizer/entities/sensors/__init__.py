@@ -24,6 +24,8 @@ from .pricing import (
     MorningSellWindowTomorrowSensor,
     NightBuyWindowSensor,
     NightBuyWindowTomorrowSensor,
+    NightBuyWindowNextSensor,
+    DayBuyWindowNextSensor,
     SellPriceSensor,
 )
 from .tracking import (
@@ -58,6 +60,8 @@ __all__ = [
     "MorningSellWindowTomorrowSensor",
     "NightBuyWindowSensor",
     "NightBuyWindowTomorrowSensor",
+    "NightBuyWindowNextSensor",
+    "DayBuyWindowNextSensor",
     "OptimizationHistorySensor",
     "PvForecastCompensationSensor",
     "ScheduledActionsSensor",

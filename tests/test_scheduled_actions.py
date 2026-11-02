@@ -145,7 +145,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
     monkeypatch.setattr(
         "custom_components.energy_optimizer.scheduler.action_scheduler.get_internal_sensor_entity_id",
         lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": {
-                "night_buy_window_tomorrow": "sensor.night_buy_window_tomorrow",
+                "night_buy_next_window": "sensor.night_buy_window_tomorrow",
             "morning_sell_window": "sensor.morning_peak",
             "evening_sell_window": "sensor.evening_peak",
             "consume_window": "sensor.daytime_min",
@@ -154,7 +154,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
     monkeypatch.setattr(
         "custom_components.energy_optimizer.helpers.get_internal_sensor_entity_id",
         lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": {
-                "night_buy_window_tomorrow": "sensor.night_buy_window_tomorrow",
+                "night_buy_next_window": "sensor.night_buy_window_tomorrow",
         }.get(unique_id_suffix),
     )
     monkeypatch.setattr(
@@ -222,7 +222,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
         assert any(
             action["key"] == "morning_charge"
             and action["time_local"] == "22:00"
-            and action["source"] == "night_buy_window_tomorrow_sensor"
+            and action["source"] == "night_buy_next_window_sensor"
             for action in actions
         )
         assert any(
