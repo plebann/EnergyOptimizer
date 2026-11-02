@@ -190,9 +190,7 @@ async def test_options_battery_params_default_ignores_legacy_max_sell_energy() -
 async def test_setup_flow_field_absent_from_control_entities() -> None:
     schema = await _render_setup_control_entities()
     # Test that max_discharge_power is NOT accepted in this schema step (should be in battery_params)
-    # We validate empty data to check what fields are accepted
-    validated_data = schema({})
-    assert CONF_MAX_DISCHARGE_POWER not in validated_data
+    assert CONF_MAX_DISCHARGE_POWER not in {str(key) for key in schema.schema}
 
 
 @pytest.mark.asyncio
