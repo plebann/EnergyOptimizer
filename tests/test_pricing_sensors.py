@@ -225,6 +225,16 @@ def _night_buy_sensor(
 
 def _day_plan_dict(prices: list[dict[str, object]]) -> dict[str, object] | None:
     first = datetime.fromisoformat(str(prices[0]["time"]))
+    present_hours = {
+        datetime.fromisoformat(str(item["time"])).hour
+        for item in prices
+        if first.date() == datetime.fromisoformat(str(item["time"])).date()
+    }
+    prices = list(prices) + [
+        _hourly_entry_for_day(first.day, hour, 99.0)
+        for hour in range(9, 17)
+        if hour not in present_hours
+    ]
     plan = NightBuyWindowPlanManager._day_plan(
         prices, "sensor.buy", plan_date=first.date(), local_tz=first.tzinfo
     )

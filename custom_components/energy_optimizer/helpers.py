@@ -65,6 +65,14 @@ def get_buy_plan(
     return manager.get_plan(kind, for_date) if manager is not None else None
 
 
+def _buy_window_manager(hass: HomeAssistant, entry_id: str) -> Any | None:
+    """Return the lifecycle manager when coordinator-backed lookup is active."""
+    from .const import DOMAIN
+
+    entry_data = hass.data.get(DOMAIN, {}).get(entry_id, {})
+    return entry_data.get("buy_window_manager") if isinstance(entry_data, dict) else None
+
+
 def _buy_plan_for_relative_day(
     hass: HomeAssistant,
     *,
@@ -75,8 +83,7 @@ def _buy_plan_for_relative_day(
     """Resolve a persisted plan relative to the local calendar day."""
     from .const import DOMAIN
 
-    entry_data = hass.data.get(DOMAIN, {}).get(entry_id, {})
-    if not isinstance(entry_data, dict) or entry_data.get("buy_window_manager") is None:
+    if _buy_window_manager(hass, entry_id) is None:
         return None
     return get_buy_plan(
         hass,
@@ -475,14 +482,14 @@ def get_internal_window_price(
     }:
         kind = "night" if unique_id_suffix.startswith("night") else "day"
         is_next = unique_id_suffix.endswith(("_tomorrow", "_next_window"))
-        if not is_next:
-            plan = _buy_plan_for_relative_day(hass, entry_id=entry_id, kind=kind)
-        elif kind == "night":
-            plan = get_active_night_plan(hass, entry_id=entry_id)
-        else:
-            plan = get_day_plan_for_active_night(hass, entry_id=entry_id)
-        if plan is not None:
-            return round(plan.price, 3)
+        if _buy_window_manager(hass, entry_id) is not None:
+            if not is_next:
+                plan = _buy_plan_for_relative_day(hass, entry_id=entry_id, kind=kind)
+            elif kind == "night":
+                plan = get_active_night_plan(hass, entry_id=entry_id)
+            else:
+                plan = get_day_plan_for_active_night(hass, entry_id=entry_id)
+            return round(plan.price, 3) if plan is not None else None
     entity_id = get_internal_sensor_entity_id(
         hass,
         entry_id=entry_id,
@@ -964,6 +971,8 @@ def resolve_night_buy_window_start_hour(
     planned_start = _plan_time_or_none(plan, "start")
     if planned_start is not None:
         return planned_start.hour
+    if _buy_window_manager(hass, entry_id) is not None:
+        return default_hour
     entity_id = get_internal_sensor_entity_id(
         hass,
         entry_id=entry_id,
@@ -992,6 +1001,8 @@ def resolve_night_buy_window_tomorrow_start_hour(
     planned_start = _plan_time_or_none(plan, "start")
     if planned_start is not None:
         return planned_start.hour
+    if _buy_window_manager(hass, entry_id) is not None:
+        return default_hour if default_hour is not None else None
     del config
     entity_id = get_internal_sensor_entity_id(
         hass,
@@ -1022,6 +1033,8 @@ def resolve_night_buy_window_tomorrow_start_datetime(
     planned_start = _plan_time_or_none(plan, "start")
     if planned_start is not None:
         return planned_start
+    if _buy_window_manager(hass, entry_id) is not None:
+        return None
     entity_id = get_internal_sensor_entity_id(
         hass,
         entry_id=entry_id,
@@ -1045,6 +1058,8 @@ def resolve_night_buy_window_tomorrow_end_datetime(
     planned_end = _plan_time_or_none(plan, "end")
     if planned_end is not None:
         return planned_end
+    if _buy_window_manager(hass, entry_id) is not None:
+        return None
     entity_id = get_internal_sensor_entity_id(
         hass,
         entry_id=entry_id,
@@ -1101,6 +1116,8 @@ def resolve_night_buy_window_tomorrow_duration_hours(
     plan = get_active_night_plan(hass, entry_id=entry_id)
     if plan is not None:
         return float(plan.duration_hours)
+    if _buy_window_manager(hass, entry_id) is not None:
+        return default_hours
     entity_id = get_internal_sensor_entity_id(
         hass,
         entry_id=entry_id,
@@ -1160,6 +1177,17 @@ def resolve_night_buy_window_end_hour(
 ) -> int:
     """Resolve the internal night buy window end hour with fallback."""
     del config
+    if (
+        _buy_window_manager(hass, entry_id) is not None
+        and get_buy_plan(
+            hass,
+            entry_id=entry_id,
+            kind="night",
+            for_date=dt_util.as_local(dt_util.utcnow()).date(),
+        )
+        is None
+    ):
+        return default_hour
     return _resolve_buy_window_end_hour(
         hass,
         entry_id=entry_id,
@@ -1181,6 +1209,8 @@ def resolve_night_buy_window_tomorrow_end_hour(
     planned_end = _plan_time_or_none(plan, "end")
     if planned_end is not None:
         return planned_end.hour
+    if _buy_window_manager(hass, entry_id) is not None:
+        return default_hour
     return _resolve_buy_window_end_hour(
         hass,
         entry_id=entry_id,
@@ -1201,6 +1231,8 @@ def resolve_day_buy_window_start_hour(
     planned_start = _plan_time_or_none(plan, "start")
     if planned_start is not None:
         return planned_start.hour
+    if _buy_window_manager(hass, entry_id) is not None:
+        return default_hour
     entity_id = get_internal_sensor_entity_id(
         hass,
         entry_id=entry_id,
@@ -1238,6 +1270,8 @@ def resolve_day_buy_window_tomorrow_start_hour(
     planned_start = _plan_time_or_none(plan, "start")
     if planned_start is not None:
         return planned_start.hour
+    if _buy_window_manager(hass, entry_id) is not None:
+        return default_hour
     entity_id = get_internal_sensor_entity_id(
         hass,
         entry_id=entry_id,

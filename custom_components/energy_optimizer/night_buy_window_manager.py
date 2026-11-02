@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, time, timedelta
 import asyncio
 import logging
+from math import isfinite
 from typing import Any, TYPE_CHECKING
 
 from homeassistant.util import dt as dt_util
@@ -23,7 +24,7 @@ from .night_buy_window import (
     build_night_buy_window_plan,
     night_buy_window_store,
 )
-from .calculations.price_windows import build_best_buy_window_result_for_period
+from .calculations.price_windows import build_best_buy_window_result
 from homeassistant.helpers.storage import Store
 
 if TYPE_CHECKING:
@@ -131,12 +132,41 @@ class NightBuyWindowPlanManager:
     ) -> NightBuyWindowPlan | None:
         start = datetime.combine(plan_date, time(9), tzinfo=local_tz)
         end = datetime.combine(plan_date, time(17), tzinfo=local_tz)
-        result = build_best_buy_window_result_for_period(
+        expected_hours = set(range(9, 17))
+        entries_by_hour: dict[int, dict[str, Any]] = {}
+        for raw in prices:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                parsed = datetime.fromisoformat(str(raw["time"]).replace("Z", "+00:00"))
+                parsed = (
+                    parsed.replace(tzinfo=local_tz)
+                    if parsed.tzinfo is None
+                    else parsed.astimezone(local_tz)
+                )
+                price = float(raw["price"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (
+                parsed.date() == plan_date
+                and parsed.minute == 0
+                and parsed.second == 0
+                and parsed.microsecond == 0
+                and parsed.hour in expected_hours
+                and parsed.hour not in entries_by_hour
+                and isfinite(price)
+            ):
+                entries_by_hour[parsed.hour] = raw
+        if set(entries_by_hour) != expected_hours:
+            return None
+
+        result = build_best_buy_window_result(
             prices,
             entity_id,
-            range_start=start,
-            range_end=end,
-            expansion_multiplier=DAY_BUY_WINDOW_EXPANSION_MULTIPLIER,
+            range_key="day",
+            range_start_hour=9,
+            range_end_hour=17,
+            now_local=datetime.combine(plan_date, time(12), tzinfo=local_tz),
         )
         if result is None:
             return None

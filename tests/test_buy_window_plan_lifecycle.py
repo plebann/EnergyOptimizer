@@ -557,3 +557,43 @@ def test_lookup_helpers_return_none_without_manager() -> None:
 
     assert get_buy_plan(hass, entry_id="entry-1", kind="night", for_date=date(2026, 10, 28)) is None
     assert get_day_plan_for_active_night(hass, entry_id="entry-1") is None
+
+
+def test_day_plan_requires_complete_finite_09_to_17_coverage() -> None:
+    manager = _manager()
+    day = date(2026, 10, 28)
+
+    incomplete = _day_prices(day)[:-1]
+    incomplete.append({"time": datetime(2026, 10, 28, 16, tzinfo=TZ).isoformat(), "price": float("inf")})
+
+    assert manager._day_plan(incomplete, "sensor.buy", plan_date=day, local_tz=TZ) is None
+
+
+def test_day_plan_preserves_closest_to_thirteen_then_earlier_tie_break() -> None:
+    manager = _manager()
+    day = date(2026, 10, 28)
+    prices = _hourly(
+        day,
+        {9: 2.0, 10: 2.0, 11: 2.0, 12: 1.0, 13: 1.0, 14: 1.0, 15: 1.0, 16: 2.0},
+    )
+
+    plan = manager._day_plan(prices, "sensor.buy", plan_date=day, local_tz=TZ)
+
+    assert plan is not None
+    assert plan.start.hour == 12
+
+
+def test_manager_lookup_does_not_fall_back_to_stale_day_sensor() -> None:
+    manager = _manager()
+    manager._day_current = _day(date(2026, 10, 27), price=0.1)
+    hass = _hass_with(manager)
+
+    assert get_internal_window_price(
+        hass,
+        entry_id="entry-1",
+        unique_id_suffix="day_buy_window",
+        entity_name="Day buy window",
+    ) is None
+    assert resolve_day_buy_window_tomorrow_start_hour(
+        hass, {}, entry_id="entry-1", default_hour=13, for_date=date(2026, 10, 28)
+    ) == 13
