@@ -231,7 +231,7 @@ def _arb_config(
 
 def _internal_sensor_id(_hass, *, entry_id: str, unique_id_suffix: str, entity_domain: str = "sensor") -> str | None:
     mapping = {
-        "night_buy_window_tomorrow": "sensor.night_buy_window_tomorrow_internal",
+        "night_buy_next_window": "sensor.night_buy_window_tomorrow_internal",
         "day_buy_window": "sensor.day_buy_window_internal",
     }
     return mapping.get(unique_id_suffix)

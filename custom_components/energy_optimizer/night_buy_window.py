@@ -33,6 +33,15 @@ class NightBuyWindowPlan:
     price: float
 
     @property
+    def plan_date(self) -> date:
+        """Return the semantic date owned by this plan.
+
+        Night plans are keyed by the morning on which they end.  The same
+        representation is used for day plans, whose end is on the owned day.
+        """
+        return self.end.astimezone(self.start.tzinfo).date()
+
+    @property
     def duration_hours(self) -> int:
         """Return the whole-hour duration represented by the plan."""
         return int(

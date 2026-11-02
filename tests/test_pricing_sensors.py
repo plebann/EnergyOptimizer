@@ -12,6 +12,9 @@ from custom_components.energy_optimizer.const import (
     CONF_SELL_PRICE_SENSOR,
 )
 from custom_components.energy_optimizer.coordinator import EnergyOptimizerCoordinator
+from custom_components.energy_optimizer.night_buy_window_manager import (
+    NightBuyWindowPlanManager,
+)
 from custom_components.energy_optimizer.entities.sensors.pricing import (
     BuyPriceSensor,
     DayBuyWindowSensor,
@@ -220,11 +223,33 @@ def _night_buy_sensor(
     return sensor
 
 
+def _day_plan_dict(prices: list[dict[str, object]]) -> dict[str, object] | None:
+    first = datetime.fromisoformat(str(prices[0]["time"]))
+    present_hours = {
+        datetime.fromisoformat(str(item["time"])).hour
+        for item in prices
+        if first.date() == datetime.fromisoformat(str(item["time"])).date()
+    }
+    prices = list(prices) + [
+        _hourly_entry_for_day(first.day, hour, 99.0)
+        for hour in range(9, 17)
+        if hour not in present_hours
+    ]
+    plan = NightBuyWindowPlanManager._day_plan(
+        prices, "sensor.buy", plan_date=first.date(), local_tz=first.tzinfo
+    )
+    return plan.as_dict() if plan is not None else None
+
+
 def _day_buy_sensor(
     prices_today: list[dict[str, object]],
     prices_tomorrow: list[dict[str, object]] | None = None,
 ) -> DayBuyWindowSensor:
     coordinator = _coordinator_with_prices(prices_today, prices_tomorrow, "sensor.buy")
+    coordinator.data["buy_window_plans"] = {
+        "night": {},
+        "day": {"window": _day_plan_dict(prices_today), "next": None},
+    }
     sensor = DayBuyWindowSensor(
         coordinator,
         _mock_entry(),
@@ -251,6 +276,10 @@ def _day_buy_tomorrow_sensor(
     prices_tomorrow: list[dict[str, object]],
 ) -> DayBuyWindowTomorrowSensor:
     coordinator = _coordinator_with_prices(None, prices_tomorrow, "sensor.buy")
+    coordinator.data["buy_window_plans"] = {
+        "night": {},
+        "day": {"window": None, "next": _day_plan_dict(prices_tomorrow)},
+    }
     sensor = DayBuyWindowTomorrowSensor(
         coordinator,
         _mock_entry(),
@@ -833,6 +862,7 @@ def test_today_buy_window_sensors_publish_state_and_attributes(
         "is_negative": False,
         "start_time": "2026-05-08T11:00:00+02:00",
         "end_time": "2026-05-08T13:00:00+02:00",
+        "plan_date": "2026-05-08",
     }
 
 
@@ -875,6 +905,7 @@ def test_tomorrow_buy_window_sensors_publish_state_and_attributes(
         "is_negative": False,
         "start_time": "2026-05-09T11:00:00+02:00",
         "end_time": "2026-05-09T13:00:00+02:00",
+        "plan_date": "2026-05-09",
     }
 
 
@@ -924,6 +955,7 @@ def test_buy_window_sensor_sets_is_negative_true_only_for_negative_average(
         "is_negative": True,
         "start_time": "2026-05-08T11:00:00+02:00",
         "end_time": "2026-05-08T13:00:00+02:00",
+        "plan_date": "2026-05-08",
     }
 
 
@@ -947,6 +979,7 @@ def test_buy_window_sensor_keeps_zero_average_available_with_false_is_negative(
         "is_negative": False,
         "start_time": "2026-05-08T10:00:00+02:00",
         "end_time": "2026-05-08T12:00:00+02:00",
+        "plan_date": "2026-05-08",
     }
 
 
@@ -962,8 +995,8 @@ def test_buy_window_sensors_have_translation_keys_and_prefixed_unique_ids() -> N
 
     assert today_night.translation_key == "night_buy_window"
     assert today_night.unique_id == "entry-1_night_buy_window"
-    assert tomorrow_day.translation_key == "day_buy_window_tomorrow"
-    assert tomorrow_day.unique_id == "entry-1_day_buy_window_tomorrow"
+    assert tomorrow_day.translation_key == "day_buy_next_window"
+    assert tomorrow_day.unique_id == "entry-1_day_buy_next_window"
     assert morning_reference.translation_key == "morning_sell_buy_reference"
     assert morning_reference.unique_id == "entry-1_morning_sell_buy_reference"
 
@@ -1070,6 +1103,7 @@ def test_day_buy_window_sensor_publishes_expected_result_for_real_may_13_prices(
         "is_negative": False,
         "start_time": "2026-05-13T15:00:00+02:00",
         "end_time": "2026-05-13T17:00:00+02:00",
+        "plan_date": "2026-05-13",
     }
 
 

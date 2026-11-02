@@ -221,7 +221,7 @@ async def _run(
 
     assert gather_mock.call_args.kwargs["start_hour"] == 12
     assert gather_mock.call_args.kwargs["end_hour"] == (
-        24 if tomorrow_start_hour is None else tomorrow_start_hour
+        22 if tomorrow_start_hour is None else tomorrow_start_hour
     )
     optimization = hass.data[DOMAIN]["entry-1"]["last_optimization_sensor"]
     optimization.log_optimization.assert_called_once()
@@ -460,15 +460,15 @@ async def test_no_grid_charge_target_capped_at_max_soc() -> None:
 
 
 @pytest.mark.asyncio
-async def test_forecast_horizon_falls_back_to_midnight() -> None:
-    """Unavailable tomorrow pricing keeps the full day-buy start-to-midnight horizon."""
+async def test_forecast_horizon_falls_back_to_night_window_start() -> None:
+    """Unavailable tomorrow pricing ends the horizon at the 22:00 night start."""
     hass, _ = _hass(current_soc=50.0)
     details = await _run(
         hass,
-        _forecast(start_hour=12, end_hour=24),
+        _forecast(start_hour=12, end_hour=22),
         arbitrage_enabled=False,
         tomorrow_start_hour=None,
     )
 
     assert details["window_start_hour"] == 12
-    assert details["window_end_hour"] == 24
+    assert details["window_end_hour"] == 22

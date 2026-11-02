@@ -304,11 +304,11 @@
       "day_buy_window": {
         "name": "Day buy window"
       },
-      "night_buy_window_tomorrow": {
-        "name": "Night buy window tomorrow"
+      "night_buy_next_window": {
+        "name": "Next night buy window"
       },
-      "day_buy_window_tomorrow": {
-        "name": "Day buy window tomorrow"
+      "day_buy_next_window": {
+        "name": "Next day buy window"
       },
       "sell_price": {
         "name": "Sell price"

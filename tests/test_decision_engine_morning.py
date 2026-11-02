@@ -156,7 +156,7 @@ def test_morning_charge_extends_horizon_when_night_buy_is_cheaper(
     monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.morning_charge.get_internal_window_price",
         lambda _hass, **kwargs: (
-            0.2 if kwargs["unique_id_suffix"] == "night_buy_window_tomorrow" else 0.5
+            0.2 if kwargs["unique_id_suffix"] == "night_buy_next_window" else 0.5
         ),
     )
     monkeypatch.setattr(
@@ -201,7 +201,7 @@ def test_morning_price_comparison_uses_strict_tolerance(
         "custom_components.energy_optimizer.decision_engine.morning_charge.get_internal_window_price",
         lambda _hass, **kwargs: (
             night_price
-            if kwargs["unique_id_suffix"] == "night_buy_window_tomorrow"
+            if kwargs["unique_id_suffix"] == "night_buy_next_window"
             else day_price
         ),
     )

@@ -226,7 +226,7 @@ class ActionScheduler:
         night_buy_window_entity = get_internal_sensor_entity_id(
             self.hass,
             entry_id=self.entry.entry_id,
-            unique_id_suffix="night_buy_window_tomorrow",
+            unique_id_suffix="night_buy_next_window",
         )
         if night_buy_window_entity:
             self._listeners.append(
@@ -895,7 +895,7 @@ class ActionScheduler:
                     else None
                 ),
                 kind="dynamic",
-                source="night_buy_window_tomorrow_sensor",
+                source="night_buy_next_window_sensor",
                 order=10,
             )
         )

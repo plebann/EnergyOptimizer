@@ -190,7 +190,7 @@ async def test_migration_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     hass.config_entries.async_update_entry.assert_any_call(entry, version=3)
     hass.config_entries.async_update_entry.assert_any_call(entry, version=4)
     hass.config_entries.async_update_entry.assert_any_call(entry, version=5)
-    assert entry.version == 6
+    assert entry.version == 7
 
 
 @pytest.mark.asyncio
@@ -209,7 +209,7 @@ async def test_migration_tolerates_entry_without_old_entities(
     hass.config_entries.async_update_entry.assert_any_call(entry, version=3)
     hass.config_entries.async_update_entry.assert_any_call(entry, version=4)
     hass.config_entries.async_update_entry.assert_any_call(entry, version=5)
-    assert entry.version == 6
+    assert entry.version == 7
 
 
 @pytest.mark.asyncio
@@ -225,16 +225,16 @@ async def test_max_sell_energy_key_removed_on_migration(
 
     assert await async_migrate_entry(hass, entry)
 
-    assert entry.version == 6
+    assert entry.version == 7
     assert "max_sell_energy" not in entry.data
     registry.async_update_entity.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_new_entry_v6_does_not_run_migration(
+async def test_new_entry_v7_does_not_run_migration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    hass, entry, _ = _migration_context(version=6)
+    hass, entry, _ = _migration_context(version=7)
     async_get = MagicMock()
     monkeypatch.setattr(
         "custom_components.energy_optimizer.er.async_get",
@@ -260,7 +260,7 @@ async def test_v4_to_v5_renames_charge_current_entity_key(
 
     assert await async_migrate_entry(hass, entry)
 
-    assert entry.version == 6
+    assert entry.version == 7
     assert "charge_current_entity" not in entry.data
     assert entry.data["grid_charge_current_entity"] == "number.charge_current"
     registry.async_update_entity.assert_not_called()
@@ -279,7 +279,7 @@ async def test_v4_without_old_key_only_bumps_version(
 
     assert await async_migrate_entry(hass, entry)
 
-    assert entry.version == 6
+    assert entry.version == 7
     assert "charge_current_entity" not in entry.data
     assert "grid_charge_current_entity" not in entry.data
     assert entry.data["work_mode_entity"] == "select.mode"
@@ -298,7 +298,7 @@ async def test_v5_to_v6_renames_max_charge_current_entity_key(
 
     assert await async_migrate_entry(hass, entry)
 
-    assert entry.version == 6
+    assert entry.version == 7
     assert "max_charge_current_entity" not in entry.data
     assert entry.data["charge_current_entity"] == "number.max_charge_current"
 
@@ -316,7 +316,7 @@ async def test_v5_without_old_key_only_bumps_version(
 
     assert await async_migrate_entry(hass, entry)
 
-    assert entry.version == 6
+    assert entry.version == 7
     assert "charge_current_entity" not in entry.data
     assert "grid_charge_current_entity" not in entry.data
     assert entry.data["work_mode_entity"] == "select.mode"
@@ -337,6 +337,109 @@ async def test_v4_with_both_legacy_charge_keys_migrates_to_distinct_keys(
 
     assert await async_migrate_entry(hass, entry)
 
-    assert entry.version == 6
+    assert entry.version == 7
     assert entry.data["grid_charge_current_entity"] == "number.charge_current"
     assert entry.data["charge_current_entity"] == "number.max_charge_current"
+
+
+@pytest.mark.asyncio
+async def test_v6_entry_only_runs_buy_window_rename(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A v6 entry must not re-run earlier key renames (regression guard)."""
+    hass, entry, registry = _migration_context(version=6)
+    entry.data["charge_current_entity"] = "number.max_charge_current"
+    entry.data["grid_charge_current_entity"] = "number.grid_charge_current"
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.er.async_get",
+        lambda _: registry,
+    )
+
+    assert await async_migrate_entry(hass, entry)
+
+    assert entry.version == 7
+    assert entry.data["charge_current_entity"] == "number.max_charge_current"
+    assert entry.data["grid_charge_current_entity"] == "number.grid_charge_current"
+    versions = [
+        c.kwargs["version"]
+        for c in hass.config_entries.async_update_entry.call_args_list
+        if "version" in c.kwargs
+    ]
+    assert versions == [7]
+
+
+@pytest.mark.asyncio
+async def test_v6_to_v7_renames_buy_window_entities_with_default_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass, entry, registry = _migration_context(
+        version=6,
+        registry_entities={
+            (
+                "sensor",
+                DOMAIN,
+                "entry-1_night_buy_window_tomorrow",
+            ): "sensor.energy_optimizer_night_buy_window_tomorrow",
+            (
+                "sensor",
+                DOMAIN,
+                "entry-1_day_buy_window_tomorrow",
+            ): "sensor.energy_optimizer_day_buy_window_tomorrow",
+        },
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.er.async_get",
+        lambda _: registry,
+    )
+
+    assert await async_migrate_entry(hass, entry)
+
+    assert registry.async_update_entity.call_args_list == [
+        call(
+            "sensor.energy_optimizer_night_buy_window_tomorrow",
+            new_entity_id="sensor.energy_optimizer_night_buy_next_window",
+            new_unique_id="entry-1_night_buy_next_window",
+        ),
+        call(
+            "sensor.energy_optimizer_day_buy_window_tomorrow",
+            new_entity_id="sensor.energy_optimizer_day_buy_next_window",
+            new_unique_id="entry-1_day_buy_next_window",
+        ),
+    ]
+    assert entry.version == 7
+
+
+@pytest.mark.asyncio
+async def test_v6_to_v7_keeps_customized_entity_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass, entry, registry = _migration_context(
+        version=6,
+        registry_entities={
+            (
+                "sensor",
+                DOMAIN,
+                "entry-1_night_buy_window_tomorrow",
+            ): "sensor.my_night",
+        },
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.er.async_get",
+        lambda _: registry,
+    )
+
+    assert await async_migrate_entry(hass, entry)
+
+    registry.async_update_entity.assert_called_once_with(
+        "sensor.my_night",
+        new_unique_id="entry-1_night_buy_next_window",
+    )
+    registry.async_generate_entity_id.assert_not_called()
+
+
+def test_config_flow_version_matches_latest_migration() -> None:
+    from custom_components.energy_optimizer.config_flow import (
+        EnergyOptimizerConfigFlow,
+    )
+
+    assert EnergyOptimizerConfigFlow.VERSION == 7

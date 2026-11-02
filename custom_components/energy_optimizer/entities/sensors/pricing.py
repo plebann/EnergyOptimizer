@@ -20,8 +20,6 @@ from ...const import (
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_SELL_PRICE_SENSOR,
     DEFAULT_MIN_ARBITRAGE_PRICE,
-    NIGHT_BUY_WINDOW_ROTATION_HOUR,
-    NIGHT_BUY_WINDOW_ROTATION_MINUTE,
     PRICE_UNIT_PLN_PER_KWH,
 )
 from ...helpers import resolve_morning_max_price_hour, resolve_tariff_end_hour
@@ -100,6 +98,7 @@ class _BuyWindowBaseSensor(EnergyOptimizerSensor):
     _day_offset: int = 0
     _display_window_range: bool = True
     _include_timestamps: bool = True
+    _include_plan_date: bool = False
 
     def __init__(self, coordinator, config_entry, config) -> None:
         """Initialize the sensor with the current coordinator snapshot."""
@@ -157,6 +156,10 @@ class _BuyWindowBaseSensor(EnergyOptimizerSensor):
             "price": round(result.average_price, 3),
             "is_negative": result.average_price < 0,
         }
+        if self._include_plan_date:
+            self._attr_extra_state_attributes["plan_date"] = (
+                result.end_local.date().isoformat()
+            )
         if self._include_timestamps:
             self._attr_extra_state_attributes["start_time"] = result.start_local.isoformat()
             self._attr_extra_state_attributes["end_time"] = result.end_local.isoformat()
@@ -187,67 +190,48 @@ class _BuyWindowBaseSensor(EnergyOptimizerSensor):
 class NightBuyWindowSensor(_BuyWindowBaseSensor):
     """Sensor publishing the current or most recently completed night plan."""
 
+    _include_plan_date = True
     _attr_translation_key = "night_buy_window"
     _attr_unique_id = "night_buy_window"
     _payload_key = "prices_today"
     _range_key = "night"
-    _range_start_hour = 0
-    _range_end_hour = 6
 
     def _get_result(self) -> BuyWindowResult | None:
         """Return the active plan before rotation, otherwise the completed plan."""
         plans = (
-            self.coordinator.data.get("night_buy_window_plans")
+            self.coordinator.data.get("buy_window_plans")
+            or self.coordinator.data.get("night_buy_window_plans")
             if isinstance(self.coordinator.data, dict)
             else None
         )
         if not isinstance(plans, dict):
             return None
-        now = dt_util.now()
-        rotation_time = now.replace(
-            hour=NIGHT_BUY_WINDOW_ROTATION_HOUR,
-            minute=NIGHT_BUY_WINDOW_ROTATION_MINUTE,
-            second=0,
-            microsecond=0,
-        )
-        raw_plan = (
-            plans.get("upcoming") or plans.get("current")
-            if now < rotation_time
-            else plans.get("current")
-        )
+        raw_plan = plans.get("night", {}).get("window")
         return _night_plan_to_result(raw_plan)
-
-
-class DayBuyWindowSensor(_BuyWindowBaseSensor):
-    """Sensor publishing the best day buy window for today."""
-
-    _attr_translation_key = "day_buy_window"
-    _attr_unique_id = "day_buy_window"
-    _payload_key = "prices_today"
-    _range_key = "day"
-    _range_start_hour = 9
-    _range_end_hour = 17
 
 
 class NightBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
     """Sensor publishing the current-before-06:01 or next planned night."""
 
-    _attr_translation_key = "night_buy_window_tomorrow"
-    _attr_unique_id = "night_buy_window_tomorrow"
+    _include_plan_date = True
+    _attr_translation_key = "night_buy_next_window"
+    _attr_unique_id = "night_buy_next_window"
     _payload_key = "prices_tomorrow"
     _range_key = "night"
-    _range_start_hour = 0
-    _range_end_hour = 6
-    _day_offset = 1
 
     def _get_result(self) -> BuyWindowResult | None:
         """Return the persisted upcoming night plan without recalculation."""
         plans = (
-            self.coordinator.data.get("night_buy_window_plans")
+            self.coordinator.data.get("buy_window_plans")
+            or self.coordinator.data.get("night_buy_window_plans")
             if isinstance(self.coordinator.data, dict)
             else None
         )
-        return _night_plan_to_result(plans.get("upcoming")) if isinstance(plans, dict) else None
+        return (
+            _night_plan_to_result(plans.get("night", {}).get("next"))
+            if isinstance(plans, dict)
+            else None
+        )
 
 
 def _night_plan_to_result(raw_plan: object) -> BuyWindowResult | None:
@@ -268,13 +252,50 @@ def _night_plan_to_result(raw_plan: object) -> BuyWindowResult | None:
 class DayBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
     """Sensor publishing the best day buy window for tomorrow."""
 
-    _attr_translation_key = "day_buy_window_tomorrow"
-    _attr_unique_id = "day_buy_window_tomorrow"
+    _include_plan_date = True
+    _attr_translation_key = "day_buy_next_window"
+    _attr_unique_id = "day_buy_next_window"
     _payload_key = "prices_tomorrow"
     _range_key = "day"
-    _range_start_hour = 9
-    _range_end_hour = 17
-    _day_offset = 1
+
+    def _get_result(self) -> BuyWindowResult | None:
+        plans = (
+            self.coordinator.data.get("buy_window_plans")
+            if isinstance(self.coordinator.data, dict)
+            else None
+        )
+        return (
+            _night_plan_to_result(plans.get("day", {}).get("next"))
+            if isinstance(plans, dict)
+            else None
+        )
+
+
+class DayBuyWindowSensor(_BuyWindowBaseSensor):
+    """Sensor publishing the persisted current day buy plan."""
+
+    _include_plan_date = True
+    _attr_translation_key = "day_buy_window"
+    _attr_unique_id = "day_buy_window"
+    _payload_key = "prices_today"
+    _range_key = "day"
+
+    def _get_result(self) -> BuyWindowResult | None:
+        plans = (
+            self.coordinator.data.get("buy_window_plans")
+            if isinstance(self.coordinator.data, dict)
+            else None
+        )
+        return (
+            _night_plan_to_result(plans.get("day", {}).get("window"))
+            if isinstance(plans, dict)
+            else None
+        )
+
+
+# Public names retain their Python API while exposing the new entity names.
+NightBuyWindowNextSensor = NightBuyWindowTomorrowSensor
+DayBuyWindowNextSensor = DayBuyWindowTomorrowSensor
 
 
 class MorningSellBuyReferenceSensor(_BuyWindowBaseSensor):

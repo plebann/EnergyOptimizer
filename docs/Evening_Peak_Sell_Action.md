@@ -1,5 +1,11 @@
 # Sprzedaż w szczycie wieczornym — Opis akcji
 
+## Semantyka planu
+
+Cena i granica arbitrażu pochodzą z `night_buy_next_window`, czyli planu nocy
+22:00–06:00 identyfikowanego datą poranka. Przy chwilowym braku planu granicą
+awaryjną jest 22:00; brak danych nie tworzy pustego poprawnego planu.
+
 ## Cel
 
 Zarządzanie sprzedażą energii z magazynu wieczorem z użyciem dwóch okien sprzedaży:
@@ -10,7 +16,7 @@ Zarządzanie sprzedażą energii z magazynu wieczorem z użyciem dwóch okien sp
 ## Aktualna granica horyzontu zapotrzebowania
 
 Dla każdego aktywnego okna A/B arbitrage jest możliwy tylko do pierwszej
-późniejszej godziny przed `night_buy_window_tomorrow`, w której średnia cena
+późniejszej godziny przed `night_buy_next_window`, w której średnia cena
 zakupu jest ściśle niższa od ceny tego okna sprzedaży pomniejszonej o
 `min_arbitrage_margin`. Bez takiej godziny energia jest zachowywana do
 jutrzejszej samowystarczalności PV; gdy jej nie ma, sprzedaż nie jest
@@ -37,7 +43,7 @@ Logika działa niezależnie od kolejności czasowej okien (`A First` albo `B Fir
 - Cena okna `B` (`evening_second_max_price_sensor`), jeśli skonfigurowana
 - Cena jutrzejszego porannego szczytu (`tomorrow_morning_max_price_sensor`)
 - Minimalna cena arbitrażu (`min_arbitrage_price`, PLN/kWh) — minimalny próg **Arbitrage Margin**
-- Arbitrage Buy Reference: cena `night_buy_window_tomorrow` (koszt nocnego odkupienia energii po dzisiejszej sprzedaży)
+- Arbitrage Buy Reference: cena `night_buy_next_window` (koszt nocnego odkupienia energii po dzisiejszej sprzedaży)
 - Przewidywane zużycie energii w oknie od teraz+1h do startu taryfy niskiej:
   - Zużycie domowe (z czujników w okienkach 4-godzinnych)
   - Zużycie Pompy Ciepła (integracja zewnętrzna)
@@ -72,7 +78,7 @@ Logika działa niezależnie od kolejności czasowej okien (`A First` albo `B Fir
      - w **drugim** oknie, jeśli sprzedaż jest aktywna → `sell_restore`.
 
 2. **Bazowe wyliczenie nadwyżki**
-   - Gdy `current_window_price - night_buy_window_tomorrow_price > min_arbitrage_price`
+   - Gdy `current_window_price - night_buy_next_window_price > min_arbitrage_price`
      używana jest ścieżka `high_sell`.
    - Gdy margin nie przekracza progu lub brakuje ceny buy reference, używana jest ścieżka
      `sell` (surplus sell, fail-closed dla high sell).
@@ -191,7 +197,7 @@ graph TD
 
 **Aktualny stan (implementacja):**
 - Brak ceny bieżącego okna → fallback do gałęzi `surplus sell`
-- Gdy Arbitrage Margin nie przekracza progu albo brakuje ceny `night_buy_window_tomorrow`:
+- Gdy Arbitrage Margin nie przekracza progu albo brakuje ceny `night_buy_next_window`:
    - nie kończy od razu,
    - uruchamia gałąź `surplus sell`
 - Cena bieżącego okna nie wyższa niż cena jutro rano:

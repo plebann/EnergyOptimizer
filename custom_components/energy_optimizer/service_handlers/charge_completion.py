@@ -49,7 +49,7 @@ def resolve_charge_window(
     """Resolve a buy window to concrete local datetimes."""
     now = dt_util.now()
     suffix = (
-        "night_buy_window_tomorrow" if charge_type == "morning" else "day_buy_window"
+        "night_buy_next_window" if charge_type == "morning" else "day_buy_window"
     )
     entity_id = get_internal_sensor_entity_id(
         hass,

@@ -216,10 +216,8 @@ async def test_coordinator_creates_first_valid_plan_from_combined_prices(
 
 
 @pytest.mark.unit
-def test_night_sensors_publish_persisted_plan_with_rotation_semantics(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Both sensors expose the active plan before 06:01, then split at rotation."""
+def test_night_sensors_publish_persisted_plan_slots() -> None:
+    """The window sensor reads the `window` slot, the next sensor the `next` slot."""
     plan = {
         "start_time": "2026-10-27T22:00:00+01:00",
         "end_time": "2026-10-28T00:00:00+01:00",
@@ -228,23 +226,19 @@ def test_night_sensors_publish_persisted_plan_with_rotation_semantics(
         "validated_complete": True,
     }
     coordinator = MagicMock()
-    coordinator.data = {"night_buy_window_plans": {"current": plan, "upcoming": plan}}
+    coordinator.data = {
+        "buy_window_plans": {"night": {"window": None, "next": plan}, "day": {}}
+    }
     entry = MagicMock(entry_id="entry-1", data={}, options={})
     config = {CONF_BUY_PRICE_SENSOR: "sensor.buy"}
     current = NightBuyWindowSensor(coordinator, entry, config)
-    tomorrow = NightBuyWindowTomorrowSensor(coordinator, entry, config)
+    upcoming = NightBuyWindowTomorrowSensor(coordinator, entry, config)
 
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.entities.sensors.pricing.dt_util.now",
-        lambda: datetime(2026, 10, 28, 6, 0, tzinfo=TZ),
-    )
-    assert current.native_value == "22:00-00:00"
-    assert tomorrow.native_value == "22:00-00:00"
+    assert current.native_value is None
+    assert upcoming.native_value == "22:00-00:00"
+    assert upcoming.extra_state_attributes["plan_date"] == "2026-10-28"
 
-    coordinator.data["night_buy_window_plans"]["upcoming"] = None
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.entities.sensors.pricing.dt_util.now",
-        lambda: datetime(2026, 10, 28, 6, 1, tzinfo=TZ),
-    )
+    coordinator.data["buy_window_plans"]["night"] = {"window": plan, "next": None}
     assert current.native_value == "22:00-00:00"
-    assert tomorrow.native_value is None
+    assert upcoming.native_value is None
+    assert upcoming.extra_state_attributes == {}
