@@ -169,6 +169,21 @@ class TestResolvedMarketWindow:
         assert after_fold.contains(first_two_thirty.astimezone(UTC)) is False
         assert after_fold.contains(second_two.astimezone(UTC)) is True
 
+    def test_windows_differing_only_by_dst_fold_are_not_equal(self) -> None:
+        six = datetime(2026, 10, 25, 6, tzinfo=TZ)
+        five_hours = _window(datetime(2026, 10, 25, 2, tzinfo=TZ), six)
+        four_hours = _window(datetime(2026, 10, 25, 2, tzinfo=TZ, fold=1), six)
+
+        assert five_hours != four_hours
+        assert hash(five_hours) != hash(four_hours)
+
+    def test_windows_at_the_same_instants_are_equal_in_any_zone(self) -> None:
+        local = _window(_dt(8, 22), _dt(9, 6))
+        utc = _window(_dt(8, 22).astimezone(UTC), _dt(9, 6).astimezone(UTC))
+
+        assert local == utc
+        assert hash(local) == hash(utc)
+
     def test_a_resolved_window_cannot_be_changed(self) -> None:
         resolved = _window(_dt(8, 13), _dt(8, 15))
 
@@ -227,6 +242,17 @@ class TestMarketWindows:
     def test_changed_from_reports_only_the_field_whose_price_changed(self) -> None:
         previous = _snapshot()
         current = _snapshot(night_buy=window(22, 6, price=0.46))
+
+        assert current.changed_from(previous) == {"night_buy"}
+
+    def test_changed_from_sees_a_night_buy_moved_across_the_dst_fold(self) -> None:
+        six = datetime(2026, 10, 25, 6, tzinfo=TZ)
+        previous = _snapshot(
+            night_buy=_window(datetime(2026, 10, 25, 2, tzinfo=TZ), six)
+        )
+        current = _snapshot(
+            night_buy=_window(datetime(2026, 10, 25, 2, tzinfo=TZ, fold=1), six)
+        )
 
         assert current.changed_from(previous) == {"night_buy"}
 

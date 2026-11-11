@@ -22,9 +22,16 @@ class MarketWindowSource(StrEnum):
     DEFAULT = "default"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class ResolvedMarketWindow:
-    """A Market Window resolved to tz-aware local datetimes and a price."""
+    """A Market Window resolved to tz-aware local datetimes and a price.
+
+    Equality and hashing compare the endpoints as instants (UTC): generated
+    dataclass equality would compare same-zone datetimes by wall time and
+    ignore ``fold``, so two windows of different length in the repeated DST
+    hour would compare equal and ``MarketWindows.changed_from`` would miss
+    the change.
+    """
 
     start: datetime
     end: datetime
@@ -45,6 +52,25 @@ class ResolvedMarketWindow:
             raise ValueError(
                 "Market Window reason is set exactly when the source is DEFAULT"
             )
+
+    def _key(
+        self,
+    ) -> tuple[datetime, datetime, float | None, MarketWindowSource, str | None]:
+        return (
+            self.start.astimezone(UTC),
+            self.end.astimezone(UTC),
+            self.price,
+            self.source,
+            self.reason,
+        )
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ResolvedMarketWindow):
+            return NotImplemented
+        return self._key() == other._key()
+
+    def __hash__(self) -> int:
+        return hash(self._key())
 
     @property
     def hour(self) -> int:
