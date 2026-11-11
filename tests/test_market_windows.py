@@ -637,6 +637,21 @@ class TestCoordinatorMarketWindowResolverHighTariff:
             13, MarketWindowSource.DEFAULT
         )
 
+    def test_the_lowest_hours_of_each_range_are_accepted(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.tariff_start": "0", "sensor.tariff_end": "7"}),
+            entry=_entry(
+                **{
+                    CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start",
+                    CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end",
+                }
+            ),
+        )
+
+        snapshot = resolver.windows(NOW)
+        assert snapshot.high_tariff_start == ResolvedHour(0, MarketWindowSource.CONFIG_ENTITY)
+        assert snapshot.high_tariff_end == ResolvedHour(7, MarketWindowSource.CONFIG_ENTITY)
+
     def test_an_end_hour_of_24_is_accepted(self) -> None:
         resolver = _resolver(
             hass=_hass({"sensor.tariff_end": "24"}),
@@ -845,7 +860,9 @@ class TestCoordinatorMarketWindowResolverConsume:
         assert snapshot.consume == window(10, 12, price=0.5)
 
 
-BUY_PRICES_TODAY = {6: 0.30, 7: 0.40, 8: 0.60, 9: 0.70, 10: 0.80, 11: 0.70, 12: 0.70, 13: 0.95, 14: 0.99}
+BUY_PRICES_TODAY = {
+    6: 0.30, 7: 0.40, 8: 0.60, 9: 0.70, 10: 0.80, 11: 0.70, 12: 0.70, 13: 0.95, 14: 0.99
+}
 
 
 class TestCoordinatorMarketWindowResolverBuyReference:
@@ -880,11 +897,25 @@ class TestCoordinatorMarketWindowResolverBuyReference:
         assert (reference.start, reference.end) == (_dt(8, 9), _dt(8, 12))
         assert reference.price == pytest.approx(0.7333, abs=1e-4)
 
+    def test_a_reference_starting_at_the_tariff_end_wraps_to_the_next_day(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.tariff_end": "9"}),
+            entry=_entry(**{CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end"}),
+            coordinator=_coordinator(
+                _sell_payload(prices_today=_hourly(8, {7: 1.00, 8: 1.20, 9: 1.10}))
+            ),
+        )
+
+        reference = resolver.windows(NOW).morning_sell_buy_reference
+        assert (reference.start, reference.end) == (_dt(8, 9), _dt(9, 9))
+
     def test_without_buy_prices_the_reference_defaults_to_the_same_span_without_a_price(
         self,
     ) -> None:
         resolver = _resolver(
-            coordinator=_coordinator(_sell_payload(prices_today=_hourly(8, {7: 1.00, 8: 1.20, 9: 1.10})))
+            coordinator=_coordinator(
+                _sell_payload(prices_today=_hourly(8, {7: 1.00, 8: 1.20, 9: 1.10}))
+            )
         )
 
         reference = resolver.windows(NOW).morning_sell_buy_reference
@@ -984,6 +1015,15 @@ class TestCoordinatorMarketWindowResolverLegacyEntities:
         )
         assert evening.secondary is None
 
+    def test_an_unavailable_legacy_hour_yields_an_unavailable_default(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.morning_hour": "unavailable"}),
+            entry=_entry(**{CONF_MORNING_MAX_PRICE_HOUR_SENSOR: "sensor.morning_hour"}),
+        )
+
+        primary = resolver.windows(NOW).morning_sell.primary
+        assert (primary.source, primary.reason) == (MarketWindowSource.DEFAULT, "unavailable")
+
     def test_a_legacy_window_without_a_price_entity_has_no_price(self) -> None:
         resolver = _resolver(
             hass=_hass({"sensor.morning_hour": "8"}),
@@ -1079,6 +1119,17 @@ class TestCoordinatorMarketWindowResolverInvariants:
             assert resolved.start.tzinfo is not None and resolved.end.tzinfo is not None
             assert resolved.start.utcoffset() == NOW.utcoffset()
         assert snapshot.now is NOW
+
+    def test_a_naive_now_is_read_in_home_assistant_local_time(self) -> None:
+        resolver = _resolver(night_next=TONIGHT)
+
+        with patch(
+            "custom_components.energy_optimizer.market_windows.dt_util.DEFAULT_TIME_ZONE", TZ
+        ):
+            snapshot = resolver.windows(datetime(2026, 5, 8, 12))
+
+        assert snapshot.now == NOW
+        assert snapshot.night_buy == _plan_window(TONIGHT)
 
     def test_without_now_the_snapshot_is_anchored_at_home_assistant_local_now(self) -> None:
         resolver = _resolver(night_next=TONIGHT)

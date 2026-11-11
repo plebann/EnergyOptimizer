@@ -463,9 +463,9 @@ def _combined_prices(payload: object) -> list[dict[str, object]] | None:
 
 
 def _day_prices(payload: object, key: str) -> list[dict[str, object]] | None:
-    """Return one day's non-empty price list from a payload."""
+    """Return one day's price list from a payload."""
     prices = payload.get(key) if isinstance(payload, dict) else None
-    return prices if isinstance(prices, list) and prices else None
+    return prices if isinstance(prices, list) else None
 
 
 def _night_from_prices(
@@ -574,6 +574,8 @@ class CoordinatorMarketWindowResolver:
     def windows(self, now: datetime | None = None) -> MarketWindows:
         """Resolve every Market Window at `now` (default: Home Assistant local now)."""
         current = now or dt_util.now()
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
         tz = current.tzinfo
         today = current.date()
         tomorrow_local = current + timedelta(days=1)
