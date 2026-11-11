@@ -149,6 +149,19 @@ DEFAULT_HIGH_TARIFF_START_HOUR: Final = 15
 DEFAULT_HIGH_TARIFF_END_HOUR: Final = 13
 
 
+def _default_window(
+    start: datetime, end: datetime, *, reason: DefaultReason
+) -> ResolvedMarketWindow:
+    """Build a Default Market Window: no price, source DEFAULT, the given reason."""
+    return ResolvedMarketWindow(
+        start=start,
+        end=end,
+        price=None,
+        source=MarketWindowSource.DEFAULT,
+        reason=reason,
+    )
+
+
 def _default_buy_window(
     now: datetime, start_hour: int, end_hour: int, *, reason: DefaultReason
 ) -> ResolvedMarketWindow:
@@ -160,13 +173,7 @@ def _default_buy_window(
     if end <= now:
         start += timedelta(days=1)
         end += timedelta(days=1)
-    return ResolvedMarketWindow(
-        start=start,
-        end=end,
-        price=None,
-        source=MarketWindowSource.DEFAULT,
-        reason=reason,
-    )
+    return _default_window(start, end, reason=reason)
 
 
 def _default_hour_window(
@@ -174,13 +181,7 @@ def _default_hour_window(
 ) -> ResolvedMarketWindow:
     """Build a one-hour Default Market Window at `hour` on `day`."""
     start = datetime.combine(day, time(hour), tzinfo=tz)
-    return ResolvedMarketWindow(
-        start=start,
-        end=start + timedelta(hours=1),
-        price=None,
-        source=MarketWindowSource.DEFAULT,
-        reason=reason,
-    )
+    return _default_window(start, start + timedelta(hours=1), reason=reason)
 
 
 def _default_ranked(
@@ -209,40 +210,34 @@ def default_market_windows(
     return MarketWindows(
         now=now,
         night_buy=night_buy,
-        night_buy_completed=ResolvedMarketWindow(
-            start=datetime.combine(
+        night_buy_completed=_default_window(
+            datetime.combine(
                 today - timedelta(days=1), time(NIGHT_BUY_WINDOW_START_HOUR), tzinfo=tz
             ),
-            end=datetime.combine(today, time(NIGHT_BUY_WINDOW_END_HOUR), tzinfo=tz),
-            price=None,
-            source=MarketWindowSource.DEFAULT,
+            datetime.combine(today, time(NIGHT_BUY_WINDOW_END_HOUR), tzinfo=tz),
             reason=reason,
         ),
-        night_buy_after=ResolvedMarketWindow(
-            start=datetime.combine(
+        night_buy_after=_default_window(
+            datetime.combine(
                 night_buy.plan_date + timedelta(days=1), time.min, tzinfo=tz
             ),
-            end=datetime.combine(
+            datetime.combine(
                 night_buy.plan_date + timedelta(days=1),
                 time(NIGHT_BUY_WINDOW_END_HOUR),
                 tzinfo=tz,
             ),
-            price=None,
-            source=MarketWindowSource.DEFAULT,
             reason=reason,
         ),
         day_buy=day_buy,
-        day_buy_next=ResolvedMarketWindow(
-            start=datetime.combine(
+        day_buy_next=_default_window(
+            datetime.combine(
                 night_buy.plan_date,
                 time(DEFAULT_HIGH_TARIFF_START_HOUR - DEFAULT_DAY_BUY_DURATION_HOURS),
                 tzinfo=tz,
             ),
-            end=datetime.combine(
+            datetime.combine(
                 night_buy.plan_date, time(DEFAULT_HIGH_TARIFF_START_HOUR), tzinfo=tz
             ),
-            price=None,
-            source=MarketWindowSource.DEFAULT,
             reason=reason,
         ),
         morning_sell=_default_ranked(today, DEFAULT_MORNING_SELL_HOUR, tz, reason=reason),
@@ -257,11 +252,9 @@ def default_market_windows(
         consume_tomorrow=_default_hour_window(
             tomorrow, DEFAULT_CONSUME_HOUR, tz, reason=reason
         ),
-        morning_sell_buy_reference=ResolvedMarketWindow(
-            start=datetime.combine(today, time(DEFAULT_MORNING_SELL_HOUR + 1), tzinfo=tz),
-            end=datetime.combine(today, time(DEFAULT_HIGH_TARIFF_END_HOUR), tzinfo=tz),
-            price=None,
-            source=MarketWindowSource.DEFAULT,
+        morning_sell_buy_reference=_default_window(
+            datetime.combine(today, time(DEFAULT_MORNING_SELL_HOUR + 1), tzinfo=tz),
+            datetime.combine(today, time(DEFAULT_HIGH_TARIFF_END_HOUR), tzinfo=tz),
             reason=reason,
         ),
         high_tariff_start=ResolvedHour(
