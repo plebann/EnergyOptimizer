@@ -665,3 +665,51 @@ class TestCoordinatorMarketWindowResolverHighTariff:
             _dt(9, 14),
             _dt(9, 16),
         )
+
+
+LAST_NIGHT = _plan(_dt(7, 22), _dt(8, 6), 0.40)
+TONIGHT = _plan(_dt(8, 22), _dt(9, 6), 0.45)
+TODAY_DAY = _plan(_dt(8, 13), _dt(8, 15), 0.60)
+TOMORROW_DAY = _plan(_dt(9, 12), _dt(9, 14), 0.55)
+
+
+def _plan_window(plan: NightBuyWindowPlan) -> ResolvedMarketWindow:
+    return ResolvedMarketWindow(
+        start=plan.start, end=plan.end, price=plan.price, source=MarketWindowSource.PLAN
+    )
+
+
+class TestCoordinatorMarketWindowResolverPlans:
+    def test_night_buy_is_the_earliest_plan_not_ended_at_now(self) -> None:
+        resolver = _resolver(night=LAST_NIGHT, night_next=TONIGHT)
+
+        assert resolver.windows(NOW).night_buy == _plan_window(TONIGHT)
+
+    def test_night_buy_completed_is_the_plan_keyed_by_todays_date(self) -> None:
+        resolver = _resolver(night=LAST_NIGHT, night_next=TONIGHT)
+
+        assert resolver.windows(NOW).night_buy_completed == _plan_window(LAST_NIGHT)
+
+    def test_day_buy_is_the_plan_keyed_by_todays_local_date(self) -> None:
+        resolver = _resolver(day=TODAY_DAY, day_next=TOMORROW_DAY)
+
+        assert resolver.windows(NOW).day_buy == _plan_window(TODAY_DAY)
+
+    def test_day_buy_next_is_the_plan_keyed_by_the_night_buy_plan_date(self) -> None:
+        resolver = _resolver(night_next=TONIGHT, day=TODAY_DAY, day_next=TOMORROW_DAY)
+
+        snapshot = resolver.windows(NOW)
+        assert snapshot.day_buy_next == _plan_window(TOMORROW_DAY)
+        assert snapshot.day_buy_for(_dt(9, 0).date()) is snapshot.day_buy_next
+        assert snapshot.day_buy_for(_dt(8, 0).date()) is snapshot.day_buy
+
+    def test_with_every_plan_ended_the_night_buy_is_tonights_default(self) -> None:
+        resolver = _resolver(night=LAST_NIGHT)
+
+        night = resolver.windows(_dt(8, 7)).night_buy
+        assert (night.start, night.end, night.source, night.reason) == (
+            _dt(8, 22),
+            _dt(9, 6),
+            MarketWindowSource.DEFAULT,
+            "unavailable",
+        )

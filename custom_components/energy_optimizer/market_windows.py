@@ -349,6 +349,8 @@ _UNAVAILABLE_STATES: Final = frozenset({"unknown", "unavailable"})
 # A Market Window Source chain: sources in priority order, each answering None
 # when it cannot supply the value and raising when its data is invalid.
 _HourChain = Iterable[tuple[MarketWindowSource, Callable[[], int | None]]]
+_Span = tuple[datetime, datetime, float | None]
+_WindowChain = Iterable[tuple[MarketWindowSource, Callable[[], _Span | None]]]
 
 
 def _parse_hour(state_value: object) -> int | None:
@@ -374,6 +376,38 @@ def _first_hour(chain: _HourChain, *, default: int, name: str) -> ResolvedHour:
         if hour is not None:
             return ResolvedHour(hour, source)
     return ResolvedHour(default, MarketWindowSource.DEFAULT)
+
+
+def _first_window(
+    chain: _WindowChain,
+    *,
+    default: Callable[[DefaultReason], ResolvedMarketWindow],
+    name: str,
+) -> ResolvedMarketWindow:
+    """Resolve a window from the first source that supplies one, else a default.
+
+    A source that raises had data but could not make a valid window of it, so
+    the default built after it carries the `unreliable` reason.
+    """
+    reason: DefaultReason = "unavailable"
+    for source, supply in chain:
+        try:
+            span = supply()
+            if span is None:
+                continue
+            start, end, price = span
+            return ResolvedMarketWindow(start=start, end=end, price=price, source=source)
+        except Exception:  # noqa: BLE001 - a resolver never raises
+            _LOGGER.warning("%s from %s is invalid, trying the next source", name, source, exc_info=True)
+            reason = "unreliable"
+    return default(reason)
+
+
+def _plan_span(plan: NightBuyWindowPlan | None) -> _Span | None:
+    """Project a buy-window plan onto a window span."""
+    if plan is None:
+        return None
+    return plan.start, plan.end, plan.price
 
 
 class CoordinatorMarketWindowResolver:
@@ -422,23 +456,54 @@ class CoordinatorMarketWindowResolver:
             default=DEFAULT_HIGH_TARIFF_END_HOUR,
             name="High-Tariff end hour",
         )
-        defaults = default_market_windows(current)
-        day_buy_end = datetime.combine(
-            defaults.night_buy.plan_date, time(high_tariff_start.hour), tzinfo=current.tzinfo
+        night_buy = _first_window(
+            [(MarketWindowSource.PLAN, lambda: _plan_span(self._manager.get_active_plan("night", current)))],
+            default=lambda reason: _default_buy_window(
+                current, *DEFAULT_NIGHT_BUY_HOURS, reason=reason
+            ),
+            name="Night Buy Window",
         )
-        return replace(
-            defaults,
-            day_buy=_default_buy_window(
+        today = current.date()
+        tz = current.tzinfo
+        defaults = default_market_windows(current)
+        night_buy_completed = _first_window(
+            [(MarketWindowSource.PLAN, lambda: _plan_span(self._manager.get_plan("night", today)))],
+            default=lambda reason: replace(defaults.night_buy_completed, reason=reason),
+            name="completed Night Buy Window",
+        )
+        day_buy = _first_window(
+            [(MarketWindowSource.PLAN, lambda: _plan_span(self._manager.get_plan("day", today)))],
+            default=lambda reason: _default_buy_window(
                 current,
                 (high_tariff_start.hour - DEFAULT_DAY_BUY_DURATION_HOURS) % 24,
                 high_tariff_start.hour,
-                reason="unavailable",
+                reason=reason,
             ),
-            day_buy_next=_default_window(
-                day_buy_end - timedelta(hours=DEFAULT_DAY_BUY_DURATION_HOURS),
-                day_buy_end,
-                reason="unavailable",
+            name="Day Buy Window",
+        )
+        day_buy_next_end = datetime.combine(
+            night_buy.plan_date, time(high_tariff_start.hour), tzinfo=tz
+        )
+        day_buy_next = _first_window(
+            [
+                (
+                    MarketWindowSource.PLAN,
+                    lambda: _plan_span(self._manager.get_plan("day", night_buy.plan_date)),
+                )
+            ],
+            default=lambda reason: _default_window(
+                day_buy_next_end - timedelta(hours=DEFAULT_DAY_BUY_DURATION_HOURS),
+                day_buy_next_end,
+                reason=reason,
             ),
+            name="next Day Buy Window",
+        )
+        return replace(
+            defaults,
+            night_buy=night_buy,
+            night_buy_completed=night_buy_completed,
+            day_buy=day_buy,
+            day_buy_next=day_buy_next,
             high_tariff_start=high_tariff_start,
             high_tariff_end=high_tariff_end,
         )
