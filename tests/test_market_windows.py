@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
-from datetime import datetime
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -94,6 +94,20 @@ class TestResolvedMarketWindow:
         assert (night.hour, night.end_hour) == (22, 6)
         assert night.duration_hours == 8.0
         assert night.plan_date == _dt(9, 6).date()
+
+    def test_plan_date_is_the_local_date_the_window_ends_on(self) -> None:
+        ends_after_midnight_local = _window(
+            _dt(8, 22), datetime(2026, 5, 8, 22, 30, tzinfo=UTC)
+        )
+
+        assert ends_after_midnight_local.plan_date == _dt(9, 0).date()
+
+    def test_duration_counts_elapsed_hours_across_a_dst_change(self) -> None:
+        autumn_night = _window(
+            datetime(2026, 10, 24, 22, tzinfo=TZ), datetime(2026, 10, 25, 6, tzinfo=TZ)
+        )
+
+        assert autumn_night.duration_hours == 9.0
 
     def test_default_window_is_a_fallback_and_yields_the_callers_default_hour(
         self,

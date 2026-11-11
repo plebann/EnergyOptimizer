@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from datetime import date, datetime, time, timedelta, tzinfo
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from enum import StrEnum
 from typing import Final, Literal, Protocol
 
@@ -56,12 +56,14 @@ class ResolvedMarketWindow:
     @property
     def duration_hours(self) -> float:
         """Return the window length in hours."""
-        return (self.end - self.start).total_seconds() / 3600
+        return (
+            self.end.astimezone(UTC) - self.start.astimezone(UTC)
+        ).total_seconds() / 3600
 
     @property
     def plan_date(self) -> date:
         """Return the date the window is keyed by: the day it ends on."""
-        return self.end.date()
+        return self.end.astimezone(self.start.tzinfo).date()
 
     @property
     def is_fallback(self) -> bool:
