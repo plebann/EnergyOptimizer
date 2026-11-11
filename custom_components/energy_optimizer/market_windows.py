@@ -11,10 +11,12 @@ from typing import TYPE_CHECKING, Final, Literal, Protocol
 
 from homeassistant.util import dt as dt_util
 
+from .calculations.price_windows import build_ranked_sell_window_result
 from .const import (
     CONF_BUY_PRICE_SENSOR,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
+    CONF_SELL_PRICE_SENSOR,
     DOMAIN,
     NIGHT_BUY_WINDOW_END_HOUR,
     NIGHT_BUY_WINDOW_START_HOUR,
@@ -200,6 +202,10 @@ DEFAULT_CONSUME_HOUR: Final = 12
 DEFAULT_HIGH_TARIFF_START_HOUR: Final = 15
 DEFAULT_HIGH_TARIFF_END_HOUR: Final = 13
 
+# The hour ranges the ranked sell windows are chosen from.
+MORNING_SELL_RANGE_HOURS: Final = (4, 10)
+EVENING_SELL_RANGE_HOURS: Final = (16, 22)
+
 
 def _default_window(
     start: datetime, end: datetime, *, reason: DefaultReason
@@ -353,6 +359,8 @@ _UNAVAILABLE_STATES: Final = frozenset({"unknown", "unavailable"})
 _HourChain = Iterable[tuple[MarketWindowSource, Callable[[], int | None]]]
 _Span = tuple[datetime, datetime, float | None]
 _WindowChain = Iterable[tuple[MarketWindowSource, Callable[[], _Span | None]]]
+_RankedSpans = tuple[_Span, _Span | None]
+_RankedChain = Iterable[tuple[MarketWindowSource, Callable[[], _RankedSpans | None]]]
 
 
 def _parse_hour(state_value: object) -> int | None:
@@ -405,6 +413,60 @@ def _first_window(
     return default(reason)
 
 
+def _first_ranked(
+    chain: _RankedChain,
+    *,
+    default: Callable[[DefaultReason], RankedMarketWindow],
+    name: str,
+) -> RankedMarketWindow:
+    """Resolve a Primary and optional Secondary Market Window from one chain."""
+    reason: DefaultReason = "unavailable"
+    for source, supply in chain:
+        try:
+            spans = supply()
+            if spans is None:
+                continue
+            primary, secondary = spans
+            return RankedMarketWindow(
+                primary=ResolvedMarketWindow(*primary, source=source),
+                secondary=(
+                    ResolvedMarketWindow(*secondary, source=source)
+                    if secondary is not None
+                    else None
+                ),
+            )
+        except Exception:  # noqa: BLE001 - a resolver never raises
+            _LOGGER.warning("%s from %s is invalid, trying the next source", name, source, exc_info=True)
+            reason = "unreliable"
+    return default(reason)
+
+
+def _ranked_from_prices(
+    prices: object, entity_id: str, hours: tuple[int, int], now_local: datetime
+) -> _RankedSpans | None:
+    """Rank the one-hour sell windows of `now_local`'s day inside `hours`."""
+    if not isinstance(prices, list) or not prices:
+        return None
+    result = build_ranked_sell_window_result(
+        prices,
+        entity_id,
+        range_start_hour=hours[0],
+        range_end_hour=hours[1],
+        now_local=now_local,
+    )
+    if result is None:
+        return None
+    one_hour = timedelta(hours=1)
+    return (
+        (result.best_start_local, result.best_start_local + one_hour, result.best_price),
+        (
+            result.second_best_start_local,
+            result.second_best_start_local + one_hour,
+            result.second_best_price,
+        ),
+    )
+
+
 def _combined_prices(payload: object) -> list[dict[str, object]] | None:
     """Return a payload's combined price list, or today's and tomorrow's joined."""
     if not isinstance(payload, dict):
@@ -455,6 +517,12 @@ class CoordinatorMarketWindowResolver:
         payloads = data.get("price_payloads") if isinstance(data, dict) else None
         buy_entity = str(self._entry.data.get(CONF_BUY_PRICE_SENSOR))
         buy_payload = payloads.get(buy_entity) if isinstance(payloads, dict) else None
+        sell_entity = str(self._entry.data.get(CONF_SELL_PRICE_SENSOR))
+        sell_payload = payloads.get(sell_entity) if isinstance(payloads, dict) else None
+        sell_today = sell_payload.get("prices_today") if isinstance(sell_payload, dict) else None
+        sell_tomorrow = (
+            sell_payload.get("prices_tomorrow") if isinstance(sell_payload, dict) else None
+        )
         high_tariff_start = _first_hour(
             [
                 (
@@ -536,11 +604,41 @@ class CoordinatorMarketWindowResolver:
             ),
             name="Night Buy Window after the active one",
         )
+        tomorrow = today + timedelta(days=1)
+        tomorrow_local = current + timedelta(days=1)
+
+        def ranked(
+            prices: object, hours: tuple[int, int], day: date, default_hour: int
+        ) -> RankedMarketWindow:
+            now_local = current if day == today else tomorrow_local
+            return _first_ranked(
+                [
+                    (
+                        MarketWindowSource.PRICES,
+                        lambda: _ranked_from_prices(prices, sell_entity, hours, now_local),
+                    )
+                ],
+                default=lambda reason: _default_ranked(day, default_hour, tz, reason=reason),
+                name="ranked sell window",
+            )
+
         return replace(
             defaults,
             night_buy=night_buy,
             night_buy_completed=night_buy_completed,
             night_buy_after=night_buy_after,
+            morning_sell=ranked(
+                sell_today, MORNING_SELL_RANGE_HOURS, today, DEFAULT_MORNING_SELL_HOUR
+            ),
+            morning_sell_tomorrow=ranked(
+                sell_tomorrow, MORNING_SELL_RANGE_HOURS, tomorrow, DEFAULT_MORNING_SELL_HOUR
+            ),
+            evening_sell=ranked(
+                sell_today, EVENING_SELL_RANGE_HOURS, today, DEFAULT_EVENING_SELL_HOUR
+            ),
+            evening_sell_tomorrow=ranked(
+                sell_tomorrow, EVENING_SELL_RANGE_HOURS, tomorrow, DEFAULT_EVENING_SELL_HOUR
+            ),
             day_buy=day_buy,
             day_buy_next=day_buy_next,
             high_tariff_start=high_tariff_start,

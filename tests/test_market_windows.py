@@ -748,3 +748,62 @@ class TestCoordinatorMarketWindowResolverNightBuyAfter:
             _dt(10, 6),
             MarketWindowSource.DEFAULT,
         )
+
+
+def _sell_payload(**lists: list[dict[str, object]]) -> dict[str, dict[str, list]]:
+    return {SELL: lists}
+
+
+MORNING_PRICES = {4: 0.80, 5: 0.90, 6: 1.00, 7: 1.20, 8: 1.10, 9: 0.95}
+EVENING_PRICES = {16: 1.00, 17: 1.30, 18: 1.25, 19: 1.05, 20: 0.90, 21: 0.80}
+
+
+class TestCoordinatorMarketWindowResolverSellWindows:
+    def test_morning_sell_ranks_todays_sell_prices_between_4_and_10(self) -> None:
+        resolver = _resolver(
+            coordinator=_coordinator(_sell_payload(prices_today=_hourly(8, MORNING_PRICES)))
+        )
+
+        assert resolver.windows(NOW).morning_sell == RankedMarketWindow(
+            primary=window(7, 8, price=1.20), secondary=window(8, 9, price=1.10)
+        )
+
+    def test_evening_sell_ranks_todays_sell_prices_between_16_and_22(self) -> None:
+        resolver = _resolver(
+            coordinator=_coordinator(_sell_payload(prices_today=_hourly(8, EVENING_PRICES)))
+        )
+
+        assert resolver.windows(NOW).evening_sell == RankedMarketWindow(
+            primary=window(17, 18, price=1.30), secondary=window(18, 19, price=1.25)
+        )
+
+    def test_tomorrows_sell_windows_rank_only_tomorrows_prices(self) -> None:
+        resolver = _resolver(
+            coordinator=_coordinator(
+                _sell_payload(
+                    prices_today=_hourly(8, MORNING_PRICES) + _hourly(8, EVENING_PRICES),
+                    prices_tomorrow=_hourly(9, {5: 1.50, 6: 1.40, 7: 0.50})
+                    + _hourly(9, {18: 1.10, 19: 1.60, 20: 1.20}),
+                )
+            )
+        )
+
+        snapshot = resolver.windows(NOW)
+        assert snapshot.morning_sell_tomorrow == RankedMarketWindow(
+            primary=window(5, 6, price=1.50, next_day=True),
+            secondary=window(6, 7, price=1.40, next_day=True),
+        )
+        assert snapshot.evening_sell_tomorrow == RankedMarketWindow(
+            primary=window(19, 20, price=1.60, next_day=True),
+            secondary=window(20, 21, price=1.20, next_day=True),
+        )
+        assert snapshot.morning_sell.primary == window(7, 8, price=1.20)
+
+    def test_a_single_candidate_yields_a_default_primary_and_no_secondary(self) -> None:
+        resolver = _resolver(
+            coordinator=_coordinator(_sell_payload(prices_today=_hourly(8, {17: 1.30})))
+        )
+
+        ranked = resolver.windows(NOW).evening_sell
+        assert ranked.primary == default_market_windows(NOW).evening_sell.primary
+        assert ranked.secondary is None
