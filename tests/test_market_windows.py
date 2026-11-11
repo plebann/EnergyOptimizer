@@ -10,6 +10,8 @@ import pytest
 
 from custom_components.energy_optimizer.const import (
     CONF_BUY_PRICE_SENSOR,
+    CONF_HIGH_TARIFF_END_HOUR_SENSOR,
+    CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     CONF_SELL_PRICE_SENSOR,
     DOMAIN,
 )
@@ -584,3 +586,82 @@ class TestCoordinatorMarketWindowResolverDefaults:
         resolver = _resolver()
 
         assert resolver.windows(NOW) == default_market_windows(NOW)
+
+
+class TestCoordinatorMarketWindowResolverHighTariff:
+    def test_start_hour_comes_from_the_configured_entity(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.tariff_start": "16"}),
+            entry=_entry(**{CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start"}),
+        )
+
+        assert resolver.windows(NOW).high_tariff_start == ResolvedHour(
+            16, MarketWindowSource.CONFIG_ENTITY
+        )
+
+    def test_end_hour_comes_from_the_configured_entity(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.tariff_end": "14:00"}),
+            entry=_entry(**{CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end"}),
+        )
+
+        assert resolver.windows(NOW).high_tariff_end == ResolvedHour(
+            14, MarketWindowSource.CONFIG_ENTITY
+        )
+
+    def test_a_start_hour_outside_0_to_23_falls_back_to_the_default(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.tariff_start": "24"}),
+            entry=_entry(**{CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start"}),
+        )
+
+        assert resolver.windows(NOW).high_tariff_start == ResolvedHour(
+            15, MarketWindowSource.DEFAULT
+        )
+
+    def test_an_end_hour_below_7_falls_back_to_the_default(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.tariff_end": "6"}),
+            entry=_entry(**{CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end"}),
+        )
+
+        assert resolver.windows(NOW).high_tariff_end == ResolvedHour(
+            13, MarketWindowSource.DEFAULT
+        )
+
+    def test_an_end_hour_of_24_is_accepted(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.tariff_end": "24"}),
+            entry=_entry(**{CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end"}),
+        )
+
+        assert resolver.windows(NOW).high_tariff_end.hour == 24
+
+    def test_an_unparseable_or_unavailable_state_falls_back_to_the_default(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.tariff_start": "soon", "sensor.tariff_end": "unavailable"}),
+            entry=_entry(
+                **{
+                    CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start",
+                    CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end",
+                }
+            ),
+        )
+
+        snapshot = resolver.windows(NOW)
+        assert snapshot.high_tariff_start == ResolvedHour(15, MarketWindowSource.DEFAULT)
+        assert snapshot.high_tariff_end == ResolvedHour(13, MarketWindowSource.DEFAULT)
+
+    def test_default_day_buy_windows_end_at_the_configured_tariff_start(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.tariff_start": "16"}),
+            entry=_entry(**{CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start"}),
+        )
+
+        snapshot = resolver.windows(NOW)
+        assert (snapshot.day_buy.start, snapshot.day_buy.end) == (_dt(8, 14), _dt(8, 16))
+        assert snapshot.day_buy.is_fallback is True
+        assert (snapshot.day_buy_next.start, snapshot.day_buy_next.end) == (
+            _dt(9, 14),
+            _dt(9, 16),
+        )

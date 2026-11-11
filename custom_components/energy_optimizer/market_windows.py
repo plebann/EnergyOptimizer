@@ -1,15 +1,23 @@
 """Market Window Resolver vocabulary: resolved windows, snapshot and adapters."""
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, fields, replace
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from enum import StrEnum
+import logging
 from math import isfinite
 from typing import TYPE_CHECKING, Final, Literal, Protocol
 
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, NIGHT_BUY_WINDOW_END_HOUR, NIGHT_BUY_WINDOW_START_HOUR
+from .const import (
+    CONF_HIGH_TARIFF_END_HOUR_SENSOR,
+    CONF_HIGH_TARIFF_START_HOUR_SENSOR,
+    DOMAIN,
+    NIGHT_BUY_WINDOW_END_HOUR,
+    NIGHT_BUY_WINDOW_START_HOUR,
+)
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -17,6 +25,8 @@ if TYPE_CHECKING:
     from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
     from .night_buy_window_manager import NightBuyWindowPlanManager
+
+_LOGGER = logging.getLogger(__name__)
 
 DefaultReason = Literal["unavailable", "unreliable"]
 
@@ -334,8 +344,44 @@ class StaticMarketWindowResolver:
         return self._windows
 
 
+_UNAVAILABLE_STATES: Final = frozenset({"unknown", "unavailable"})
+
+# A Market Window Source chain: sources in priority order, each answering None
+# when it cannot supply the value and raising when its data is invalid.
+_HourChain = Iterable[tuple[MarketWindowSource, Callable[[], int | None]]]
+
+
+def _parse_hour(state_value: object) -> int | None:
+    """Parse an hour from a datetime, time or numeric entity state."""
+    raw_value = str(state_value)
+    dt_value = dt_util.parse_datetime(raw_value)
+    if dt_value is not None:
+        return dt_util.as_local(dt_value).hour
+    time_value = dt_util.parse_time(raw_value)
+    if time_value is not None:
+        return time_value.hour
+    return int(float(raw_value))
+
+
+def _first_hour(chain: _HourChain, *, default: int, name: str) -> ResolvedHour:
+    """Resolve an hour from the first source that supplies one."""
+    for source, supply in chain:
+        try:
+            hour = supply()
+        except Exception:  # noqa: BLE001 - a resolver never raises
+            _LOGGER.warning("%s from %s is invalid, trying the next source", name, source, exc_info=True)
+            continue
+        if hour is not None:
+            return ResolvedHour(hour, source)
+    return ResolvedHour(default, MarketWindowSource.DEFAULT)
+
+
 class CoordinatorMarketWindowResolver:
-    """Production resolver over the coordinator, the plan manager and `hass.states`."""
+    """Production resolver over the coordinator, the plan manager and `hass.states`.
+
+    Each snapshot field is resolved by one ordered Market Window Source chain;
+    adding a source is a chain position, adding a window is a field plus a chain.
+    """
 
     def __init__(
         self,
@@ -352,7 +398,61 @@ class CoordinatorMarketWindowResolver:
     def windows(self, now: datetime | None = None) -> MarketWindows:
         """Resolve every Market Window at `now` (default: Home Assistant local now)."""
         current = now or dt_util.now()
-        return default_market_windows(current)
+        high_tariff_start = _first_hour(
+            [
+                (
+                    MarketWindowSource.CONFIG_ENTITY,
+                    lambda: self._config_hour(
+                        CONF_HIGH_TARIFF_START_HOUR_SENSOR, lowest=0, highest=23
+                    ),
+                )
+            ],
+            default=DEFAULT_HIGH_TARIFF_START_HOUR,
+            name="High-Tariff start hour",
+        )
+        high_tariff_end = _first_hour(
+            [
+                (
+                    MarketWindowSource.CONFIG_ENTITY,
+                    lambda: self._config_hour(
+                        CONF_HIGH_TARIFF_END_HOUR_SENSOR, lowest=7, highest=24
+                    ),
+                )
+            ],
+            default=DEFAULT_HIGH_TARIFF_END_HOUR,
+            name="High-Tariff end hour",
+        )
+        defaults = default_market_windows(current)
+        day_buy_end = datetime.combine(
+            defaults.night_buy.plan_date, time(high_tariff_start.hour), tzinfo=current.tzinfo
+        )
+        return replace(
+            defaults,
+            day_buy=_default_buy_window(
+                current,
+                (high_tariff_start.hour - DEFAULT_DAY_BUY_DURATION_HOURS) % 24,
+                high_tariff_start.hour,
+                reason="unavailable",
+            ),
+            day_buy_next=_default_window(
+                day_buy_end - timedelta(hours=DEFAULT_DAY_BUY_DURATION_HOURS),
+                day_buy_end,
+                reason="unavailable",
+            ),
+            high_tariff_start=high_tariff_start,
+            high_tariff_end=high_tariff_end,
+        )
+
+    def _config_hour(self, config_key: str, *, lowest: int, highest: int) -> int | None:
+        """Read an hour inside [lowest, highest] from the configured entity."""
+        entity_id = self._entry.data.get(config_key)
+        state = self._hass.states.get(str(entity_id)) if entity_id else None
+        if state is None or state.state in _UNAVAILABLE_STATES:
+            return None
+        hour = _parse_hour(state.state)
+        if not lowest <= hour <= highest:
+            raise ValueError(f"hour {hour} outside {lowest}-{highest}")
+        return hour
 
 
 def market_window_resolver(hass: HomeAssistant, entry_id: str) -> MarketWindowResolver:
