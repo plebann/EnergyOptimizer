@@ -145,6 +145,10 @@ class TestResolvedMarketWindow:
         with pytest.raises(ValueError):
             _window(datetime(2026, 5, 8, 13), datetime(2026, 5, 8, 15))
 
+    def test_a_non_finite_price_is_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            _window(_dt(8, 13), _dt(8, 15), price=float("nan"))
+
     @pytest.mark.parametrize(
         ("source", "reason"),
         [
@@ -312,11 +316,22 @@ class TestDefaultMarketWindows:
             _dt(10, 6),
         )
 
-    def test_completed_night_and_next_day_buy_default_to_the_same_windows(self) -> None:
+    def test_completed_night_defaults_to_the_night_that_ended_this_morning(self) -> None:
         defaults = default_market_windows(_dt(8, 12))
 
-        assert defaults.night_buy_completed == defaults.night_buy
-        assert defaults.day_buy_next == defaults.day_buy
+        completed = defaults.night_buy_completed
+        assert (completed.start, completed.end) == (_dt(7, 22), _dt(8, 6))
+        assert completed.plan_date == _dt(8, 0).date()
+        assert completed.is_fallback is True
+
+    def test_next_day_buy_defaults_to_the_morning_the_night_buy_ends_on(self) -> None:
+        defaults = default_market_windows(_dt(8, 12))
+
+        assert (defaults.day_buy_next.start, defaults.day_buy_next.end) == (
+            _dt(9, 13),
+            _dt(9, 15),
+        )
+        assert defaults.day_buy_for(defaults.night_buy.plan_date) is defaults.day_buy_next
 
     def test_an_unreliable_reason_is_carried_by_every_default_window(self) -> None:
         defaults = default_market_windows(_dt(8, 12), reason="unreliable")

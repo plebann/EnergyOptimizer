@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from enum import StrEnum
+from math import isfinite
 from typing import Final, Literal, Protocol
 
 from .const import NIGHT_BUY_WINDOW_END_HOUR, NIGHT_BUY_WINDOW_START_HOUR
@@ -38,6 +39,8 @@ class ResolvedMarketWindow:
             raise ValueError(
                 f"Market Window end {self.end} must be after start {self.start}"
             )
+        if self.price is not None and not isfinite(self.price):
+            raise ValueError(f"Market Window price must be finite, got {self.price}")
         if (self.reason is None) == (self.source is MarketWindowSource.DEFAULT):
             raise ValueError(
                 "Market Window reason is set exactly when the source is DEFAULT"
@@ -206,7 +209,15 @@ def default_market_windows(
     return MarketWindows(
         now=now,
         night_buy=night_buy,
-        night_buy_completed=night_buy,
+        night_buy_completed=ResolvedMarketWindow(
+            start=datetime.combine(
+                today - timedelta(days=1), time(NIGHT_BUY_WINDOW_START_HOUR), tzinfo=tz
+            ),
+            end=datetime.combine(today, time(NIGHT_BUY_WINDOW_END_HOUR), tzinfo=tz),
+            price=None,
+            source=MarketWindowSource.DEFAULT,
+            reason=reason,
+        ),
         night_buy_after=ResolvedMarketWindow(
             start=datetime.combine(
                 night_buy.plan_date + timedelta(days=1), time.min, tzinfo=tz
@@ -221,7 +232,19 @@ def default_market_windows(
             reason=reason,
         ),
         day_buy=day_buy,
-        day_buy_next=day_buy,
+        day_buy_next=ResolvedMarketWindow(
+            start=datetime.combine(
+                night_buy.plan_date,
+                time(DEFAULT_HIGH_TARIFF_START_HOUR - DEFAULT_DAY_BUY_DURATION_HOURS),
+                tzinfo=tz,
+            ),
+            end=datetime.combine(
+                night_buy.plan_date, time(DEFAULT_HIGH_TARIFF_START_HOUR), tzinfo=tz
+            ),
+            price=None,
+            source=MarketWindowSource.DEFAULT,
+            reason=reason,
+        ),
         morning_sell=_default_ranked(today, DEFAULT_MORNING_SELL_HOUR, tz, reason=reason),
         morning_sell_tomorrow=_default_ranked(
             tomorrow, DEFAULT_MORNING_SELL_HOUR, tz, reason=reason
