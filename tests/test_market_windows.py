@@ -87,6 +87,24 @@ ALL_WINDOW_FIELDS = frozenset(
 )
 
 
+class TestMarketWindowSource:
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            ("PLAN", "plan"),
+            ("PRICES", "prices"),
+            ("CONFIG_ENTITY", "config_entity"),
+            ("LEGACY_ENTITY", "legacy_entity"),
+            ("DEFAULT", "default"),
+        ],
+    )
+    def test_names_every_market_window_source(self, name: str, value: str) -> None:
+        assert MarketWindowSource[name] == value
+
+    def test_has_no_other_source(self) -> None:
+        assert len(MarketWindowSource) == 5
+
+
 class TestResolvedMarketWindow:
     def test_hours_are_derived_from_a_window_spanning_midnight(self) -> None:
         night = _window(_dt(8, 22), _dt(9, 6))
@@ -136,6 +154,12 @@ class TestResolvedMarketWindow:
         assert night.contains(_dt(9, 2, 30)) is True
         assert night.contains(_dt(9, 6)) is False
         assert night.contains(_dt(8, 21, 59)) is False
+
+    def test_a_resolved_window_cannot_be_changed(self) -> None:
+        resolved = _window(_dt(8, 13), _dt(8, 15))
+
+        with pytest.raises(FrozenInstanceError):
+            resolved.price = 9.9  # type: ignore[misc]
 
     def test_end_must_be_after_start(self) -> None:
         with pytest.raises(ValueError):
@@ -231,6 +255,15 @@ class TestDefaultMarketWindows:
             source=MarketWindowSource.DEFAULT,
             reason="unavailable",
         )
+
+    def test_night_buy_default_after_midnight_is_the_coming_night(self) -> None:
+        defaults = default_market_windows(_dt(9, 2))
+
+        assert (defaults.night_buy.start, defaults.night_buy.end) == (
+            _dt(9, 22),
+            _dt(10, 6),
+        )
+        assert defaults.night_buy.contains(_dt(9, 2)) is False
 
     def test_day_buy_defaults_to_the_two_hours_before_the_high_tariff_start(
         self,
