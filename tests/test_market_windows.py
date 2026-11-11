@@ -3,11 +3,18 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from custom_components.energy_optimizer.const import (
+    CONF_BUY_PRICE_SENSOR,
+    CONF_SELL_PRICE_SENSOR,
+    DOMAIN,
+)
 from custom_components.energy_optimizer.market_windows import (
+    CoordinatorMarketWindowResolver,
     MarketWindows,
     MarketWindowSource,
     RankedMarketWindow,
@@ -15,8 +22,13 @@ from custom_components.energy_optimizer.market_windows import (
     ResolvedMarketWindow,
     StaticMarketWindowResolver,
     default_market_windows,
+    market_window_resolver,
 )
-from tests.conftest import market_windows, window
+from custom_components.energy_optimizer.night_buy_window import NightBuyWindowPlan
+from custom_components.energy_optimizer.night_buy_window_manager import (
+    NightBuyWindowPlanManager,
+)
+from tests.conftest import MARKET_WINDOWS_NOW, market_windows, window
 
 TZ = ZoneInfo("Europe/Warsaw")
 
@@ -473,3 +485,102 @@ class TestBuilders:
         assert snapshot.night_buy == window(22, 6, price=0.45)
         assert snapshot.now == _dt(8, 12)
         assert snapshot.evening_sell == default_market_windows(_dt(8, 12)).evening_sell
+
+
+class TestMarketWindowResolverAccessor:
+    def test_returns_the_resolver_stored_under_market_windows(self) -> None:
+        hass = MagicMock()
+        resolver = StaticMarketWindowResolver(_snapshot())
+        hass.data = {DOMAIN: {"entry-1": {"market_windows": resolver}}}
+
+        assert market_window_resolver(hass, "entry-1") is resolver
+
+
+# --- Production adapter -----------------------------------------------------
+
+NOW = MARKET_WINDOWS_NOW  # 2026-05-08 12:00 Europe/Warsaw
+BUY = "sensor.buy"
+SELL = "sensor.sell"
+
+
+def _state(value: object, **attributes: object) -> MagicMock:
+    state = MagicMock()
+    state.state = value
+    state.attributes = attributes
+    return state
+
+
+def _hass(states: dict[str, object] | None = None) -> MagicMock:
+    """A hass stub whose `states.get` answers from `states` (a value or a state)."""
+    hass = MagicMock()
+    hass.data = {}
+    table = {
+        entity_id: value if isinstance(value, MagicMock) else _state(value)
+        for entity_id, value in (states or {}).items()
+    }
+    hass.states.get = lambda entity_id: table.get(entity_id)
+    return hass
+
+
+def _entry(**data: object) -> MagicMock:
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {CONF_BUY_PRICE_SENSOR: BUY, CONF_SELL_PRICE_SENSOR: SELL, **data}
+    entry.options = {}
+    return entry
+
+
+def _coordinator(payloads: dict[str, dict[str, list]] | None = None) -> MagicMock:
+    coordinator = MagicMock()
+    coordinator.data = {"states": {}, "price_payloads": payloads or {}}
+    return coordinator
+
+
+def _manager(
+    hass: MagicMock,
+    entry: MagicMock,
+    *,
+    night: NightBuyWindowPlan | None = None,
+    night_next: NightBuyWindowPlan | None = None,
+    day: NightBuyWindowPlan | None = None,
+    day_next: NightBuyWindowPlan | None = None,
+) -> NightBuyWindowPlanManager:
+    """A real plan manager fed in memory (prior art: test_night_buy_window_manager)."""
+    manager = NightBuyWindowPlanManager(hass, entry)
+    manager._current = night
+    manager._upcoming = night_next
+    manager._day_current = day
+    manager._day_upcoming = day_next
+    return manager
+
+
+def _plan(start: datetime, end: datetime, price: float) -> NightBuyWindowPlan:
+    return NightBuyWindowPlan(start=start, end=end, price=price)
+
+
+def _hourly(day: int, prices_by_hour: dict[int, float]) -> list[dict[str, object]]:
+    return [
+        {"time": _dt(day, hour).isoformat(), "price": price}
+        for hour, price in prices_by_hour.items()
+    ]
+
+
+def _resolver(
+    *,
+    hass: MagicMock | None = None,
+    entry: MagicMock | None = None,
+    coordinator: MagicMock | None = None,
+    **plans: NightBuyWindowPlan | None,
+) -> CoordinatorMarketWindowResolver:
+    hass = hass or _hass()
+    entry = entry or _entry()
+    return CoordinatorMarketWindowResolver(
+        hass, entry, coordinator or _coordinator(), _manager(hass, entry, **plans)
+    )
+
+
+class TestCoordinatorMarketWindowResolverDefaults:
+    def test_without_plans_prices_or_entities_every_window_is_a_default(self) -> None:
+        resolver = _resolver()
+
+        assert resolver.windows(NOW) == default_market_windows(NOW)

@@ -19,6 +19,7 @@ from .const import (
     SERVICE_OVERNIGHT_SCHEDULE,
 )
 from .coordinator import EnergyOptimizerCoordinator
+from .market_windows import CoordinatorMarketWindowResolver
 from .scheduler.action_scheduler import ActionScheduler
 from .services import async_register_services
 from .utils.decision_dump import emit_config_snapshot
@@ -164,6 +165,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_restore_night_buy_window_plans()
     await coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id]["coordinator"] = coordinator
+    hass.data[DOMAIN][entry.entry_id]["market_windows"] = (
+        CoordinatorMarketWindowResolver(
+            hass, entry, coordinator, coordinator.buy_window_manager
+        )
+    )
     emit_config_snapshot(hass, entry)
 
     # Entries created before the in-UI SOC band validation may still persist

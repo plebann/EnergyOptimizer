@@ -5,9 +5,18 @@ from dataclasses import dataclass, fields
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from enum import StrEnum
 from math import isfinite
-from typing import Final, Literal, Protocol
+from typing import TYPE_CHECKING, Final, Literal, Protocol
 
-from .const import NIGHT_BUY_WINDOW_END_HOUR, NIGHT_BUY_WINDOW_START_HOUR
+from homeassistant.util import dt as dt_util
+
+from .const import DOMAIN, NIGHT_BUY_WINDOW_END_HOUR, NIGHT_BUY_WINDOW_START_HOUR
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
+    from .night_buy_window_manager import NightBuyWindowPlanManager
 
 DefaultReason = Literal["unavailable", "unreliable"]
 
@@ -323,3 +332,29 @@ class StaticMarketWindowResolver:
     ) -> MarketWindows:
         """Return the given snapshot unchanged, whatever `now` is."""
         return self._windows
+
+
+class CoordinatorMarketWindowResolver:
+    """Production resolver over the coordinator, the plan manager and `hass.states`."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        coordinator: DataUpdateCoordinator,
+        manager: NightBuyWindowPlanManager,
+    ) -> None:
+        self._hass = hass
+        self._entry = entry
+        self._coordinator = coordinator
+        self._manager = manager
+
+    def windows(self, now: datetime | None = None) -> MarketWindows:
+        """Resolve every Market Window at `now` (default: Home Assistant local now)."""
+        current = now or dt_util.now()
+        return default_market_windows(current)
+
+
+def market_window_resolver(hass: HomeAssistant, entry_id: str) -> MarketWindowResolver:
+    """Return the entry's Market Window Resolver: the only ``hass.data`` lookup for it."""
+    return hass.data[DOMAIN][entry_id]["market_windows"]
