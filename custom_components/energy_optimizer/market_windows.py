@@ -1,7 +1,7 @@
 """Market Window Resolver vocabulary: resolved windows, snapshot and adapters."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
@@ -71,3 +71,59 @@ class ResolvedMarketWindow:
     def contains(self, now: datetime) -> bool:
         """Return True when `now` falls inside the window (end exclusive)."""
         return self.start <= now < self.end
+
+
+@dataclass(frozen=True, slots=True)
+class RankedMarketWindow:
+    """A Primary Market Window with its optional Secondary Market Window."""
+
+    primary: ResolvedMarketWindow
+    secondary: ResolvedMarketWindow | None
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedHour:
+    """A High-Tariff boundary: an hour, not a window."""
+
+    hour: int
+    source: MarketWindowSource
+
+
+@dataclass(frozen=True, slots=True)
+class MarketWindows:
+    """Every Market Window the decision engine reads, anchored at `now`."""
+
+    now: datetime
+    night_buy: ResolvedMarketWindow
+    night_buy_completed: ResolvedMarketWindow
+    night_buy_after: ResolvedMarketWindow
+    day_buy: ResolvedMarketWindow
+    day_buy_next: ResolvedMarketWindow
+    morning_sell: RankedMarketWindow
+    morning_sell_tomorrow: RankedMarketWindow
+    evening_sell: RankedMarketWindow
+    evening_sell_tomorrow: RankedMarketWindow
+    consume: ResolvedMarketWindow
+    consume_tomorrow: ResolvedMarketWindow
+    morning_sell_buy_reference: ResolvedMarketWindow
+    high_tariff_start: ResolvedHour
+    high_tariff_end: ResolvedHour
+
+    def changed_from(self, previous: MarketWindows | None) -> frozenset[str]:
+        """Return the window fields whose value differs from `previous`."""
+        names = [f.name for f in fields(self) if f.name != "now"]
+        if previous is None:
+            return frozenset(names)
+        return frozenset(
+            name
+            for name in names
+            if getattr(self, name) != getattr(previous, name)
+        )
+
+    def day_buy_for(self, plan_date: date) -> ResolvedMarketWindow | None:
+        """Return the Day Buy Window keyed by `plan_date`, if the snapshot has one."""
+        if self.day_buy.plan_date == plan_date:
+            return self.day_buy
+        if self.day_buy_next.plan_date == plan_date:
+            return self.day_buy_next
+        return None
