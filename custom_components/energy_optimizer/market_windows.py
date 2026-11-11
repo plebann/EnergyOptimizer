@@ -317,6 +317,8 @@ class StaticMarketWindowResolver:
     def __init__(self, windows: MarketWindows) -> None:
         self._windows = windows
 
-    def windows(self, now: datetime | None = None) -> MarketWindows:
+    def windows(  # NOSONAR S1172: `now` is the MarketWindowResolver signature
+        self, now: datetime | None = None
+    ) -> MarketWindows:
         """Return the given snapshot unchanged, whatever `now` is."""
         return self._windows
