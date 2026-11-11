@@ -159,6 +159,16 @@ class TestResolvedMarketWindow:
         assert night.contains(_dt(9, 6)) is False
         assert night.contains(_dt(8, 21, 59)) is False
 
+    def test_contains_compares_instants_in_the_repeated_dst_hour(self) -> None:
+        # 2026-10-25: Warsaw repeats 02:00-03:00; fold=1 is the second pass.
+        second_two = datetime(2026, 10, 25, 2, tzinfo=TZ, fold=1)
+        first_two_thirty = datetime(2026, 10, 25, 2, 30, tzinfo=TZ)
+        after_fold = _window(second_two, datetime(2026, 10, 25, 4, tzinfo=TZ))
+
+        assert after_fold.contains(first_two_thirty) is False
+        assert after_fold.contains(first_two_thirty.astimezone(UTC)) is False
+        assert after_fold.contains(second_two.astimezone(UTC)) is True
+
     def test_a_resolved_window_cannot_be_changed(self) -> None:
         resolved = _window(_dt(8, 13), _dt(8, 15))
 
@@ -168,6 +178,19 @@ class TestResolvedMarketWindow:
     def test_end_must_be_after_start(self) -> None:
         with pytest.raises(ValueError):
             _window(_dt(8, 15), _dt(8, 15))
+
+    def test_end_after_start_is_judged_by_instant_in_the_repeated_dst_hour(
+        self,
+    ) -> None:
+        first_two = datetime(2026, 10, 25, 2, tzinfo=TZ)
+        second_two = datetime(2026, 10, 25, 2, tzinfo=TZ, fold=1)
+        first_two_thirty = datetime(2026, 10, 25, 2, 30, tzinfo=TZ)
+
+        repeated_hour = _window(first_two, second_two)
+        assert repeated_hour.duration_hours == 1.0
+
+        with pytest.raises(ValueError):
+            _window(second_two, first_two_thirty)
 
     def test_naive_datetimes_are_rejected(self) -> None:
         with pytest.raises(ValueError):

@@ -35,7 +35,7 @@ class ResolvedMarketWindow:
     def __post_init__(self) -> None:
         if self.start.tzinfo is None or self.end.tzinfo is None:
             raise ValueError("Market Window datetimes must be tz-aware")
-        if self.end <= self.start:
+        if self.end.astimezone(UTC) <= self.start.astimezone(UTC):
             raise ValueError(
                 f"Market Window end {self.end} must be after start {self.start}"
             )
@@ -78,8 +78,13 @@ class ResolvedMarketWindow:
         return default if self.is_fallback else self.hour
 
     def contains(self, now: datetime) -> bool:
-        """Return True when `now` falls inside the window (end exclusive)."""
-        return self.start <= now < self.end
+        """Return True when `now` falls inside the window (end exclusive).
+
+        Compared as instants: same-zone datetimes would otherwise compare by
+        wall time and ignore ``fold`` in the repeated DST hour.
+        """
+        instant = now.astimezone(UTC)
+        return self.start.astimezone(UTC) <= instant < self.end.astimezone(UTC)
 
 
 @dataclass(frozen=True, slots=True)
