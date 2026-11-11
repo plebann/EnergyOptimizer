@@ -807,3 +807,31 @@ class TestCoordinatorMarketWindowResolverSellWindows:
         ranked = resolver.windows(NOW).evening_sell
         assert ranked.primary == default_market_windows(NOW).evening_sell.primary
         assert ranked.secondary is None
+
+
+def _consume_prices(day: int, cheap_start: int) -> list[dict[str, object]]:
+    return _hourly(
+        day, {hour: 0.5 if cheap_start <= hour < cheap_start + 2 else 1.0 for hour in range(8, 16)}
+    )
+
+
+class TestCoordinatorMarketWindowResolverConsume:
+    def test_consume_is_the_cheapest_two_hours_of_todays_sell_prices(self) -> None:
+        resolver = _resolver(
+            coordinator=_coordinator(_sell_payload(prices_today=_consume_prices(8, 10)))
+        )
+
+        assert resolver.windows(NOW).consume == window(10, 12, price=0.5)
+
+    def test_consume_tomorrow_uses_only_tomorrows_sell_prices(self) -> None:
+        resolver = _resolver(
+            coordinator=_coordinator(
+                _sell_payload(
+                    prices_today=_consume_prices(8, 10), prices_tomorrow=_consume_prices(9, 13)
+                )
+            )
+        )
+
+        snapshot = resolver.windows(NOW)
+        assert snapshot.consume_tomorrow == window(13, 15, price=0.5, next_day=True)
+        assert snapshot.consume == window(10, 12, price=0.5)

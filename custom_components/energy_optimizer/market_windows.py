@@ -11,7 +11,10 @@ from typing import TYPE_CHECKING, Final, Literal, Protocol
 
 from homeassistant.util import dt as dt_util
 
-from .calculations.price_windows import build_ranked_sell_window_result
+from .calculations.price_windows import (
+    build_consume_window_result,
+    build_ranked_sell_window_result,
+)
 from .const import (
     CONF_BUY_PRICE_SENSOR,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
@@ -467,6 +470,16 @@ def _ranked_from_prices(
     )
 
 
+def _consume_from_prices(prices: object, entity_id: str, now_local: datetime) -> _Span | None:
+    """Select the cheapest Consume Window of `now_local`'s day from sell prices."""
+    if not isinstance(prices, list) or not prices:
+        return None
+    result = build_consume_window_result(prices, entity_id, now_local=now_local)
+    if result is None:
+        return None
+    return result.start_local, result.end_local, result.average_price
+
+
 def _combined_prices(payload: object) -> list[dict[str, object]] | None:
     """Return a payload's combined price list, or today's and tomorrow's joined."""
     if not isinstance(payload, dict):
@@ -622,11 +635,28 @@ class CoordinatorMarketWindowResolver:
                 name="ranked sell window",
             )
 
+        def consume(prices: object, day: date) -> ResolvedMarketWindow:
+            now_local = current if day == today else tomorrow_local
+            return _first_window(
+                [
+                    (
+                        MarketWindowSource.PRICES,
+                        lambda: _consume_from_prices(prices, sell_entity, now_local),
+                    )
+                ],
+                default=lambda reason: _default_hour_window(
+                    day, DEFAULT_CONSUME_HOUR, tz, reason=reason
+                ),
+                name="Consume Window",
+            )
+
         return replace(
             defaults,
             night_buy=night_buy,
             night_buy_completed=night_buy_completed,
             night_buy_after=night_buy_after,
+            consume=consume(sell_today, today),
+            consume_tomorrow=consume(sell_tomorrow, tomorrow),
             morning_sell=ranked(
                 sell_today, MORNING_SELL_RANGE_HOURS, today, DEFAULT_MORNING_SELL_HOUR
             ),
