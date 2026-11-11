@@ -196,7 +196,11 @@ def _default_ranked(
 def default_market_windows(
     now: datetime, *, reason: DefaultReason = "unavailable"
 ) -> MarketWindows:
-    """Build a snapshot of Default Market Windows at today's default hours."""
+    """Build a snapshot of Default Market Windows at today's default hours.
+
+    `now` must be in Home Assistant's local time zone (the adapter passes
+    `dt_util.now()`); hours are projected in `now`'s zone, never converted.
+    """
     night_buy = _default_buy_window(now, *DEFAULT_NIGHT_BUY_HOURS, reason=reason)
     day_buy = _default_buy_window(
         now,
