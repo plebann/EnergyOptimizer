@@ -16,6 +16,7 @@ from custom_components.energy_optimizer.market_windows import (
     StaticMarketWindowResolver,
     default_market_windows,
 )
+from tests.conftest import MARKET_WINDOWS_NOW, market_windows, window
 
 TZ = ZoneInfo("Europe/Warsaw")
 
@@ -313,3 +314,27 @@ class TestStaticMarketWindowResolver:
 
         assert resolver.windows() is snapshot
         assert resolver.windows(now=_dt(9, 3)) is snapshot
+
+
+class TestBuilders:
+    def test_window_builds_a_price_window_on_the_anchor_day(self) -> None:
+        built = window(13, 15, price=0.6)
+
+        assert (built.start, built.end, built.price, built.source) == (
+            _dt(8, 13),
+            _dt(8, 15),
+            0.6,
+            MarketWindowSource.PRICES,
+        )
+
+    def test_window_spanning_midnight_can_be_placed_on_the_next_day(self) -> None:
+        built = window(22, 6, price=0.45, next_day=True)
+
+        assert (built.start, built.end) == (_dt(9, 22), _dt(10, 6))
+
+    def test_market_windows_overrides_one_field_and_defaults_the_rest(self) -> None:
+        snapshot = market_windows(night_buy=window(22, 6, price=0.45))
+
+        assert snapshot.night_buy == window(22, 6, price=0.45)
+        assert snapshot.now == _dt(8, 12)
+        assert snapshot.evening_sell == default_market_windows(_dt(8, 12)).evening_sell
