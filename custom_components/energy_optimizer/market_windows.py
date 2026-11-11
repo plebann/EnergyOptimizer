@@ -18,8 +18,16 @@ from .calculations.price_windows import (
 )
 from .const import (
     CONF_BUY_PRICE_SENSOR,
+    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
+    CONF_DAYTIME_MIN_PRICE_SENSOR,
+    CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
+    CONF_EVENING_MAX_PRICE_SENSOR,
+    CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
+    CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
+    CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
+    CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_SELL_PRICE_SENSOR,
     DOMAIN,
     NIGHT_BUY_WINDOW_END_HOUR,
@@ -367,16 +375,24 @@ _RankedSpans = tuple[_Span, _Span | None]
 _RankedChain = Iterable[tuple[MarketWindowSource, Callable[[], _RankedSpans | None]]]
 
 
-def _parse_hour(state_value: object) -> int | None:
-    """Parse an hour from a datetime, time or numeric entity state."""
+def _parse_time(state_value: object) -> time:
+    """Parse a wall time from a datetime, time or whole-hour numeric entity state."""
     raw_value = str(state_value)
     dt_value = dt_util.parse_datetime(raw_value)
     if dt_value is not None:
-        return dt_util.as_local(dt_value).hour
+        return dt_util.as_local(dt_value).time()
     time_value = dt_util.parse_time(raw_value)
     if time_value is not None:
-        return time_value.hour
-    return int(float(raw_value))
+        return time_value
+    return time(int(float(raw_value)))
+
+
+def _parse_hour(state_value: object) -> int:
+    """Parse an hour from a datetime, time or numeric entity state."""
+    raw_value = str(state_value)
+    if dt_util.parse_datetime(raw_value) is None and dt_util.parse_time(raw_value) is None:
+        return int(float(raw_value))
+    return _parse_time(raw_value).hour
 
 
 def _first_hour(chain: _HourChain, *, default: int, name: str) -> ResolvedHour:
@@ -645,30 +661,58 @@ class CoordinatorMarketWindowResolver:
         tomorrow = today + timedelta(days=1)
         tomorrow_local = current + timedelta(days=1)
 
+        def legacy_ranked(
+            hour_key: str,
+            price_key: str,
+            second_hour_key: str | None = None,
+            second_price_key: str | None = None,
+        ) -> _RankedSpans | None:
+            primary = self._legacy_span(hour_key, price_key, today, tz)
+            if primary is None:
+                return None
+            secondary = (
+                self._legacy_span(second_hour_key, second_price_key, today, tz)
+                if second_hour_key and second_price_key
+                else None
+            )
+            return primary, secondary
+
         def ranked(
-            prices: object, hours: tuple[int, int], day: date, default_hour: int
+            prices: object,
+            hours: tuple[int, int],
+            day: date,
+            default_hour: int,
+            legacy: Callable[[], _RankedSpans | None] | None = None,
         ) -> RankedMarketWindow:
             now_local = current if day == today else tomorrow_local
+            chain: list[tuple[MarketWindowSource, Callable[[], _RankedSpans | None]]] = [
+                (
+                    MarketWindowSource.PRICES,
+                    lambda: _ranked_from_prices(prices, sell_entity, hours, now_local),
+                )
+            ]
+            if legacy is not None:
+                chain.append((MarketWindowSource.LEGACY_ENTITY, legacy))
             return _first_ranked(
-                [
-                    (
-                        MarketWindowSource.PRICES,
-                        lambda: _ranked_from_prices(prices, sell_entity, hours, now_local),
-                    )
-                ],
+                chain,
                 default=lambda reason: _default_ranked(day, default_hour, tz, reason=reason),
                 name="ranked sell window",
             )
 
-        def consume(prices: object, day: date) -> ResolvedMarketWindow:
+        def consume(
+            prices: object, day: date, legacy: Callable[[], _Span | None] | None = None
+        ) -> ResolvedMarketWindow:
             now_local = current if day == today else tomorrow_local
+            chain: list[tuple[MarketWindowSource, Callable[[], _Span | None]]] = [
+                (
+                    MarketWindowSource.PRICES,
+                    lambda: _consume_from_prices(prices, sell_entity, now_local),
+                )
+            ]
+            if legacy is not None:
+                chain.append((MarketWindowSource.LEGACY_ENTITY, legacy))
             return _first_window(
-                [
-                    (
-                        MarketWindowSource.PRICES,
-                        lambda: _consume_from_prices(prices, sell_entity, now_local),
-                    )
-                ],
+                chain,
                 default=lambda reason: _default_hour_window(
                     day, DEFAULT_CONSUME_HOUR, tz, reason=reason
                 ),
@@ -676,7 +720,13 @@ class CoordinatorMarketWindowResolver:
             )
 
         morning_sell = ranked(
-            sell_today, MORNING_SELL_RANGE_HOURS, today, DEFAULT_MORNING_SELL_HOUR
+            sell_today,
+            MORNING_SELL_RANGE_HOURS,
+            today,
+            DEFAULT_MORNING_SELL_HOUR,
+            legacy=lambda: legacy_ranked(
+                CONF_MORNING_MAX_PRICE_HOUR_SENSOR, CONF_MORNING_MAX_PRICE_SENSOR
+            ),
         )
         buy_today = buy_payload.get("prices_today") if isinstance(buy_payload, dict) else None
         reference_start_hour = (morning_sell.primary.hour + 1) % 24
@@ -705,7 +755,13 @@ class CoordinatorMarketWindowResolver:
             night_buy=night_buy,
             night_buy_completed=night_buy_completed,
             night_buy_after=night_buy_after,
-            consume=consume(sell_today, today),
+            consume=consume(
+                sell_today,
+                today,
+                legacy=lambda: self._legacy_span(
+                    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR, CONF_DAYTIME_MIN_PRICE_SENSOR, today, tz
+                ),
+            ),
             consume_tomorrow=consume(sell_tomorrow, tomorrow),
             morning_sell=morning_sell,
             morning_sell_buy_reference=morning_sell_buy_reference,
@@ -713,7 +769,16 @@ class CoordinatorMarketWindowResolver:
                 sell_tomorrow, MORNING_SELL_RANGE_HOURS, tomorrow, DEFAULT_MORNING_SELL_HOUR
             ),
             evening_sell=ranked(
-                sell_today, EVENING_SELL_RANGE_HOURS, today, DEFAULT_EVENING_SELL_HOUR
+                sell_today,
+                EVENING_SELL_RANGE_HOURS,
+                today,
+                DEFAULT_EVENING_SELL_HOUR,
+                legacy=lambda: legacy_ranked(
+                    CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
+                    CONF_EVENING_MAX_PRICE_SENSOR,
+                    CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
+                    CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
+                ),
             ),
             evening_sell_tomorrow=ranked(
                 sell_tomorrow, EVENING_SELL_RANGE_HOURS, tomorrow, DEFAULT_EVENING_SELL_HOUR
@@ -736,13 +801,32 @@ class CoordinatorMarketWindowResolver:
             build_night_buy_window_plan(prices, entity_id, end_date=end_date, local_tz=tz)
         )
 
-    def _config_hour(self, config_key: str, *, lowest: int, highest: int) -> int | None:
-        """Read an hour inside [lowest, highest] from the configured entity."""
+    def _entity_state(self, config_key: str) -> object | None:
+        """Return the state of the entity configured under `config_key`, if it has one."""
         entity_id = self._entry.data.get(config_key)
         state = self._hass.states.get(str(entity_id)) if entity_id else None
         if state is None or state.state in _UNAVAILABLE_STATES:
             return None
-        hour = _parse_hour(state.state)
+        return state.state
+
+    def _legacy_span(
+        self, time_key: str, price_key: str, day: date, tz: tzinfo
+    ) -> _Span | None:
+        """A one-hour window at a legacy hour entity's time, priced by its price entity."""
+        raw_time = self._entity_state(time_key)
+        if raw_time is None:
+            return None
+        start = datetime.combine(day, _parse_time(raw_time), tzinfo=tz)
+        raw_price = self._entity_state(price_key)
+        price = float(raw_price) if raw_price is not None else None
+        return start, start + timedelta(hours=1), price
+
+    def _config_hour(self, config_key: str, *, lowest: int, highest: int) -> int | None:
+        """Read an hour inside [lowest, highest] from the configured entity."""
+        raw_hour = self._entity_state(config_key)
+        if raw_hour is None:
+            return None
+        hour = _parse_hour(raw_hour)
         if not lowest <= hour <= highest:
             raise ValueError(f"hour {hour} outside {lowest}-{highest}")
         return hour

@@ -10,8 +10,16 @@ import pytest
 
 from custom_components.energy_optimizer.const import (
     CONF_BUY_PRICE_SENSOR,
+    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
+    CONF_DAYTIME_MIN_PRICE_SENSOR,
+    CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
+    CONF_EVENING_MAX_PRICE_SENSOR,
+    CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
+    CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
+    CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
+    CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_SELL_PRICE_SENSOR,
     DOMAIN,
 )
@@ -520,7 +528,7 @@ def _hass(states: dict[str, object] | None = None) -> MagicMock:
         entity_id: value if isinstance(value, MagicMock) else _state(value)
         for entity_id, value in (states or {}).items()
     }
-    hass.states.get = lambda entity_id: table.get(entity_id)
+    hass.states.get = MagicMock(side_effect=table.get)
     return hass
 
 
@@ -885,4 +893,103 @@ class TestCoordinatorMarketWindowResolverBuyReference:
             _dt(8, 13),
             None,
             MarketWindowSource.DEFAULT,
+        )
+
+
+def _legacy(
+    start: datetime, end: datetime, price: float | None
+) -> ResolvedMarketWindow:
+    return ResolvedMarketWindow(
+        start=start, end=end, price=price, source=MarketWindowSource.LEGACY_ENTITY
+    )
+
+
+EVENING_LEGACY = {
+    CONF_EVENING_MAX_PRICE_HOUR_SENSOR: "sensor.evening_hour",
+    CONF_EVENING_MAX_PRICE_SENSOR: "sensor.evening_price",
+    CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR: "sensor.evening_second_hour",
+    CONF_EVENING_SECOND_MAX_PRICE_SENSOR: "sensor.evening_second_price",
+}
+EVENING_LEGACY_STATES = {
+    "sensor.evening_hour": "18",
+    "sensor.evening_price": "1.25",
+    "sensor.evening_second_hour": "20",
+    "sensor.evening_second_price": "1.05",
+}
+
+
+class TestCoordinatorMarketWindowResolverLegacyEntities:
+    def test_evening_sell_reads_the_legacy_hour_and_price_entities_without_prices(
+        self,
+    ) -> None:
+        resolver = _resolver(hass=_hass(EVENING_LEGACY_STATES), entry=_entry(**EVENING_LEGACY))
+
+        assert resolver.windows(NOW).evening_sell == RankedMarketWindow(
+            primary=_legacy(_dt(8, 18), _dt(8, 19), 1.25),
+            secondary=_legacy(_dt(8, 20), _dt(8, 21), 1.05),
+        )
+
+    def test_morning_sell_reads_the_legacy_entities_and_has_no_secondary(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.morning_hour": "08:00", "sensor.morning_price": "1.1"}),
+            entry=_entry(
+                **{
+                    CONF_MORNING_MAX_PRICE_HOUR_SENSOR: "sensor.morning_hour",
+                    CONF_MORNING_MAX_PRICE_SENSOR: "sensor.morning_price",
+                }
+            ),
+        )
+
+        assert resolver.windows(NOW).morning_sell == RankedMarketWindow(
+            primary=_legacy(_dt(8, 8), _dt(8, 9), 1.1), secondary=None
+        )
+
+    def test_consume_reads_the_legacy_daytime_min_price_entities(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.min_hour": "11:30", "sensor.min_price": "0.2"}),
+            entry=_entry(
+                **{
+                    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR: "sensor.min_hour",
+                    CONF_DAYTIME_MIN_PRICE_SENSOR: "sensor.min_price",
+                }
+            ),
+        )
+
+        assert resolver.windows(NOW).consume == _legacy(_dt(8, 11, 30), _dt(8, 12, 30), 0.2)
+
+    def test_legacy_entities_are_not_read_while_prices_resolve_the_window(self) -> None:
+        hass = _hass(EVENING_LEGACY_STATES)
+        resolver = _resolver(
+            hass=hass,
+            entry=_entry(**EVENING_LEGACY),
+            coordinator=_coordinator(_sell_payload(prices_today=_hourly(8, EVENING_PRICES))),
+        )
+
+        evening = resolver.windows(NOW).evening_sell
+        assert evening.primary == window(17, 18, price=1.30)
+        read_entities = {call.args[0] for call in hass.states.get.call_args_list}
+        assert read_entities.isdisjoint(EVENING_LEGACY_STATES)
+
+    def test_an_unparseable_legacy_hour_yields_an_unreliable_default(self) -> None:
+        resolver = _resolver(
+            hass=_hass({**EVENING_LEGACY_STATES, "sensor.evening_hour": "soon"}),
+            entry=_entry(**EVENING_LEGACY),
+        )
+
+        evening = resolver.windows(NOW).evening_sell
+        assert evening.primary.start == _dt(8, 17)
+        assert (evening.primary.source, evening.primary.reason) == (
+            MarketWindowSource.DEFAULT,
+            "unreliable",
+        )
+        assert evening.secondary is None
+
+    def test_a_legacy_window_without_a_price_entity_has_no_price(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.morning_hour": "8"}),
+            entry=_entry(**{CONF_MORNING_MAX_PRICE_HOUR_SENSOR: "sensor.morning_hour"}),
+        )
+
+        assert resolver.windows(NOW).morning_sell.primary == _legacy(
+            _dt(8, 8), _dt(8, 9), None
         )
