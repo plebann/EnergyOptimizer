@@ -835,3 +835,54 @@ class TestCoordinatorMarketWindowResolverConsume:
         snapshot = resolver.windows(NOW)
         assert snapshot.consume_tomorrow == window(13, 15, price=0.5, next_day=True)
         assert snapshot.consume == window(10, 12, price=0.5)
+
+
+BUY_PRICES_TODAY = {6: 0.30, 7: 0.40, 8: 0.60, 9: 0.70, 10: 0.80, 11: 0.70, 12: 0.70, 13: 0.95, 14: 0.99}
+
+
+class TestCoordinatorMarketWindowResolverBuyReference:
+    def test_averages_buy_prices_from_the_hour_after_the_morning_sell_to_the_tariff_end(
+        self,
+    ) -> None:
+        resolver = _resolver(
+            coordinator=_coordinator(_buy_payload(prices_today=_hourly(8, BUY_PRICES_TODAY)))
+        )
+
+        reference = resolver.windows(NOW).morning_sell_buy_reference
+        assert (reference.start, reference.end, reference.source) == (
+            _dt(8, 8),
+            _dt(8, 13),
+            MarketWindowSource.PRICES,
+        )
+        assert reference.price == pytest.approx(0.70)
+
+    def test_follows_the_resolved_morning_sell_hour_and_tariff_end(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.tariff_end": "12"}),
+            entry=_entry(**{CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end"}),
+            coordinator=_coordinator(
+                {
+                    **_buy_payload(prices_today=_hourly(8, BUY_PRICES_TODAY)),
+                    **_sell_payload(prices_today=_hourly(8, {7: 1.00, 8: 1.20, 9: 1.10})),
+                }
+            ),
+        )
+
+        reference = resolver.windows(NOW).morning_sell_buy_reference
+        assert (reference.start, reference.end) == (_dt(8, 9), _dt(8, 12))
+        assert reference.price == pytest.approx(0.75)
+
+    def test_without_buy_prices_the_reference_defaults_to_the_same_span_without_a_price(
+        self,
+    ) -> None:
+        resolver = _resolver(
+            coordinator=_coordinator(_sell_payload(prices_today=_hourly(8, {7: 1.00, 8: 1.20, 9: 1.10})))
+        )
+
+        reference = resolver.windows(NOW).morning_sell_buy_reference
+        assert (reference.start, reference.end, reference.price, reference.source) == (
+            _dt(8, 9),
+            _dt(8, 13),
+            None,
+            MarketWindowSource.DEFAULT,
+        )

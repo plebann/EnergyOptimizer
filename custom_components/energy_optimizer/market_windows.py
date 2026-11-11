@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Final, Literal, Protocol
 from homeassistant.util import dt as dt_util
 
 from .calculations.price_windows import (
+    build_average_buy_price_result,
     build_consume_window_result,
     build_ranked_sell_window_result,
 )
@@ -480,6 +481,30 @@ def _consume_from_prices(prices: object, entity_id: str, now_local: datetime) ->
     return result.start_local, result.end_local, result.average_price
 
 
+def _average_buy_from_prices(
+    prices: object, entity_id: str, *, start_hour: int, end_hour: int, now_local: datetime
+) -> _Span | None:
+    """Average the buy prices of `now_local`'s day over [start_hour, end_hour)."""
+    if not isinstance(prices, list) or not prices:
+        return None
+    result = build_average_buy_price_result(
+        prices, entity_id, start_hour=start_hour, end_hour=end_hour, now_local=now_local
+    )
+    if result is None:
+        return None
+    return result.start_local, result.end_local, result.average_price
+
+
+def _hours_window(day: date, start_hour: int, end_hour: int, tz: tzinfo) -> tuple[datetime, datetime]:
+    """Return the span from `start_hour` to `end_hour` on `day`, wrapping past midnight."""
+    midnight = datetime.combine(day, time.min, tzinfo=tz)
+    start = midnight + timedelta(hours=start_hour)
+    end = midnight + timedelta(hours=end_hour)
+    if end <= start:
+        end += timedelta(days=1)
+    return start, end
+
+
 def _combined_prices(payload: object) -> list[dict[str, object]] | None:
     """Return a payload's combined price list, or today's and tomorrow's joined."""
     if not isinstance(payload, dict):
@@ -650,6 +675,31 @@ class CoordinatorMarketWindowResolver:
                 name="Consume Window",
             )
 
+        morning_sell = ranked(
+            sell_today, MORNING_SELL_RANGE_HOURS, today, DEFAULT_MORNING_SELL_HOUR
+        )
+        buy_today = buy_payload.get("prices_today") if isinstance(buy_payload, dict) else None
+        reference_start_hour = (morning_sell.primary.hour + 1) % 24
+        morning_sell_buy_reference = _first_window(
+            [
+                (
+                    MarketWindowSource.PRICES,
+                    lambda: _average_buy_from_prices(
+                        buy_today,
+                        buy_entity,
+                        start_hour=reference_start_hour,
+                        end_hour=high_tariff_end.hour,
+                        now_local=current,
+                    ),
+                )
+            ],
+            default=lambda reason: _default_window(
+                *_hours_window(today, reference_start_hour, high_tariff_end.hour, tz),
+                reason=reason,
+            ),
+            name="Morning Sell Buy Reference",
+        )
+
         return replace(
             defaults,
             night_buy=night_buy,
@@ -657,9 +707,8 @@ class CoordinatorMarketWindowResolver:
             night_buy_after=night_buy_after,
             consume=consume(sell_today, today),
             consume_tomorrow=consume(sell_tomorrow, tomorrow),
-            morning_sell=ranked(
-                sell_today, MORNING_SELL_RANGE_HOURS, today, DEFAULT_MORNING_SELL_HOUR
-            ),
+            morning_sell=morning_sell,
+            morning_sell_buy_reference=morning_sell_buy_reference,
             morning_sell_tomorrow=ranked(
                 sell_tomorrow, MORNING_SELL_RANGE_HOURS, tomorrow, DEFAULT_MORNING_SELL_HOUR
             ),
