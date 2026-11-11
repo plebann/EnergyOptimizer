@@ -16,7 +16,7 @@ from custom_components.energy_optimizer.market_windows import (
     StaticMarketWindowResolver,
     default_market_windows,
 )
-from tests.conftest import MARKET_WINDOWS_NOW, market_windows, window
+from tests.conftest import market_windows, window
 
 TZ = ZoneInfo("Europe/Warsaw")
 
@@ -38,33 +38,32 @@ def _window(
     )
 
 
-def _ranked(
-    start: datetime, end: datetime, *, price: float = 1.0
-) -> RankedMarketWindow:
-    return RankedMarketWindow(primary=_window(start, end, price=price), secondary=None)
+def _primary(start_hour: int, end_hour: int, *, price: float) -> RankedMarketWindow:
+    return RankedMarketWindow(primary=window(start_hour, end_hour, price=price), secondary=None)
 
 
 def _snapshot(**overrides: object) -> MarketWindows:
-    """Build a fully resolved snapshot anchored at 2026-05-08 12:00 local."""
-    fields: dict[str, object] = {
-        "now": _dt(8, 12),
-        "night_buy": _window(_dt(8, 22), _dt(9, 6), price=0.45),
-        "night_buy_completed": _window(_dt(7, 22), _dt(8, 6), price=0.40),
-        "night_buy_after": _window(_dt(9, 22), _dt(10, 6), price=0.50),
-        "day_buy": _window(_dt(8, 13), _dt(8, 15), price=0.60),
-        "day_buy_next": _window(_dt(9, 12), _dt(9, 14), price=0.55),
-        "morning_sell": _ranked(_dt(8, 7), _dt(8, 8), price=1.20),
-        "morning_sell_tomorrow": _ranked(_dt(9, 7), _dt(9, 8), price=1.10),
-        "evening_sell": _ranked(_dt(8, 17), _dt(8, 18), price=1.30),
-        "evening_sell_tomorrow": _ranked(_dt(9, 18), _dt(9, 19), price=1.25),
-        "consume": _window(_dt(8, 12), _dt(8, 14), price=0.10),
-        "consume_tomorrow": _window(_dt(9, 11), _dt(9, 13), price=0.12),
-        "morning_sell_buy_reference": _window(_dt(8, 8), _dt(8, 13), price=0.70),
+    """A snapshot of price-resolved windows at MARKET_WINDOWS_NOW (2026-05-08 12:00)."""
+    resolved: dict[str, object] = {
+        "night_buy": window(22, 6, price=0.45),
+        "night_buy_after": window(22, 6, price=0.50, next_day=True),
+        "day_buy": window(13, 15, price=0.60),
+        "day_buy_next": window(12, 14, price=0.55, next_day=True),
+        "morning_sell": _primary(7, 8, price=1.20),
+        "morning_sell_tomorrow": RankedMarketWindow(
+            primary=window(7, 8, price=1.10, next_day=True), secondary=None
+        ),
+        "evening_sell": _primary(17, 18, price=1.30),
+        "evening_sell_tomorrow": RankedMarketWindow(
+            primary=window(18, 19, price=1.25, next_day=True), secondary=None
+        ),
+        "consume": window(12, 14, price=0.10),
+        "consume_tomorrow": window(11, 13, price=0.12, next_day=True),
+        "morning_sell_buy_reference": window(8, 13, price=0.70),
         "high_tariff_start": ResolvedHour(15, MarketWindowSource.CONFIG_ENTITY),
         "high_tariff_end": ResolvedHour(13, MarketWindowSource.CONFIG_ENTITY),
     }
-    fields.update(overrides)
-    return MarketWindows(**fields)  # type: ignore[arg-type]
+    return market_windows(**{**resolved, **overrides})
 
 
 ALL_WINDOW_FIELDS = frozenset(
@@ -193,7 +192,7 @@ class TestMarketWindows:
 
     def test_changed_from_reports_only_the_field_whose_price_changed(self) -> None:
         previous = _snapshot()
-        current = _snapshot(night_buy=_window(_dt(8, 22), _dt(9, 6), price=0.46))
+        current = _snapshot(night_buy=window(22, 6, price=0.46))
 
         assert current.changed_from(previous) == {"night_buy"}
 
@@ -207,8 +206,8 @@ class TestMarketWindows:
         previous = _snapshot()
         current = _snapshot(
             evening_sell=RankedMarketWindow(
-                primary=_window(_dt(8, 17), _dt(8, 18), price=1.30),
-                secondary=_window(_dt(8, 19), _dt(8, 20), price=1.05),
+                primary=window(17, 18, price=1.30),
+                secondary=window(19, 20, price=1.05),
             )
         )
 
