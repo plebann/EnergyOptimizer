@@ -233,6 +233,11 @@ class TestDefaultMarketWindows:
             _dt(9, 15),
         )
 
+    def test_a_default_buy_window_ending_exactly_now_rolls_forward(self) -> None:
+        defaults = default_market_windows(_dt(8, 15))
+
+        assert defaults.day_buy.start == _dt(9, 13)
+
     def test_morning_sell_defaults_to_07_with_no_secondary_window(self) -> None:
         defaults = default_market_windows(_dt(8, 12))
 
