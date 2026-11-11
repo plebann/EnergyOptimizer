@@ -176,8 +176,10 @@ class TestResolvedMarketWindow:
             resolved.price = 9.9  # type: ignore[misc]
 
     def test_end_must_be_after_start(self) -> None:
+        at_fifteen = _dt(8, 15)
+
         with pytest.raises(ValueError):
-            _window(_dt(8, 15), _dt(8, 15))
+            _window(at_fifteen, at_fifteen)
 
     def test_end_after_start_is_judged_by_instant_in_the_repeated_dst_hour(
         self,
@@ -197,8 +199,10 @@ class TestResolvedMarketWindow:
             _window(datetime(2026, 5, 8, 13), datetime(2026, 5, 8, 15))
 
     def test_a_non_finite_price_is_rejected(self) -> None:
+        start, end = _dt(8, 13), _dt(8, 15)
+
         with pytest.raises(ValueError):
-            _window(_dt(8, 13), _dt(8, 15), price=float("nan"))
+            _window(start, end, price=float("nan"))
 
     @pytest.mark.parametrize(
         ("source", "reason"),
@@ -210,8 +214,10 @@ class TestResolvedMarketWindow:
     def test_reason_is_set_exactly_when_the_source_is_default(
         self, source: MarketWindowSource, reason: str | None
     ) -> None:
+        start, end = _dt(8, 13), _dt(8, 15)
+
         with pytest.raises(ValueError):
-            _window(_dt(8, 13), _dt(8, 15), source=source, reason=reason)
+            _window(start, end, source=source, reason=reason)
 
 
 class TestMarketWindows:
