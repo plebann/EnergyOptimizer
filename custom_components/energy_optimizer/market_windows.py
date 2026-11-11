@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 from datetime import date, datetime, time, timedelta, tzinfo
 from enum import StrEnum
-from typing import Final, Literal
+from typing import Final, Literal, Protocol
 
 from .const import NIGHT_BUY_WINDOW_END_HOUR, NIGHT_BUY_WINDOW_START_HOUR
 
@@ -246,3 +246,24 @@ def default_market_windows(
             DEFAULT_HIGH_TARIFF_END_HOUR, MarketWindowSource.DEFAULT
         ),
     )
+
+
+class MarketWindowResolver(Protocol):
+    """The single place EnergyOptimizer asks which Market Windows apply now.
+
+    `windows()` is synchronous, side-effect free and never raises; callers
+    read it once at the start of a run and use the snapshot thereafter.
+    """
+
+    def windows(self, now: datetime | None = None) -> MarketWindows: ...
+
+
+class StaticMarketWindowResolver:
+    """Resolver returning one fixed snapshot; the test adapter at the seam."""
+
+    def __init__(self, windows: MarketWindows) -> None:
+        self._windows = windows
+
+    def windows(self, now: datetime | None = None) -> MarketWindows:
+        """Return the given snapshot unchanged, whatever `now` is."""
+        return self._windows

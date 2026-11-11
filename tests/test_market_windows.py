@@ -13,6 +13,7 @@ from custom_components.energy_optimizer.market_windows import (
     RankedMarketWindow,
     ResolvedHour,
     ResolvedMarketWindow,
+    StaticMarketWindowResolver,
     default_market_windows,
 )
 
@@ -303,3 +304,12 @@ class TestDefaultMarketWindows:
         assert defaults.night_buy.reason == "unreliable"
         assert defaults.evening_sell.primary.reason == "unreliable"
         assert defaults.consume.reason == "unreliable"
+
+
+class TestStaticMarketWindowResolver:
+    def test_returns_the_given_snapshot_unchanged_whatever_now_is(self) -> None:
+        snapshot = _snapshot()
+        resolver = StaticMarketWindowResolver(snapshot)
+
+        assert resolver.windows() is snapshot
+        assert resolver.windows(now=_dt(9, 3)) is snapshot
