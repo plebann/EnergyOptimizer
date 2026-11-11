@@ -13,6 +13,7 @@ from custom_components.energy_optimizer.market_windows import (
     RankedMarketWindow,
     ResolvedHour,
     ResolvedMarketWindow,
+    default_market_windows,
 )
 
 TZ = ZoneInfo("Europe/Warsaw")
@@ -197,3 +198,108 @@ class TestMarketWindows:
 
         with pytest.raises(FrozenInstanceError):
             snapshot.night_buy = snapshot.night_buy_after  # type: ignore[misc]
+
+
+class TestDefaultMarketWindows:
+    def test_night_buy_defaults_to_tonight_22_to_06(self) -> None:
+        defaults = default_market_windows(_dt(8, 12))
+
+        assert defaults.night_buy == ResolvedMarketWindow(
+            start=_dt(8, 22),
+            end=_dt(9, 6),
+            price=None,
+            source=MarketWindowSource.DEFAULT,
+            reason="unavailable",
+        )
+
+    def test_day_buy_defaults_to_the_two_hours_before_the_high_tariff_start(
+        self,
+    ) -> None:
+        defaults = default_market_windows(_dt(8, 12))
+
+        assert (defaults.day_buy.start, defaults.day_buy.end) == (
+            _dt(8, 13),
+            _dt(8, 15),
+        )
+        assert defaults.day_buy.is_fallback is True
+
+    def test_a_default_buy_window_already_ended_rolls_forward_one_day(self) -> None:
+        defaults = default_market_windows(_dt(8, 16))
+
+        assert (defaults.day_buy.start, defaults.day_buy.end) == (
+            _dt(9, 13),
+            _dt(9, 15),
+        )
+
+    def test_morning_sell_defaults_to_07_with_no_secondary_window(self) -> None:
+        defaults = default_market_windows(_dt(8, 12))
+
+        assert defaults.morning_sell == RankedMarketWindow(
+            primary=ResolvedMarketWindow(
+                start=_dt(8, 7),
+                end=_dt(8, 8),
+                price=None,
+                source=MarketWindowSource.DEFAULT,
+                reason="unavailable",
+            ),
+            secondary=None,
+        )
+
+    def test_evening_sell_defaults_to_17(self) -> None:
+        defaults = default_market_windows(_dt(8, 12))
+
+        primary = defaults.evening_sell.primary
+        assert (primary.start, primary.end) == (_dt(8, 17), _dt(8, 18))
+        assert defaults.evening_sell.secondary is None
+
+    def test_tomorrows_sell_windows_default_to_the_same_hours_tomorrow(self) -> None:
+        defaults = default_market_windows(_dt(8, 12))
+
+        assert defaults.morning_sell_tomorrow.primary.start == _dt(9, 7)
+        assert defaults.evening_sell_tomorrow.primary.start == _dt(9, 17)
+
+    def test_consume_defaults_to_12_00_today_and_tomorrow(self) -> None:
+        defaults = default_market_windows(_dt(8, 12))
+
+        assert (defaults.consume.start, defaults.consume.end) == (_dt(8, 12), _dt(8, 13))
+        assert defaults.consume_tomorrow.start == _dt(9, 12)
+        assert defaults.consume.is_fallback is True
+
+    def test_high_tariff_defaults_to_start_15_and_end_13(self) -> None:
+        defaults = default_market_windows(_dt(8, 12))
+
+        assert defaults.high_tariff_start == ResolvedHour(15, MarketWindowSource.DEFAULT)
+        assert defaults.high_tariff_end == ResolvedHour(13, MarketWindowSource.DEFAULT)
+
+    def test_morning_sell_buy_reference_defaults_to_the_hour_after_the_sell_until_tariff_end(
+        self,
+    ) -> None:
+        defaults = default_market_windows(_dt(8, 12))
+
+        reference = defaults.morning_sell_buy_reference
+        assert (reference.start, reference.end, reference.price) == (
+            _dt(8, 8),
+            _dt(8, 13),
+            None,
+        )
+
+    def test_night_buy_after_defaults_to_midnight_after_the_active_night(self) -> None:
+        defaults = default_market_windows(_dt(8, 12))
+
+        assert (defaults.night_buy_after.start, defaults.night_buy_after.end) == (
+            _dt(10, 0),
+            _dt(10, 6),
+        )
+
+    def test_completed_night_and_next_day_buy_default_to_the_same_windows(self) -> None:
+        defaults = default_market_windows(_dt(8, 12))
+
+        assert defaults.night_buy_completed == defaults.night_buy
+        assert defaults.day_buy_next == defaults.day_buy
+
+    def test_an_unreliable_reason_is_carried_by_every_default_window(self) -> None:
+        defaults = default_market_windows(_dt(8, 12), reason="unreliable")
+
+        assert defaults.night_buy.reason == "unreliable"
+        assert defaults.evening_sell.primary.reason == "unreliable"
+        assert defaults.consume.reason == "unreliable"
