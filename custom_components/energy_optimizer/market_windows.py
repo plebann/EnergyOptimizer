@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from enum import StrEnum
 import logging
 from math import isfinite
+import re
 from typing import TYPE_CHECKING, Final, Literal, Protocol, TypeVar
 
 from homeassistant.util import dt as dt_util
@@ -369,6 +370,7 @@ class StaticMarketWindowResolver:
 
 
 _UNAVAILABLE_STATES: Final = frozenset({"unknown", "unavailable"})
+_TIME_RANGE: Final = re.compile(r"^\s*\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\s*$")
 
 _Span = tuple[datetime, datetime, float | None]
 _RankedSpans = tuple[_Span, _Span | None]
@@ -424,8 +426,10 @@ def _ranked(spans: _RankedSpans, source: MarketWindowSource) -> RankedMarketWind
 
 
 def _parse_clock(state_value: object) -> time | None:
-    """Parse a wall time from a datetime or time entity state."""
+    """Parse a wall time from a datetime, time or `HH:MM-HH:MM` range entity state."""
     raw_value = str(state_value)
+    if _TIME_RANGE.match(raw_value):
+        raw_value = raw_value.split("-", 1)[0].strip()
     dt_value = dt_util.parse_datetime(raw_value)
     if dt_value is not None:
         return dt_util.as_local(dt_value).time()
@@ -857,9 +861,24 @@ class CoordinatorMarketWindowResolver:
         start = datetime.combine(
             day, clock if clock is not None else time(_parse_hour(raw_time)), tzinfo=tz
         )
+        return start, start + timedelta(hours=1), self._legacy_price(price_key)
+
+    def _legacy_price(self, price_key: str) -> float | None:
+        """The legacy price entity's finite price, or None when it has none."""
         raw_price = self._entity_state(price_key)
-        price = float(raw_price) if raw_price is not None else None
-        return start, start + timedelta(hours=1), price
+        try:
+            price = float(raw_price) if raw_price is not None else None
+        except (TypeError, ValueError):
+            price = None
+        if price is None or not isfinite(price):
+            if raw_price is not None:
+                _LOGGER.warning(
+                    "Legacy price entity %s has invalid value %s, window keeps no price",
+                    self._entry.data.get(price_key),
+                    raw_price,
+                )
+            return None
+        return price
 
     def _legacy_ranked(
         self,
@@ -874,11 +893,16 @@ class CoordinatorMarketWindowResolver:
         primary = self._legacy_span(day, tz, hour_key, price_key)
         if primary is None:
             return None
-        secondary = (
-            self._legacy_span(day, tz, second_hour_key, second_price_key)
-            if second_hour_key and second_price_key
-            else None
-        )
+        secondary = None
+        if second_hour_key and second_price_key:
+            try:
+                secondary = self._legacy_span(day, tz, second_hour_key, second_price_key)
+            except (TypeError, ValueError) as err:
+                _LOGGER.warning(
+                    "Legacy second hour entity %s is invalid (%s), no Secondary Market Window",
+                    self._entry.data.get(second_hour_key),
+                    err,
+                )
         return primary, secondary
 
 
