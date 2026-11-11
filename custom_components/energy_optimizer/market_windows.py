@@ -12,12 +12,14 @@ from typing import TYPE_CHECKING, Final, Literal, Protocol
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_BUY_PRICE_SENSOR,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     DOMAIN,
     NIGHT_BUY_WINDOW_END_HOUR,
     NIGHT_BUY_WINDOW_START_HOUR,
 )
+from .night_buy_window import NightBuyWindowPlan, build_night_buy_window_plan
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -403,6 +405,23 @@ def _first_window(
     return default(reason)
 
 
+def _combined_prices(payload: object) -> list[dict[str, object]] | None:
+    """Return a payload's combined price list, or today's and tomorrow's joined."""
+    if not isinstance(payload, dict):
+        return None
+    prices = payload.get("prices")
+    if isinstance(prices, list):
+        return [item for item in prices if isinstance(item, dict)] or None
+    combined: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for key in ("prices_today", "prices_tomorrow"):
+        for item in payload.get(key) or []:
+            if isinstance(item, dict) and str(item.get("time")) not in seen:
+                seen.add(str(item.get("time")))
+                combined.append(item)
+    return combined or None
+
+
 def _plan_span(plan: NightBuyWindowPlan | None) -> _Span | None:
     """Project a buy-window plan onto a window span."""
     if plan is None:
@@ -432,6 +451,10 @@ class CoordinatorMarketWindowResolver:
     def windows(self, now: datetime | None = None) -> MarketWindows:
         """Resolve every Market Window at `now` (default: Home Assistant local now)."""
         current = now or dt_util.now()
+        data = self._coordinator.data
+        payloads = data.get("price_payloads") if isinstance(data, dict) else None
+        buy_entity = str(self._entry.data.get(CONF_BUY_PRICE_SENSOR))
+        buy_payload = payloads.get(buy_entity) if isinstance(payloads, dict) else None
         high_tariff_start = _first_hour(
             [
                 (
@@ -498,14 +521,42 @@ class CoordinatorMarketWindowResolver:
             ),
             name="next Day Buy Window",
         )
+        after_date = night_buy.plan_date + timedelta(days=1)
+        night_buy_after = _first_window(
+            [
+                (
+                    MarketWindowSource.PRICES,
+                    lambda: self._night_plan_from_prices(buy_payload, buy_entity, after_date, tz),
+                )
+            ],
+            default=lambda reason: _default_window(
+                datetime.combine(after_date, time.min, tzinfo=tz),
+                datetime.combine(after_date, time(NIGHT_BUY_WINDOW_END_HOUR), tzinfo=tz),
+                reason=reason,
+            ),
+            name="Night Buy Window after the active one",
+        )
         return replace(
             defaults,
             night_buy=night_buy,
             night_buy_completed=night_buy_completed,
+            night_buy_after=night_buy_after,
             day_buy=day_buy,
             day_buy_next=day_buy_next,
             high_tariff_start=high_tariff_start,
             high_tariff_end=high_tariff_end,
+        )
+
+    @staticmethod
+    def _night_plan_from_prices(
+        payload: object, entity_id: str, end_date: date, tz: tzinfo
+    ) -> _Span | None:
+        """Plan the night ending on `end_date` from the combined buy prices."""
+        prices = _combined_prices(payload)
+        if prices is None:
+            return None
+        return _plan_span(
+            build_night_buy_window_plan(prices, entity_id, end_date=end_date, local_tz=tz)
         )
 
     def _config_hour(self, config_key: str, *, lowest: int, highest: int) -> int | None:

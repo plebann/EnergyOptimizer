@@ -713,3 +713,38 @@ class TestCoordinatorMarketWindowResolverPlans:
             MarketWindowSource.DEFAULT,
             "unavailable",
         )
+
+
+def _buy_payload(**lists: list[dict[str, object]]) -> dict[str, dict[str, list]]:
+    return {BUY: lists}
+
+
+class TestCoordinatorMarketWindowResolverNightBuyAfter:
+    def test_night_buy_after_is_built_from_the_combined_buy_prices(self) -> None:
+        after_tonight = _hourly(9, {22: 0.50, 23: 0.50}) + _hourly(
+            10, {0: 0.90, 1: 0.90, 2: 0.90, 3: 0.90, 4: 0.90, 5: 0.90}
+        )
+        resolver = _resolver(
+            coordinator=_coordinator(_buy_payload(prices=after_tonight)),
+            night_next=TONIGHT,
+        )
+
+        after = resolver.windows(NOW).night_buy_after
+        assert (after.start, after.end, after.price, after.source) == (
+            _dt(9, 22),
+            _dt(10, 0),
+            0.50,
+            MarketWindowSource.PRICES,
+        )
+
+    def test_without_prices_night_buy_after_defaults_to_the_midnight_after_the_active_night(
+        self,
+    ) -> None:
+        resolver = _resolver(night_next=TONIGHT)
+
+        after = resolver.windows(_dt(9, 5)).night_buy_after
+        assert (after.start, after.end, after.source) == (
+            _dt(10, 0),
+            _dt(10, 6),
+            MarketWindowSource.DEFAULT,
+        )
