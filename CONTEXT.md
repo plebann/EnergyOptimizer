@@ -55,6 +55,24 @@ A Market Window that cannot be resolved because the needed information is missin
 
 A Market Window that should not be used because the available information is invalid, duplicated, or contradictory.
 
+### Default Market Window
+
+A Resolved Market Window built from EnergyOptimizer's configured default hours because no Market Window Source could
+supply one. It is always marked as a fallback so a decision can tell it apart from a window resolved from data.
+_Avoid_: Fallback hour, default hour
+
+### Sell Window Ranking
+
+The pair of a Primary Market Window and its optional Secondary Market Window that a sell decision chooses between.
+In code this pair is the `RankedMarketWindow` type; a Default Market Window ranking has no Secondary Market Window.
+_Avoid_: Ranked pair, window tuple
+
+### Market Window Resolver
+
+The single place EnergyOptimizer asks which Resolved Market Window of each kind applies at a given moment. Decisions,
+the scheduler and the window sensors all read the same answer; nothing reads a Market Window back from a sensor.
+_Avoid_: Window helper, internal sensor lookup
+
 ### Arbitrage Margin
 
 The difference between a Sell Window's price and the price of its paired Arbitrage Buy Reference. EnergyOptimizer only
@@ -64,10 +82,17 @@ arbitrage energy volume, which remains capacity-derived.
 
 ### Arbitrage Buy Reference
 
-The Buy Window whose price is used as the buy side of an Arbitrage Margin calculation. Morning Charge, Morning Sell,
-and Evening Sell scenarios use the Night Buy Window as their Arbitrage Buy Reference. Afternoon Charge uses the Day
-Buy Window (best 2h window, 10:00-16:00; unchanged). If the Arbitrage Buy Reference price is unavailable, the
-Arbitrage Margin cannot be computed and the gate fails closed (no arbitrage / no high-price sell).
+The Market Window whose price is used as the buy side of an Arbitrage Margin calculation. Morning Charge and Evening
+Sell use the Night Buy Window; Morning Sell uses the Morning Sell Buy Reference; Afternoon Charge uses the Day Buy
+Window (best 2h window, 10:00-16:00; unchanged). If the Arbitrage Buy Reference price is unavailable, the Arbitrage
+Margin cannot be computed and the gate fails closed (no arbitrage / no high-price sell).
+
+### Morning Sell Buy Reference
+
+The Market Window spanning the hour after the Morning Sell Window up to the end of the High-Tariff Window, priced at
+the average buy price over that span. It is the Arbitrage Buy Reference for Morning Sell, because energy sold in the
+morning peak is bought back during that span, not in the Night Buy Window.
+_Avoid_: Night Buy Window (for Morning Sell), restore-hour buy price
 
 ### Solar Charge Block
 

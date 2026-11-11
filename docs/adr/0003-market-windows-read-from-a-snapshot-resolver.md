@@ -1,0 +1,19 @@
+# Market Windows are read from an immutable snapshot resolver, never back from the integration's own sensors
+
+Decisions, the scheduler and the charge-completion handlers resolved each Market Window by looking up one of EnergyOptimizer's own window sensors in the entity registry by unique-id suffix and parsing its `HH:MM` state or `start_time` / `end_time` / `duration_hours` attributes, with the Night/Day Buy Window plan manager consulted first and literal default hours (4, 6, 7, 13, 15, 17, 22) used last. The same window therefore existed in six places (`helpers.py`, `pricing.py`, `charge_completion.py`, the four strategies, the scheduler), a single run could observe two different windows across an `await`, and adding the persisted buy-window plan (#68) touched 15 production files. We decided that every Market Window is read through one Market Window Resolver that returns an immutable `MarketWindows` snapshot for a given `now`: the strategies take the resolver as a constructor argument and call `windows(now)` once at the start of a run, the window sensors and the scheduler read the same snapshot, and nothing reads a Market Window back from a sensor or knows a sensor suffix. Unavailable windows resolve to the same default hours as before, but carry a `DEFAULT` source so the fallback is visible in logs and tests.
+
+## Considered Options
+
+- **Keep the per-window `resolve_*` helpers and only de-duplicate the parsing**: rejected — the sensor would remain the Market Window Source of record, so the suffix convention, the attribute names and the "read your own output" round trip would stay in the interface of every caller.
+- **A query method `resolve(kind, slot)` returning one window at a time (design A)**: rejected as the interface — each call could land on a different coordinator update, so a run could still mix windows from two refreshes. Its shared defaults table and value equality on the window type were kept.
+- **A query method with an owning-date parameter and a union return type `Resolved | Unavailable | Unreliable` (design B)**: rejected — callers would have to narrow the union at every site and know plan ownership dates. Its internal source chain (plan → prices → config entity → legacy entity → default) and `night_buy_after` were kept.
+- **Immutable snapshot with named fields and one `windows(now)` method (design C)**: chosen — one read per run gives a consistent set of windows, the fields name the glossary terms, and `changed_from(previous)` gives the scheduler change detection without sensor subscriptions.
+
+## Consequences
+
+- The window sensors in `pricing.py` become projections of the snapshot: they format `start` / `end` / `price` and no longer compute windows from `price_payloads` themselves. Their state and attributes stay byte-for-byte compatible because dashboards and the entity-registry unique-id migration depend on them.
+- Datetimes are the truth and hours are derived. The "if the end already passed, roll forward one day" rule from `resolve_charge_window` lives once, in the resolver.
+- The legacy external sensors (`CONF_EVENING_MAX_PRICE_*`, `CONF_MORNING_MAX_PRICE_*`, `CONF_DAYTIME_MIN_PRICE_*`) survive as the lowest-priority Market Window Source inside the resolver; they are not removed and not re-exposed in the config flow.
+- `NightBuyWindowPlanManager` stays a separate collaborator behind the resolver; the coordinator still restores, reconciles and claims plans. Only the resolver reaches the manager through `hass.data`.
+- Strategy tests build a `StaticMarketWindowResolver` with explicit windows instead of mocking `hass.states.get` and the entity registry per entity, so adding a window kind is a new snapshot field and a resolver test, not a change in every strategy test.
+- The switchover is a single PR (plan in `specs/006-market-window-resolver/plan.md`); the old helpers and their tests are deleted in the same change rather than layered under the new interface.
