@@ -84,7 +84,7 @@ arbitrage energy volume, which remains capacity-derived.
 
 The Market Window whose price is used as the buy side of an Arbitrage Margin calculation. Morning Charge and Evening
 Sell use the Night Buy Window; Morning Sell uses the Morning Sell Buy Reference; Afternoon Charge uses the Day Buy
-Window (best 2h window, 10:00-16:00; unchanged). If the Arbitrage Buy Reference price is unavailable, the Arbitrage
+Window. If the Arbitrage Buy Reference price is unavailable, the Arbitrage
 Margin cannot be computed and the gate fails closed (no arbitrage / no high-price sell).
 
 ### Morning Sell Buy Reference
@@ -160,6 +160,15 @@ boundary hour at a time on either side while each boundary hour's price stays wi
 average price (recomputed after every accepted hour). Expansion stops permanently on a side once its next boundary
 hour exceeds the 10% threshold or falls outside 00:00-06:00; a Night Buy Window may end up spanning the full 6-hour
 range. Morning Charge starts at the Night Buy Window's start hour and charges for its full (variable) duration.
+
+### Day Buy Window
+
+A Buy Window inside the low-tariff range that runs from the High-Tariff Window's end hour to its start hour (the
+`high_tariff_end_hour_sensor` and `high_tariff_start_hour_sensor` values at planning time; 13:00-15:00 when a sensor is
+unavailable). It is seeded from the cheapest two consecutive full hours in that range, then grown by adjacent hours
+priced within 2% of the window average without leaving the range; price ties pick the earlier start. A range shorter
+than two hours yields no Day Buy Window. Afternoon Charge starts at the Day Buy Window's start and Afternoon Charge
+Completion happens at its end.
 
 ### Secure Energy
 

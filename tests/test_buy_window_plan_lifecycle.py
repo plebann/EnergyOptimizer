@@ -9,7 +9,12 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from custom_components.energy_optimizer import night_buy_window_manager as manager_module
-from custom_components.energy_optimizer.const import CONF_BUY_PRICE_SENSOR, DOMAIN
+from custom_components.energy_optimizer.const import (
+    CONF_BUY_PRICE_SENSOR,
+    CONF_HIGH_TARIFF_END_HOUR_SENSOR,
+    CONF_HIGH_TARIFF_START_HOUR_SENSOR,
+    DOMAIN,
+)
 from custom_components.energy_optimizer.helpers import (
     get_buy_plan,
     get_day_plan_for_active_night,
@@ -30,12 +35,27 @@ TZ = ZoneInfo("Europe/Warsaw")
 def _entry() -> MagicMock:
     entry = MagicMock()
     entry.entry_id = "entry-1"
-    entry.data = {CONF_BUY_PRICE_SENSOR: "sensor.buy"}
+    entry.data = {
+        CONF_BUY_PRICE_SENSOR: "sensor.buy",
+        CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end",
+        CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start",
+    }
     return entry
 
 
-def _manager() -> NightBuyWindowPlanManager:
-    manager = NightBuyWindowPlanManager(MagicMock(), _entry())
+def _hass_with_tariff(end_hour: int | None, start_hour: int | None) -> MagicMock:
+    """A hass whose high-tariff sensors report the given hours (None = missing)."""
+    states = {
+        "sensor.tariff_end": MagicMock(state=str(end_hour)) if end_hour is not None else None,
+        "sensor.tariff_start": MagicMock(state=str(start_hour)) if start_hour is not None else None,
+    }
+    hass = MagicMock()
+    hass.states.get.side_effect = lambda entity_id: states.get(entity_id)
+    return hass
+
+
+def _manager(*, tariff_end: int | None = 9, tariff_start: int | None = 17) -> NightBuyWindowPlanManager:
+    manager = NightBuyWindowPlanManager(_hass_with_tariff(tariff_end, tariff_start), _entry())
     manager._async_save_snapshot = AsyncMock()
     return manager
 
@@ -559,7 +579,7 @@ def test_lookup_helpers_return_none_without_manager() -> None:
     assert get_day_plan_for_active_night(hass, entry_id="entry-1") is None
 
 
-def test_day_plan_requires_complete_finite_09_to_17_coverage() -> None:
+def test_day_plan_requires_complete_finite_coverage_of_the_tariff_range() -> None:
     manager = _manager()
     day = date(2026, 10, 28)
 
@@ -569,7 +589,7 @@ def test_day_plan_requires_complete_finite_09_to_17_coverage() -> None:
     assert manager._day_plan(incomplete, "sensor.buy", plan_date=day, local_tz=TZ) is None
 
 
-def test_day_plan_preserves_closest_to_thirteen_then_earlier_tie_break() -> None:
+def test_day_plan_breaks_ties_by_earlier_start() -> None:
     manager = _manager()
     day = date(2026, 10, 28)
     prices = _hourly(
@@ -581,6 +601,38 @@ def test_day_plan_preserves_closest_to_thirteen_then_earlier_tie_break() -> None
 
     assert plan is not None
     assert plan.start.hour == 12
+
+
+def test_day_plan_range_follows_the_high_tariff_sensors() -> None:
+    manager = _manager(tariff_end=13, tariff_start=17)
+    day = date(2026, 10, 28)
+
+    plan = manager._day_plan(_day_prices(day), "sensor.buy", plan_date=day, local_tz=TZ)
+
+    assert plan is not None
+    assert plan.start == datetime(2026, 10, 28, 13, tzinfo=TZ)
+    assert plan.end == datetime(2026, 10, 28, 15, tzinfo=TZ)
+
+
+def test_day_plan_falls_back_to_13_to_15_when_tariff_sensors_are_missing() -> None:
+    manager = _manager(tariff_end=None, tariff_start=None)
+    day = date(2026, 10, 28)
+
+    plan = manager._day_plan(_day_prices(day), "sensor.buy", plan_date=day, local_tz=TZ)
+
+    assert plan is not None
+    assert plan.start == datetime(2026, 10, 28, 13, tzinfo=TZ)
+    assert plan.end == datetime(2026, 10, 28, 15, tzinfo=TZ)
+
+
+@pytest.mark.parametrize(("tariff_end", "tariff_start"), [(14, 15), (15, 13), (13, 13)])
+def test_day_plan_is_none_when_tariff_range_is_shorter_than_two_hours(
+    tariff_end: int, tariff_start: int
+) -> None:
+    manager = _manager(tariff_end=tariff_end, tariff_start=tariff_start)
+    day = date(2026, 10, 28)
+
+    assert manager._day_plan(_day_prices(day), "sensor.buy", plan_date=day, local_tz=TZ) is None
 
 
 def test_manager_lookup_does_not_fall_back_to_stale_day_sensor() -> None:

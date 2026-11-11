@@ -8,10 +8,13 @@ import pytest
 
 from custom_components.energy_optimizer.const import (
     CONF_BUY_PRICE_SENSOR,
+    CONF_HIGH_TARIFF_END_HOUR_SENSOR,
+    CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_SELL_PRICE_SENSOR,
 )
 from custom_components.energy_optimizer.coordinator import EnergyOptimizerCoordinator
+from custom_components.energy_optimizer.night_buy_window import NightBuyWindowPlan
 from custom_components.energy_optimizer.night_buy_window_manager import (
     NightBuyWindowPlanManager,
 )
@@ -235,10 +238,44 @@ def _day_plan_dict(prices: list[dict[str, object]]) -> dict[str, object] | None:
         for hour in range(9, 17)
         if hour not in present_hours
     ]
-    plan = NightBuyWindowPlanManager._day_plan(
+    plan = _plan_manager(tariff_end=9, tariff_start=17)._day_plan(
         prices, "sensor.buy", plan_date=first.date(), local_tz=first.tzinfo
     )
     return plan.as_dict() if plan is not None else None
+
+
+def _plan_manager(*, tariff_end: int, tariff_start: int) -> NightBuyWindowPlanManager:
+    """A plan manager whose high-tariff sensors report the given hours."""
+    states = {
+        "sensor.tariff_end": MagicMock(state=str(tariff_end)),
+        "sensor.tariff_start": MagicMock(state=str(tariff_start)),
+    }
+    hass = MagicMock()
+    hass.states.get.side_effect = lambda entity_id: states.get(entity_id)
+    entry = _mock_entry()
+    entry.data = {
+        CONF_BUY_PRICE_SENSOR: "sensor.buy",
+        CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end",
+        CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start",
+    }
+    return NightBuyWindowPlanManager(hass, entry)
+
+
+def _night_buy_sensor_with_plan(
+    start: datetime, end: datetime, *, price: float = 0.5
+) -> NightBuyWindowSensor:
+    coordinator = _coordinator_with_prices([], None, "sensor.buy")
+    coordinator.data["buy_window_plans"] = {
+        "night": {"window": NightBuyWindowPlan(start, end, price).as_dict(), "next": None},
+        "day": {},
+    }
+    sensor = NightBuyWindowSensor(
+        coordinator,
+        _mock_entry(),
+        {CONF_BUY_PRICE_SENSOR: "sensor.buy"},
+    )
+    sensor.hass = MagicMock()
+    return sensor
 
 
 def _day_buy_sensor(
@@ -863,6 +900,7 @@ def test_today_buy_window_sensors_publish_state_and_attributes(
         "start_time": "2026-05-08T11:00:00+02:00",
         "end_time": "2026-05-08T13:00:00+02:00",
         "plan_date": "2026-05-08",
+        "is_active": "on",
     }
 
 
@@ -956,6 +994,7 @@ def test_buy_window_sensor_sets_is_negative_true_only_for_negative_average(
         "start_time": "2026-05-08T11:00:00+02:00",
         "end_time": "2026-05-08T13:00:00+02:00",
         "plan_date": "2026-05-08",
+        "is_active": "on",
     }
 
 
@@ -980,6 +1019,7 @@ def test_buy_window_sensor_keeps_zero_average_available_with_false_is_negative(
         "start_time": "2026-05-08T10:00:00+02:00",
         "end_time": "2026-05-08T12:00:00+02:00",
         "plan_date": "2026-05-08",
+        "is_active": "off",
     }
 
 
@@ -999,6 +1039,85 @@ def test_buy_window_sensors_have_translation_keys_and_prefixed_unique_ids() -> N
     assert tomorrow_day.unique_id == "entry-1_day_buy_next_window"
     assert morning_reference.translation_key == "morning_sell_buy_reference"
     assert morning_reference.unique_id == "entry-1_morning_sell_buy_reference"
+
+
+@pytest.mark.unit
+def test_night_buy_window_sensor_sets_is_active_on_inside_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 2, 30, tzinfo=TZ))
+
+    sensor = _night_buy_sensor_with_plan(
+        datetime(2026, 5, 8, 1, 0, tzinfo=TZ), datetime(2026, 5, 8, 3, 0, tzinfo=TZ)
+    )
+
+    assert sensor.native_value == "01:00-03:00"
+    assert sensor.extra_state_attributes["is_active"] == "on"
+
+
+@pytest.mark.unit
+def test_night_buy_window_sensor_sets_is_active_off_at_plan_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 3, 0, tzinfo=TZ))
+
+    sensor = _night_buy_sensor_with_plan(
+        datetime(2026, 5, 8, 1, 0, tzinfo=TZ), datetime(2026, 5, 8, 3, 0, tzinfo=TZ)
+    )
+
+    assert sensor.extra_state_attributes["is_active"] == "off"
+
+
+@pytest.mark.unit
+def test_day_buy_window_sensor_sets_is_active_off_before_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 10, 59, tzinfo=TZ))
+
+    sensor = _day_buy_sensor(
+        _buy_payload_for_hours(8, {10: 0.80, 11: 0.30, 12: 0.20, 13: 0.60})
+    )
+
+    assert sensor.native_value == "11:00-13:00"
+    assert sensor.extra_state_attributes["is_active"] == "off"
+
+
+@pytest.mark.unit
+def test_next_buy_window_sensors_do_not_publish_is_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
+
+    tomorrow_day = _day_buy_tomorrow_sensor(
+        _buy_payload_for_hours(9, {10: 0.90, 11: 0.60, 12: -0.20, 13: 0.80})
+    )
+    coordinator = _coordinator_with_prices([], None, "sensor.buy")
+    coordinator.data["buy_window_plans"] = {
+        "night": {
+            "window": None,
+            "next": NightBuyWindowPlan(
+                datetime(2026, 5, 9, 1, 0, tzinfo=TZ), datetime(2026, 5, 9, 3, 0, tzinfo=TZ), 0.5
+            ).as_dict(),
+        },
+        "day": {},
+    }
+    tomorrow_night = NightBuyWindowTomorrowSensor(
+        coordinator, _mock_entry(), {CONF_BUY_PRICE_SENSOR: "sensor.buy"}
+    )
+    tomorrow_night.hass = MagicMock()
+
+    assert tomorrow_day.native_value == "11:00-13:00"
+    assert "is_active" not in tomorrow_day.extra_state_attributes
+    assert tomorrow_night.native_value == "01:00-03:00"
+    assert "is_active" not in tomorrow_night.extra_state_attributes
 
 
 @pytest.mark.unit
@@ -1104,6 +1223,7 @@ def test_day_buy_window_sensor_publishes_expected_result_for_real_may_13_prices(
         "start_time": "2026-05-13T15:00:00+02:00",
         "end_time": "2026-05-13T17:00:00+02:00",
         "plan_date": "2026-05-13",
+        "is_active": "off",
     }
 
 

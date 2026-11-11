@@ -906,7 +906,7 @@ def test_build_best_buy_window_result_night_stops_on_missing_boundary_hour() -> 
 
 
 @pytest.mark.unit
-def test_build_best_buy_window_result_breaks_day_ties_by_closest_to_thirteen_then_earlier() -> None:
+def test_build_best_buy_window_result_breaks_day_ties_by_earlier_start() -> None:
     result = build_best_buy_window_result(
         _buy_payload_for_hours(
             {

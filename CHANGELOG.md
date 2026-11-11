@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Day Buy Window is now selected inside the low-tariff range read from `high_tariff_end_hour_sensor` (range start) and `high_tariff_start_hour_sensor` (range end) instead of the fixed 09:00-17:00 range. The selection rule is unchanged: the cheapest two consecutive full hours, grown by adjacent hours priced within 2% of the window average, never leaving the range; price ties pick the earlier start. An unavailable or invalid tariff sensor falls back to the 13:00-15:00 defaults with a warning; a range shorter than two hours (or inverted) produces no Day Buy Window and the sensor is `unavailable`. Known limitation: the plan for tomorrow is computed the day before with today's tariff hours, so when the tariff hours change at the turn of a month the first day's window may fall outside the new range.
+- `sensor.<device>_day_buy_window` and `sensor.<device>_night_buy_window` publish an `is_active` attribute (`on` while the current local time is inside the window, start inclusive and end exclusive, otherwise `off`), mirroring `consume_window`. The attribute is recomputed on coordinator refresh (every 5 minutes), not on a timer, and the `*_next_window` sensors do not publish it.
+
 - Morning Charge and Afternoon Charge now apply a fixed 1 percentage point safety margin to the calculated charge target SOC: the target is rounded up to a full percent, +1 point is added, and the result is capped at the configured `max_soc` (issue #56).
 
 - Breaking change: renamed config keys `tariff_start_hour_sensor` and `tariff_end_hour_sensor` to `high_tariff_start_hour_sensor` and `high_tariff_end_hour_sensor`.
