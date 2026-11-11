@@ -38,25 +38,30 @@ def _window(
     )
 
 
-def _primary(start_hour: int, end_hour: int, *, price: float) -> RankedMarketWindow:
-    return RankedMarketWindow(primary=window(start_hour, end_hour, price=price), secondary=None)
+def _primary(
+    start_hour: int, end_hour: int, *, price: float, next_day: bool = False
+) -> RankedMarketWindow:
+    return RankedMarketWindow(
+        primary=window(start_hour, end_hour, price=price, next_day=next_day),
+        secondary=None,
+    )
 
 
 def _snapshot(**overrides: object) -> MarketWindows:
-    """A snapshot of price-resolved windows at MARKET_WINDOWS_NOW (2026-05-08 12:00)."""
+    """A snapshot at MARKET_WINDOWS_NOW (2026-05-08 12:00) of price-resolved windows.
+
+    Only ``night_buy_completed`` (last night, which the conftest builder cannot
+    place) keeps its default.
+    """
     resolved: dict[str, object] = {
         "night_buy": window(22, 6, price=0.45),
         "night_buy_after": window(22, 6, price=0.50, next_day=True),
         "day_buy": window(13, 15, price=0.60),
         "day_buy_next": window(12, 14, price=0.55, next_day=True),
         "morning_sell": _primary(7, 8, price=1.20),
-        "morning_sell_tomorrow": RankedMarketWindow(
-            primary=window(7, 8, price=1.10, next_day=True), secondary=None
-        ),
+        "morning_sell_tomorrow": _primary(7, 8, price=1.10, next_day=True),
         "evening_sell": _primary(17, 18, price=1.30),
-        "evening_sell_tomorrow": RankedMarketWindow(
-            primary=window(18, 19, price=1.25, next_day=True), secondary=None
-        ),
+        "evening_sell_tomorrow": _primary(18, 19, price=1.25, next_day=True),
         "consume": window(12, 14, price=0.10),
         "consume_tomorrow": window(11, 13, price=0.12, next_day=True),
         "morning_sell_buy_reference": window(8, 13, price=0.70),
@@ -364,6 +369,15 @@ class TestDefaultMarketWindows:
             _dt(9, 15),
         )
         assert defaults.day_buy_for(defaults.night_buy.plan_date) is defaults.day_buy_next
+
+    def test_after_the_day_buy_rolled_forward_both_day_buy_defaults_coincide(
+        self,
+    ) -> None:
+        defaults = default_market_windows(_dt(8, 16))
+
+        assert defaults.day_buy_next == defaults.day_buy
+        assert defaults.day_buy_next.start == _dt(9, 13)
+        assert defaults.day_buy_for(defaults.night_buy.plan_date) == defaults.day_buy_next
 
     def test_an_unreliable_reason_is_carried_by_every_default_window(self) -> None:
         defaults = default_market_windows(_dt(8, 12), reason="unreliable")
