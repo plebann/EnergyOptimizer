@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -993,3 +993,101 @@ class TestCoordinatorMarketWindowResolverLegacyEntities:
         assert resolver.windows(NOW).morning_sell.primary == _legacy(
             _dt(8, 8), _dt(8, 9), None
         )
+
+
+def _every_window(snapshot: MarketWindows) -> list[ResolvedMarketWindow]:
+    windows: list[ResolvedMarketWindow] = []
+    for name in ALL_WINDOW_FIELDS:
+        value = getattr(snapshot, name)
+        if isinstance(value, RankedMarketWindow):
+            windows.append(value.primary)
+            if value.secondary is not None:
+                windows.append(value.secondary)
+        elif isinstance(value, ResolvedMarketWindow):
+            windows.append(value)
+    return windows
+
+
+class TestCoordinatorMarketWindowResolverInvariants:
+    def test_an_unparseable_legacy_consume_time_yields_an_unreliable_default(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.min_hour": "noon"}),
+            entry=_entry(**{CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR: "sensor.min_hour"}),
+        )
+
+        consume = resolver.windows(NOW).consume
+        assert (consume.start, consume.source, consume.reason) == (
+            _dt(8, 12),
+            MarketWindowSource.DEFAULT,
+            "unreliable",
+        )
+
+    def test_a_raising_source_yields_an_unreliable_default_instead_of_raising(self) -> None:
+        hass, entry = _hass(), _entry()
+        manager = _manager(hass, entry)
+        manager.get_active_plan = MagicMock(side_effect=RuntimeError("store corrupt"))
+        resolver = CoordinatorMarketWindowResolver(hass, entry, _coordinator(), manager)
+
+        night = resolver.windows(NOW).night_buy
+        assert (night.start, night.source, night.reason) == (
+            _dt(8, 22),
+            MarketWindowSource.DEFAULT,
+            "unreliable",
+        )
+
+    def test_coordinator_data_that_is_not_a_dict_yields_defaults(self) -> None:
+        coordinator = MagicMock()
+        coordinator.data = None
+
+        assert _resolver(coordinator=coordinator).windows(NOW) == default_market_windows(NOW)
+
+    def test_coordinator_data_is_read_once_per_call(self) -> None:
+        coordinator = MagicMock()
+        data = PropertyMock(
+            return_value={
+                "price_payloads": {
+                    **_buy_payload(prices_today=_hourly(8, BUY_PRICES_TODAY)),
+                    **_sell_payload(
+                        prices_today=_hourly(8, MORNING_PRICES) + _hourly(8, EVENING_PRICES),
+                        prices_tomorrow=_consume_prices(9, 13),
+                    ),
+                }
+            }
+        )
+        type(coordinator).data = data
+
+        _resolver(coordinator=coordinator).windows(NOW)
+
+        assert data.call_count == 1
+
+    def test_every_datetime_is_aware_in_the_zone_of_now(self) -> None:
+        resolver = _resolver(
+            hass=_hass(EVENING_LEGACY_STATES),
+            entry=_entry(**EVENING_LEGACY),
+            coordinator=_coordinator(
+                {
+                    **_buy_payload(prices_today=_hourly(8, BUY_PRICES_TODAY)),
+                    **_sell_payload(prices_today=_hourly(8, MORNING_PRICES)),
+                }
+            ),
+            night_next=TONIGHT,
+            day=TODAY_DAY,
+        )
+
+        snapshot = resolver.windows(NOW)
+        for resolved in _every_window(snapshot):
+            assert resolved.start.tzinfo is not None and resolved.end.tzinfo is not None
+            assert resolved.start.utcoffset() == NOW.utcoffset()
+        assert snapshot.now is NOW
+
+    def test_without_now_the_snapshot_is_anchored_at_home_assistant_local_now(self) -> None:
+        resolver = _resolver(night_next=TONIGHT)
+
+        with patch(
+            "custom_components.energy_optimizer.market_windows.dt_util.now",
+            return_value=_dt(8, 23),
+        ):
+            snapshot = resolver.windows()
+
+        assert snapshot.now == _dt(8, 23)
+        assert snapshot.night_buy == _plan_window(TONIGHT)
