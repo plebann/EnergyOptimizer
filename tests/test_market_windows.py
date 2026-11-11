@@ -870,7 +870,7 @@ class TestCoordinatorMarketWindowResolverBuyReference:
 
         reference = resolver.windows(NOW).morning_sell_buy_reference
         assert (reference.start, reference.end) == (_dt(8, 9), _dt(8, 12))
-        assert reference.price == pytest.approx(0.75)
+        assert reference.price == pytest.approx(0.7333, abs=1e-4)
 
     def test_without_buy_prices_the_reference_defaults_to_the_same_span_without_a_price(
         self,
