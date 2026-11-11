@@ -167,8 +167,8 @@ A Buy Window inside the low-tariff range that runs from the High-Tariff Window's
 `high_tariff_end_hour_sensor` and `high_tariff_start_hour_sensor` values at planning time; 13:00-15:00 when a sensor is
 unavailable). It is seeded from the cheapest two consecutive full hours in that range, then grown by adjacent hours
 priced within 2% of the window average without leaving the range; price ties pick the earlier start. A range shorter
-than two hours yields no Day Buy Window. Afternoon Charge starts at the Day Buy Window's start and Afternoon Charge
-Completion happens at its end.
+than two hours yields no Day Buy Window, and without one Afternoon Charge is skipped rather than run at fallback hours.
+Afternoon Charge starts at the Day Buy Window's start and Afternoon Charge Completion happens at its end.
 
 ### Secure Energy
 

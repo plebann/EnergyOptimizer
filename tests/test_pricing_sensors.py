@@ -261,14 +261,23 @@ def _plan_manager(*, tariff_end: int, tariff_start: int) -> NightBuyWindowPlanMa
     return NightBuyWindowPlanManager(hass, entry)
 
 
-def _night_buy_sensor_with_plan(
-    start: datetime, end: datetime, *, price: float = 0.5
+_COMPLETED_NIGHT = NightBuyWindowPlan(
+    datetime(2026, 5, 7, 23, 0, tzinfo=TZ), datetime(2026, 5, 8, 5, 0, tzinfo=TZ), 0.4
+)
+_TONIGHT = NightBuyWindowPlan(
+    datetime(2026, 5, 8, 22, 0, tzinfo=TZ), datetime(2026, 5, 9, 4, 0, tzinfo=TZ), 0.5
+)
+
+
+def _night_buy_sensor_from_manager(
+    completed: NightBuyWindowPlan | None, upcoming: NightBuyWindowPlan | None
 ) -> NightBuyWindowSensor:
+    """A night sensor fed by the manager's own snapshot of its two slots."""
+    manager = _plan_manager(tariff_end=13, tariff_start=15)
+    manager._current = completed
+    manager._upcoming = upcoming
     coordinator = _coordinator_with_prices([], None, "sensor.buy")
-    coordinator.data["buy_window_plans"] = {
-        "night": {"window": NightBuyWindowPlan(start, end, price).as_dict(), "next": None},
-        "day": {},
-    }
+    coordinator.data["buy_window_plans"] = manager.snapshot()
     sensor = NightBuyWindowSensor(
         coordinator,
         _mock_entry(),
@@ -1042,33 +1051,48 @@ def test_buy_window_sensors_have_translation_keys_and_prefixed_unique_ids() -> N
 
 
 @pytest.mark.unit
-def test_night_buy_window_sensor_sets_is_active_on_inside_plan(
+def test_night_buy_window_sensor_shows_the_executing_plan_from_the_next_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Before the 06:01 rotation tonight's plan is still in `next`; it is the active one."""
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 9, 2, 30, tzinfo=TZ))
+
+    sensor = _night_buy_sensor_from_manager(_COMPLETED_NIGHT, _TONIGHT)
+
+    assert sensor.native_value == "22:00-04:00"
+    assert sensor.extra_state_attributes["plan_date"] == "2026-05-09"
+    assert sensor.extra_state_attributes["is_active"] == "on"
+
+
+@pytest.mark.unit
+def test_night_buy_window_sensor_shows_the_completed_plan_outside_the_night(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from homeassistant.util import dt as dt_util
 
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 2, 30, tzinfo=TZ))
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
 
-    sensor = _night_buy_sensor_with_plan(
-        datetime(2026, 5, 8, 1, 0, tzinfo=TZ), datetime(2026, 5, 8, 3, 0, tzinfo=TZ)
-    )
+    sensor = _night_buy_sensor_from_manager(_COMPLETED_NIGHT, _TONIGHT)
 
-    assert sensor.native_value == "01:00-03:00"
-    assert sensor.extra_state_attributes["is_active"] == "on"
+    assert sensor.native_value == "23:00-05:00"
+    assert sensor.extra_state_attributes["plan_date"] == "2026-05-08"
+    assert sensor.extra_state_attributes["is_active"] == "off"
 
 
 @pytest.mark.unit
 def test_night_buy_window_sensor_sets_is_active_off_at_plan_end(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """At the end instant the window is over, even though rotation is still ahead."""
     from homeassistant.util import dt as dt_util
 
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 3, 0, tzinfo=TZ))
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 9, 4, 0, tzinfo=TZ))
 
-    sensor = _night_buy_sensor_with_plan(
-        datetime(2026, 5, 8, 1, 0, tzinfo=TZ), datetime(2026, 5, 8, 3, 0, tzinfo=TZ)
-    )
+    sensor = _night_buy_sensor_from_manager(_COMPLETED_NIGHT, _TONIGHT)
 
+    assert sensor.native_value == "23:00-05:00"
     assert sensor.extra_state_attributes["is_active"] == "off"
 
 

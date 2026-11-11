@@ -58,6 +58,7 @@ from ..service_handlers.charge_completion import (
     cancel_charge_completion_listeners,
 )
 from ..helpers import (
+    day_buy_window_missing_for_today,
     get_internal_sensor_entity_id,
     resolve_day_buy_window_start_hour,
     resolve_daytime_min_price_time,
@@ -609,6 +610,13 @@ class ActionScheduler:
             self._afternoon_listener()
             self._afternoon_listener = None
 
+        if day_buy_window_missing_for_today(self.hass, entry_id=self.entry.entry_id):
+            _LOGGER.info(
+                "Afternoon charge not scheduled: no Day Buy Window is planned for today"
+            )
+            self._publish_schedule_snapshot()
+            return
+
         tariff_start_hour = resolve_tariff_start_hour(self.hass, self.entry.data)
         fallback_hour = (tariff_start_hour - 2) % 24
         hour = resolve_day_buy_window_start_hour(
@@ -907,20 +915,21 @@ class ActionScheduler:
             entry_id=self.entry.entry_id,
             default_hour=(tariff_start_hour - 2) % 24,
         )
-        actions.append(
-            self._build_action_entry(
-                key="afternoon_charge",
-                label="Afternoon charge",
-                scheduled_for=self._resolve_local_datetime(
-                    hour=afternoon_charge_hour,
-                    minute=0,
-                    now=now,
-                ),
-                kind="dynamic",
-                source="day_buy_window_sensor",
-                order=100,
+        if not day_buy_window_missing_for_today(self.hass, entry_id=self.entry.entry_id):
+            actions.append(
+                self._build_action_entry(
+                    key="afternoon_charge",
+                    label="Afternoon charge",
+                    scheduled_for=self._resolve_local_datetime(
+                        hour=afternoon_charge_hour,
+                        minute=0,
+                        now=now,
+                    ),
+                    kind="dynamic",
+                    source="day_buy_window_sensor",
+                    order=100,
+                )
             )
-        )
 
         program4_start_time = resolve_prog4_start_time(self.hass, self.entry.data)
         if (

@@ -16,6 +16,7 @@ from custom_components.energy_optimizer.const import (
     DOMAIN,
 )
 from custom_components.energy_optimizer.helpers import (
+    day_buy_window_missing_for_today,
     get_buy_plan,
     get_day_plan_for_active_night,
     get_internal_window_price,
@@ -592,15 +593,18 @@ def test_day_plan_requires_complete_finite_coverage_of_the_tariff_range() -> Non
 def test_day_plan_breaks_ties_by_earlier_start() -> None:
     manager = _manager()
     day = date(2026, 10, 28)
+    # 10:00-12:00 and 14:00-16:00 both average 1.0; the former closest-to-13:00
+    # rule picked 14:00, the earlier-start rule picks 10:00.
     prices = _hourly(
         day,
-        {9: 2.0, 10: 2.0, 11: 2.0, 12: 1.0, 13: 1.0, 14: 1.0, 15: 1.0, 16: 2.0},
+        {9: 2.0, 10: 1.0, 11: 1.0, 12: 2.0, 13: 2.0, 14: 1.0, 15: 1.0, 16: 2.0},
     )
 
     plan = manager._day_plan(prices, "sensor.buy", plan_date=day, local_tz=TZ)
 
     assert plan is not None
-    assert plan.start.hour == 12
+    assert plan.start.hour == 10
+    assert plan.end.hour == 12
 
 
 def test_day_plan_range_follows_the_high_tariff_sensors() -> None:
@@ -633,6 +637,25 @@ def test_day_plan_is_none_when_tariff_range_is_shorter_than_two_hours(
     day = date(2026, 10, 28)
 
     assert manager._day_plan(_day_prices(day), "sensor.buy", plan_date=day, local_tz=TZ) is None
+
+
+def test_day_buy_window_is_missing_only_with_a_manager_and_no_plan_for_today(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.helpers.dt_util.utcnow",
+        lambda: datetime(2026, 10, 28, 12, 0, tzinfo=UTC),
+    )
+    manager = _manager()
+    hass = _hass_with(manager)
+
+    assert day_buy_window_missing_for_today(hass, entry_id="entry-1") is True
+
+    manager._day_upcoming = _day(date(2026, 10, 28))
+    assert day_buy_window_missing_for_today(hass, entry_id="entry-1") is False
+
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    assert day_buy_window_missing_for_today(hass, entry_id="entry-1") is False
 
 
 def test_manager_lookup_does_not_fall_back_to_stale_day_sensor() -> None:

@@ -4,7 +4,8 @@
 
 Ładowanie używa bieżącego `day_buy_window`, wyznaczanego w zakresie niskiej
 taryfy od `high_tariff_end_hour_sensor` do `high_tariff_start_hour_sensor`
-(domyślnie 13:00-15:00). Granicą ochronnego horyzontu jest
+(domyślnie 13:00-15:00). Bez planu `day_buy_window` na dziś akcja nie jest
+planowana, a ręczne wywołanie jest pomijane. Granicą ochronnego horyzontu jest
 start planu `night_buy_next_window`; gdy plan nie jest jeszcze dostępny, używana
 jest stała granica 22:00. Planowanie następnego dnia startuje po 14:00, a
 rotacja obu typów planów jest atomowa o 06:01.

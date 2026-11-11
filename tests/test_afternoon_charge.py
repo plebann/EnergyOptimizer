@@ -25,6 +25,9 @@ from custom_components.energy_optimizer.decision_engine.afternoon_charge import 
     async_run_afternoon_charge,
 )
 from custom_components.energy_optimizer.decision_engine.common import ForecastData
+from custom_components.energy_optimizer.night_buy_window_manager import (
+    NightBuyWindowPlanManager,
+)
 
 pytestmark = pytest.mark.enable_socket
 
@@ -472,3 +475,24 @@ async def test_forecast_horizon_falls_back_to_night_window_start() -> None:
 
     assert details["window_start_hour"] == 12
     assert details["window_end_hour"] == 22
+
+
+@pytest.mark.asyncio
+async def test_afternoon_charge_is_skipped_without_a_day_buy_window() -> None:
+    """With a plan manager but no Day Buy Window for today, nothing is forecast or charged."""
+    hass, _assist = _hass(current_soc=50.0)
+    entry = hass.config_entries.async_get_entry.return_value
+    hass.data[DOMAIN]["entry-1"]["buy_window_manager"] = NightBuyWindowPlanManager(
+        hass, entry
+    )
+    gather_mock = AsyncMock()
+
+    with patch(f"{_CHARGE_BASE_MODULE}.gather_forecasts", gather_mock):
+        await async_run_afternoon_charge(hass, entry_id="entry-1", margin=1.0)
+
+    gather_mock.assert_not_called()
+    optimization = hass.data[DOMAIN]["entry-1"]["last_optimization_sensor"]
+    optimization.log_optimization.assert_called_once()
+    assert optimization.log_optimization.call_args.args[1] == {
+        "result": "Afternoon charge skipped: no Day Buy Window"
+    }
