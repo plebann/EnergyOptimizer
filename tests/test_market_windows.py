@@ -1119,20 +1119,24 @@ class TestCoordinatorMarketWindowResolverLegacyEntities:
         assert consume == _legacy(_dt(8, 10), _dt(8, 12), 0.2)
         assert consume.contains(_dt(8, 11, 30)) is True
 
-    def test_a_reversed_legacy_consume_range_keeps_one_hour_and_warns(
-        self, caplog: pytest.LogCaptureFixture
+    @pytest.mark.parametrize(
+        ("raw_range", "fault"),
+        [("12:00-10:00", "at or before its start"), ("12:00-24:00", "not a time of day")],
+    )
+    def test_a_legacy_consume_range_without_a_usable_end_keeps_one_hour_and_warns(
+        self, caplog: pytest.LogCaptureFixture, raw_range: str, fault: str
     ) -> None:
         resolver = _resolver(
-            hass=_hass({"sensor.min_hour": "12:00-10:00"}),
+            hass=_hass({"sensor.min_hour": raw_range}),
             entry=_entry(**{CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR: "sensor.min_hour"}),
         )
 
         consume = resolver.windows(NOW).consume
         assert consume == _legacy(_dt(8, 12), _dt(8, 13), None)
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
         assert any(
-            "sensor.min_hour" in record.getMessage() and "12:00-10:00" in record.getMessage()
-            for record in caplog.records
-            if record.levelname == "WARNING"
+            "sensor.min_hour" in message and raw_range in message and fault in message
+            for message in warnings
         )
 
     @pytest.mark.parametrize("raw_hour", ["inf", "1e30", "2147483648"])

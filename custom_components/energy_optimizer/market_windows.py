@@ -902,7 +902,8 @@ class CoordinatorMarketWindowResolver:
             range_end = dt_util.parse_time(second)
             if range_end is None:
                 _LOGGER.warning(
-                    "Legacy time entity %s range %s has no readable end, window lasts one hour",
+                    "Legacy time entity %s range %s has an end that is not a time of day, "
+                    "window lasts one hour",
                     entity_id,
                     raw_time,
                 )
