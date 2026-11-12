@@ -36,6 +36,7 @@ from ..decision_engine.common import (
     resolve_entry,
 )
 from ..helpers import (
+    day_buy_window_missing_for_today,
     get_internal_window_price,
     resolve_day_buy_window_end_hour,
     resolve_day_buy_window_start_hour,
@@ -229,7 +230,23 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
         return await self._prepare_program_start_time()
 
     async def _check_early_exit(self) -> bool:
-        """Reject incomplete afternoon control configuration before writes."""
+        """Skip without a Day Buy Window; reject incomplete control configuration."""
+        if day_buy_window_missing_for_today(self.hass, entry_id=self.entry.entry_id):
+            summary = "Afternoon charge skipped: no Day Buy Window"
+            await log_decision_unified(
+                self.hass,
+                self.entry,
+                DecisionOutcome(
+                    scenario=self.scenario_name,
+                    action_type="no_action",
+                    summary=summary,
+                    reason="No Day Buy Window is planned for today",
+                    details={"result": summary},
+                ),
+                context=self.integration_context,
+                logger=_LOGGER,
+            )
+            return True
         if not self.config.get(CONF_GRID_CHARGE_CURRENT_ENTITY):
             await self._log_write_failure(
                 "Grid charge current control is required for Afternoon Charge"
