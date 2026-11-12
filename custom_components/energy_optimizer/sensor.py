@@ -46,6 +46,7 @@ from .entities.sensors import (
     SellPriceSensor,
     UsableCapacitySensor,
 )
+from .market_windows import market_window_resolver
 from .services import check_and_update_balancing_completion
 
 _LOGGER = logging.getLogger(__name__)
@@ -63,6 +64,8 @@ async def async_setup_entry(
         _LOGGER.error("Coordinator not available for entry %s", config_entry.entry_id)
         return
 
+    resolver = market_window_resolver(hass, config_entry.entry_id)
+
     sensors = [
         BatteryReserveSensor(coordinator, config_entry, config),
         BatterySpaceSensor(coordinator, config_entry, config),
@@ -74,19 +77,19 @@ async def async_setup_entry(
         MinSocSensor(coordinator, config_entry, config),
         MaxSocSensor(coordinator, config_entry, config),
         BuyPriceSensor(coordinator, config_entry, config),
-        NightBuyWindowSensor(coordinator, config_entry, config),
-        DayBuyWindowSensor(coordinator, config_entry, config),
-        NightBuyWindowTomorrowSensor(coordinator, config_entry, config),
-        DayBuyWindowTomorrowSensor(coordinator, config_entry, config),
+        NightBuyWindowSensor(coordinator, config_entry, config, resolver),
+        DayBuyWindowSensor(coordinator, config_entry, config, resolver),
+        NightBuyWindowTomorrowSensor(coordinator, config_entry, config, resolver),
+        DayBuyWindowTomorrowSensor(coordinator, config_entry, config, resolver),
         SellPriceSensor(coordinator, config_entry, config),
         MinArbitrageMarginSensor(coordinator, config_entry, config),
-        MorningSellBuyReferenceSensor(coordinator, config_entry, config),
-        MorningSellWindowSensor(coordinator, config_entry, config),
-        EveningSellWindowSensor(coordinator, config_entry, config),
-        MorningSellWindowTomorrowSensor(coordinator, config_entry, config),
-        EveningSellWindowTomorrowSensor(coordinator, config_entry, config),
-        ConsumeWindowSensor(coordinator, config_entry, config),
-        ConsumeWindowTomorrowSensor(coordinator, config_entry, config),
+        MorningSellBuyReferenceSensor(coordinator, config_entry, config, resolver),
+        MorningSellWindowSensor(coordinator, config_entry, config, resolver),
+        EveningSellWindowSensor(coordinator, config_entry, config, resolver),
+        MorningSellWindowTomorrowSensor(coordinator, config_entry, config, resolver),
+        EveningSellWindowTomorrowSensor(coordinator, config_entry, config, resolver),
+        ConsumeWindowSensor(coordinator, config_entry, config, resolver),
+        ConsumeWindowTomorrowSensor(coordinator, config_entry, config, resolver),
         PvForecastCompensationSensor(coordinator, config_entry, config),
     ]
 

@@ -18,8 +18,10 @@ from custom_components.energy_optimizer.entities.sensors.pricing import (
     NightBuyWindowSensor,
     NightBuyWindowTomorrowSensor,
 )
+from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
 from custom_components.energy_optimizer.sensor import async_setup_entry
 from custom_components.energy_optimizer.services import async_register_services
+from tests.conftest import market_windows
 
 
 @pytest.mark.asyncio
@@ -78,7 +80,14 @@ async def test_sensor_setup_registers_buy_window_sensors_additively() -> None:
             "sensor.sell": {"prices_today": [], "prices_tomorrow": []},
         },
     }
-    hass.data = {DOMAIN: {"entry-1": {"coordinator": coordinator}}}
+    hass.data = {
+        DOMAIN: {
+            "entry-1": {
+                "coordinator": coordinator,
+                "market_windows": StaticMarketWindowResolver(market_windows()),
+            }
+        }
+    }
 
     entry = MagicMock()
     entry.entry_id = "entry-1"
