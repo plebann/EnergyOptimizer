@@ -29,7 +29,6 @@ from custom_components.energy_optimizer.decision_engine.common import (
     BatteryConfig,
     ForecastData,
     _compute_arbitrage_from_cap,
-    legacy_buy_reference,
     resolve_arbitrage_margin_gate,
 )
 from custom_components.energy_optimizer.decision_engine.morning_charge import (
@@ -45,8 +44,6 @@ from custom_components.energy_optimizer.market_windows import (
 from tests.conftest import market_windows, window
 
 pytestmark = pytest.mark.enable_socket
-
-_INTERNAL_SENSOR_PATCH = "custom_components.energy_optimizer.helpers.get_internal_sensor_entity_id"
 
 
 # ---------------------------------------------------------------------------
@@ -240,14 +237,6 @@ def _arb_config(
         CONF_PV_FORECAST_REMAINING: remaining_entity,
         CONF_MIN_ARBITRAGE_PRICE: min_price,
     }
-
-
-def _internal_sensor_id(_hass, *, entry_id: str, unique_id_suffix: str, entity_domain: str = "sensor") -> str | None:
-    mapping = {
-        "night_buy_next_window": "sensor.night_buy_window_tomorrow_internal",
-        "day_buy_window": "sensor.day_buy_window_internal",
-    }
-    return mapping.get(unique_id_suffix)
 
 
 def _arb_hass(
@@ -500,19 +489,10 @@ async def test_morning_charge_arbitrage_increases_gap(
     assert details_no_arb.get("arbitrage_kwh", 0.0) == 0.0
 
 
-@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
-def test_resolve_arbitrage_margin_gate_for_day_window(_mock_internal):
+def test_resolve_arbitrage_margin_gate_for_day_window():
     """Shared helper should resolve day buy window margin details."""
-    hass = _arb_hass(day_buy_price=0.3)
     margin_ok, details = resolve_arbitrage_margin_gate(
-        0.9,
-        0.2,
-        legacy_buy_reference(
-            hass,
-            entry_id="entry-1",
-            unique_id_suffix="day_buy_window",
-            entity_name="Day buy window",
-        ),
+        0.9, 0.2, window(12, 14, 0.3)
     )
 
     assert margin_ok is True
@@ -520,51 +500,13 @@ def test_resolve_arbitrage_margin_gate_for_day_window(_mock_internal):
     assert details["arbitrage_margin"] == pytest.approx(0.6)
 
 
-@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
-def test_resolve_arbitrage_margin_gate_rounds_price_details(_mock_internal):
+def test_resolve_arbitrage_margin_gate_rounds_price_details():
     """Shared helper should round price diagnostics to two decimal places."""
-    hass = _arb_hass(day_buy_price=0.465)
     margin_ok, details = resolve_arbitrage_margin_gate(
-        1.2,
-        0.1,
-        legacy_buy_reference(
-            hass,
-            entry_id="entry-1",
-            unique_id_suffix="day_buy_window",
-            entity_name="Day buy window",
-        ),
+        1.2, 0.1, window(12, 14, 0.465)
     )
 
     assert margin_ok is True
     assert details["sell_price"] == 1.2
     assert details["buy_reference_price"] == 0.47
     assert details["arbitrage_margin"] == 0.73
-
-
-@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
-def test_legacy_buy_reference_wraps_the_helper_price(_mock_internal):
-    """The bridge carries the old helper's price with the legacy source."""
-    reference = legacy_buy_reference(
-        _arb_hass(day_buy_price=0.3),
-        entry_id="entry-1",
-        unique_id_suffix="day_buy_window",
-        entity_name="Day buy window",
-    )
-
-    assert reference.price == pytest.approx(0.3)
-    assert reference.source is MarketWindowSource.LEGACY_ENTITY
-
-
-@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
-def test_legacy_buy_reference_without_price_is_a_default_window(_mock_internal):
-    """A missing helper price becomes an unavailable Default Market Window."""
-    reference = legacy_buy_reference(
-        _arb_hass(day_buy_price=None),
-        entry_id="entry-1",
-        unique_id_suffix="day_buy_window",
-        entity_name="Day buy window",
-    )
-
-    assert reference.price is None
-    assert reference.source is MarketWindowSource.DEFAULT
-    assert reference.reason == "unavailable"

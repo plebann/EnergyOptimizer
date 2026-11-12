@@ -25,11 +25,16 @@ from custom_components.energy_optimizer.decision_engine.afternoon_charge import 
     async_run_afternoon_charge,
 )
 from custom_components.energy_optimizer.decision_engine.common import ForecastData
-from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
+from custom_components.energy_optimizer.market_windows import (
+    MarketWindowSource,
+    RankedMarketWindow,
+    ResolvedHour,
+    StaticMarketWindowResolver,
+)
 from custom_components.energy_optimizer.night_buy_window_manager import (
     NightBuyWindowPlanManager,
 )
-from tests.conftest import market_windows
+from tests.conftest import market_windows, window
 
 pytestmark = pytest.mark.enable_socket
 
@@ -168,47 +173,25 @@ async def _run(
             },
         )
 
+    hass.data[DOMAIN]["entry-1"]["market_windows"] = StaticMarketWindowResolver(
+        market_windows(
+            day_buy=window(12, day_buy_end_hour, 0.3),
+            night_buy=(
+                market_windows().night_buy
+                if tomorrow_start_hour is None
+                else window(tomorrow_start_hour, 6, 0.3, next_day=True)
+            ),
+            night_buy_after=window(1, 5, 0.3, next_day=True),
+            evening_sell=RankedMarketWindow(primary=window(18, 19, 1.0), secondary=None),
+            high_tariff_start=ResolvedHour(14, MarketWindowSource.PRICES),
+        )
+    )
+
     with ExitStack() as stack:
         gather_mock = stack.enter_context(
             patch(
                 f"{_CHARGE_BASE_MODULE}.gather_forecasts",
                 AsyncMock(return_value=forecast),
-            )
-        )
-        stack.enter_context(
-            patch(
-                f"{_AFTERNOON_MODULE}.resolve_tariff_start_hour",
-                return_value=14,
-            )
-        )
-        stack.enter_context(
-            patch(
-                f"{_AFTERNOON_MODULE}.resolve_day_buy_window_start_hour",
-                return_value=12,
-            )
-        )
-        stack.enter_context(
-            patch(
-                f"{_AFTERNOON_MODULE}.resolve_day_buy_window_end_hour",
-                return_value=day_buy_end_hour,
-            )
-        )
-        stack.enter_context(
-            patch(
-                f"{_AFTERNOON_MODULE}.resolve_night_buy_window_tomorrow_start_hour",
-                return_value=tomorrow_start_hour,
-            )
-        )
-        stack.enter_context(
-            patch(
-                f"{_AFTERNOON_MODULE}.resolve_evening_max_price_hour",
-                return_value=18,
-            )
-        )
-        stack.enter_context(
-            patch(
-                f"{_AFTERNOON_MODULE}.get_internal_window_price",
-                return_value=1.0,
             )
         )
         stack.enter_context(
@@ -499,3 +482,47 @@ async def test_afternoon_charge_is_skipped_without_a_day_buy_window() -> None:
     assert optimization.log_optimization.call_args.args[1] == {
         "result": "Afternoon charge skipped: no Day Buy Window"
     }
+
+
+@pytest.mark.asyncio
+async def test_completion_is_scheduled_at_the_snapshot_day_buy_window() -> None:
+    """Completion runs at (day_buy.start, day_buy.end) of the snapshot."""
+    hass, _ = _hass(current_soc=20.0)
+    day_buy = window(12, 14, 0.3)
+    hass.data[DOMAIN]["entry-1"]["market_windows"] = StaticMarketWindowResolver(
+        market_windows(day_buy=day_buy)
+    )
+    schedule = AsyncMock()
+
+    with (
+        patch(
+            f"{_CHARGE_BASE_MODULE}.gather_forecasts",
+            AsyncMock(return_value=_forecast(usage={14: 0.8})),
+        ),
+        patch(f"{_AFTERNOON_MODULE}.async_schedule_charge_completion", schedule),
+    ):
+        await async_run_afternoon_charge(hass, entry_id="entry-1", margin=1.0)
+
+    schedule.assert_awaited_once()
+    kwargs = schedule.await_args.kwargs
+    assert (kwargs["window_start"], kwargs["window_end"]) == (day_buy.start, day_buy.end)
+    assert kwargs["complete_at"] == day_buy.end
+
+
+@pytest.mark.asyncio
+async def test_default_day_buy_window_starts_two_hours_before_high_tariff() -> None:
+    """A Default Day Buy Window is sized from the snapshot's High-Tariff start."""
+    hass, _ = _hass(current_soc=20.0)
+    hass.data[DOMAIN]["entry-1"]["market_windows"] = StaticMarketWindowResolver(
+        market_windows()
+    )
+    gather_mock = AsyncMock(return_value=_forecast(usage={14: 0.8}))
+
+    with (
+        patch(f"{_CHARGE_BASE_MODULE}.gather_forecasts", gather_mock),
+        patch(f"{_AFTERNOON_MODULE}.async_schedule_charge_completion", AsyncMock()),
+    ):
+        await async_run_afternoon_charge(hass, entry_id="entry-1", margin=1.0)
+
+    assert market_windows().day_buy.source is MarketWindowSource.DEFAULT
+    assert gather_mock.call_args.kwargs["start_hour"] == 13

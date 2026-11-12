@@ -17,7 +17,6 @@ from ..calculations.battery import (
 )
 from ..calculations.energy import hourly_demand
 from ..const import (
-    CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_GRID_CHARGE_CURRENT_ENTITY,
     CONF_PROG4_TIME_START_ENTITY,
@@ -31,23 +30,12 @@ from ..decision_engine.common import (
     ForecastData,
     get_entry_data,
     get_required_prog4_soc_state,
-    legacy_buy_reference,
     resolve_arbitrage_margin_gate,
     resolve_entry,
 )
-from ..helpers import (
-    day_buy_window_missing_for_today,
-    get_internal_window_price,
-    resolve_day_buy_window_end_hour,
-    resolve_day_buy_window_start_hour,
-    resolve_evening_max_price_hour,
-    resolve_night_buy_window_tomorrow_start_hour,
-    resolve_tariff_start_hour,
-)
-from ..service_handlers.charge_completion import (
-    async_schedule_charge_completion,
-    resolve_charge_window,
-)
+from ..helpers import day_buy_window_missing_for_today
+from ..market_windows import MarketWindows
+from ..service_handlers.charge_completion import async_schedule_charge_completion
 from ..utils.decision_dump import active_decision_audit
 from ..utils.logging import DecisionOutcome, log_decision_unified
 from ..utils.time_window import build_hour_window
@@ -113,29 +101,18 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
 
     def _resolve_forecast_params(self) -> tuple[int, int, dict[str, object]]:
         """Resolve the full day-buy start through the protection horizon."""
-        tariff_start_hour = resolve_tariff_start_hour(self.hass, self.config)
-        self._day_buy_start_hour = resolve_day_buy_window_start_hour(
-            self.hass,
-            self.config,
-            entry_id=self.entry.entry_id,
-            default_hour=(tariff_start_hour - 2) % 24,
-        )
-        self._day_buy_end_hour = resolve_day_buy_window_end_hour(
-            self.hass,
-            self.config,
-            entry_id=self.entry.entry_id,
-            default_hour=tariff_start_hour,
-        )
-        tomorrow_night_start = resolve_night_buy_window_tomorrow_start_hour(
-            self.hass,
-            self.config,
-            entry_id=self.entry.entry_id,
-            default_hour=NIGHT_BUY_WINDOW_START_HOUR,
-        )
-        if tomorrow_night_start is None:
-            tomorrow_night_start = NIGHT_BUY_WINDOW_START_HOUR
+        day_buy = self.windows.day_buy
+        self._day_buy_start_hour = day_buy.hour
+        self._day_buy_end_hour = day_buy.end_hour
+        upcoming_night = self.windows.night_buy
+        if upcoming_night.is_fallback:
             self._forecast_end_kind = "night_start_fallback"
-            return self._day_buy_start_hour, tomorrow_night_start, {"apply_efficiency": False}
+            return (
+                self._day_buy_start_hour,
+                NIGHT_BUY_WINDOW_START_HOUR,
+                {"apply_efficiency": False},
+            )
+        tomorrow_night_start = upcoming_night.hour
 
         self._forecast_end_kind = "nb_t_s"
         return (
@@ -146,13 +123,8 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
 
     def _resolve_completion_window(self) -> tuple[datetime, datetime]:
         """Resolve the concrete day buy window used by this run."""
-        return resolve_charge_window(
-            self.hass,
-            self.entry,
-            charge_type="afternoon",
-            fallback_start_hour=self._day_buy_start_hour,
-            fallback_end_hour=self._day_buy_end_hour,
-        )
+        day_buy = self.windows.day_buy
+        return day_buy.start, day_buy.end
 
     def _current_program_start_time(self, entity_id: str) -> time | None:
         """Read the configured Program 4 start time."""
@@ -294,15 +266,10 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             if entry_data is not None
             else None
         )
-        self._sell_start_hour = resolve_evening_max_price_hour(
-            self.hass,
-            self.config,
-            entry_id=self.entry.entry_id,
-        )
+        self._sell_start_hour = self.windows.evening_sell.primary.hour
         self._plan = _build_afternoon_plan(
-            self.hass,
             self.config,
-            entry_id=self.entry.entry_id,
+            windows=self.windows,
             forecasts=self.forecasts,
             bc=self.bc,
             current_soc=self.current_soc,
@@ -762,10 +729,9 @@ def _max_uniform_rate(
 
 
 def _build_afternoon_plan(
-    hass: HomeAssistant,
     config: dict[str, object],
     *,
-    entry_id: str,
+    windows: MarketWindows,
     forecasts: ForecastData,
     bc: BatteryConfig,
     current_soc: float,
@@ -875,26 +841,14 @@ def _build_afternoon_plan(
     if not protection_feasible:
         arbitrage_details["arbitrage_reason"] = "protection_infeasible"
     else:
-        sell_price = get_internal_window_price(
-            hass,
-            entry_id=entry_id,
-            unique_id_suffix="evening_sell_window",
-            entity_name="Sell window price",
-            attribute_name="price",
-            fallback_entity_id=config.get(CONF_EVENING_MAX_PRICE_SENSOR),
-        )
+        sell_price = windows.evening_sell.primary.price
         if sell_price is None:
             arbitrage_details["arbitrage_reason"] = "missing_sell_price"
         else:
             margin_ok, margin_details = resolve_arbitrage_margin_gate(
                 sell_price,
                 float(config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0),
-                legacy_buy_reference(
-                    hass,
-                    entry_id=entry_id,
-                    unique_id_suffix="day_buy_window",
-                    entity_name="Day buy window",
-                ),
+                windows.day_buy,
             )
             arbitrage_details.update(margin_details)
             horizon_hours = build_hour_window(

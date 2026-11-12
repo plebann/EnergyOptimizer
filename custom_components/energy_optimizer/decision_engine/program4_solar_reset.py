@@ -13,12 +13,8 @@ from ..const import (
     CONF_PV_FORECAST_TODAY,
 )
 from ..controllers.inverter import set_program_soc
-from ..helpers import (
-    get_required_float_state,
-    resolve_day_buy_window_start_hour,
-    resolve_prog4_start_time,
-    resolve_tariff_start_hour,
-)
+from ..helpers import get_required_float_state, resolve_prog4_start_time
+from ..market_windows import MarketWindows, market_window_resolver
 from ..utils.decision_dump import active_decision_audit, emit_decision_dump
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from .common import (
@@ -51,6 +47,7 @@ async def _async_run_program4_solar_reset(
     hass: HomeAssistant,
     *,
     entry_id: str | None = None,
+    windows: MarketWindows,
 ) -> None:
     """Reset Program 4 target when its pre-charge window has solar surplus."""
     entry = resolve_entry(hass, entry_id)
@@ -62,13 +59,7 @@ async def _async_run_program4_solar_reset(
     if prog4_start is None:
         return
 
-    tariff_start_hour = resolve_tariff_start_hour(hass, config)
-    afternoon_charge_hour = resolve_day_buy_window_start_hour(
-        hass,
-        config,
-        entry_id=entry.entry_id,
-        default_hour=(tariff_start_hour - 2) % 24,
-    )
+    afternoon_charge_hour = windows.day_buy.hour
     if prog4_start.hour >= afternoon_charge_hour:
         _LOGGER.debug(
             "Skipping Program 4 solar reset: start hour %02d is not before afternoon charge hour %02d",
@@ -169,8 +160,9 @@ async def async_run_program4_solar_reset(
     entry = resolve_entry(hass, entry_id)
     if entry is None:
         return
+    windows = market_window_resolver(hass, entry.entry_id).windows()
     async with active_decision_audit(hass, entry, trigger=trigger) as audit:
-        await _async_run_program4_solar_reset(hass, entry_id=entry_id)
+        await _async_run_program4_solar_reset(hass, entry_id=entry_id, windows=windows)
         if not audit.actions:
             return
         emit_decision_dump(

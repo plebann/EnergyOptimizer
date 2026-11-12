@@ -28,6 +28,9 @@ from custom_components.energy_optimizer.decision_engine.evening_behavior import 
     async_run_evening_behavior,
 )
 
+from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
+from tests.conftest import market_windows
+
 pytestmark = pytest.mark.enable_socket
 EVENING = "custom_components.energy_optimizer.decision_engine.evening_behavior"
 
@@ -66,6 +69,7 @@ def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
             entry.entry_id: {
                 "last_optimization_sensor": mock_opt_sensor,
                 "optimization_history_sensor": mock_hist_sensor,
+                "market_windows": StaticMarketWindowResolver(market_windows()),
             }
         }
     }
@@ -139,7 +143,6 @@ def _patch_preservation_inputs(
     heat_pump_hourly: dict[int, float],
     pv_hourly: dict[int, float],
     losses_hourly: float,
-    tariff_end_hour: int = 13,
     reserve_kwh: float = 5.0,
     battery_space_kwh: float = 10.0,
 ) -> None:
@@ -161,10 +164,6 @@ def _patch_preservation_inputs(
     monkeypatch.setattr(
         f"{EVENING}.calculate_losses",
         lambda *args, **kwargs: (losses_hourly, losses_hourly),
-    )
-    monkeypatch.setattr(
-        f"{EVENING}.resolve_tariff_end_hour",
-        lambda hass, config: tariff_end_hour,
     )
     monkeypatch.setattr(
         f"{EVENING}.calculate_battery_reserve",
@@ -206,6 +205,7 @@ async def test_preservation_context_calculates_lower_morning_target_soc(
         hass,
         config,
         entry_id="entry-1",
+        windows=market_windows(),
         current_soc=68.0,
         battery_config=battery_config,
         margin=1.1,
@@ -246,6 +246,7 @@ async def test_preservation_context_empty_morning_window_uses_min_soc(
         hass,
         config,
         entry_id="entry-1",
+        windows=market_windows(),
         current_soc=68.0,
         battery_config=battery_config,
         margin=1.1,
@@ -274,7 +275,6 @@ async def test_preservation_context_no_sufficiency_uses_tariff_end_window(
         heat_pump_hourly={},
         pv_hourly={},
         losses_hourly=0.1,
-        tariff_end_hour=13,
     )
 
     battery_config = SimpleNamespace(
@@ -288,6 +288,7 @@ async def test_preservation_context_no_sufficiency_uses_tariff_end_window(
         hass,
         config,
         entry_id="entry-1",
+        windows=market_windows(),
         current_soc=68.0,
         battery_config=battery_config,
         margin=1.1,
@@ -329,6 +330,7 @@ async def test_preservation_context_clamps_morning_target_to_current_soc(
         hass,
         config,
         entry_id="entry-1",
+        windows=market_windows(),
         current_soc=30.0,
         battery_config=battery_config,
         margin=1.1,

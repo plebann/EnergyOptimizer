@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,11 +21,29 @@ from custom_components.energy_optimizer.decision_engine.solar_charge_block impor
     async_run_solar_charge_block,
 )
 
+from custom_components.energy_optimizer.market_windows import (
+    MarketWindowSource,
+    RankedMarketWindow,
+    ResolvedMarketWindow,
+    StaticMarketWindowResolver,
+)
+from tests.conftest import MARKET_WINDOWS_NOW, market_windows, window
+
 pytestmark = pytest.mark.enable_socket
 
 _ENTRY_ID = "entry-solar"
 _PV_FORECAST_ENTITY = "sensor.pv_forecast"
 _MAX_CHARGE_ENTITY = "number.max_charge"
+
+
+def _consume_window(at: time) -> ResolvedMarketWindow:
+    start = MARKET_WINDOWS_NOW.replace(hour=at.hour, minute=at.minute)
+    return ResolvedMarketWindow(
+        start=start,
+        end=start + timedelta(hours=1),
+        price=0.1,
+        source=MarketWindowSource.PRICES,
+    )
 
 
 def _state(value: str, attributes: dict | None = None) -> MagicMock:
@@ -123,16 +141,13 @@ async def _run(
                 return_value=hass._mock_now,
             )
         )
-        stack.enter_context(
-            patch(
-                "custom_components.energy_optimizer.decision_engine.solar_charge_block.resolve_morning_max_price_hour",
-                return_value=morning_sell_hour,
-            )
-        )
-        stack.enter_context(
-            patch(
-                "custom_components.energy_optimizer.decision_engine.solar_charge_block.resolve_daytime_min_price_time",
-                return_value=daytime_min_price_time,
+        hass.data[DOMAIN][_ENTRY_ID]["market_windows"] = StaticMarketWindowResolver(
+            market_windows(
+                morning_sell=RankedMarketWindow(
+                    primary=window(morning_sell_hour, morning_sell_hour + 1, 0.5),
+                    secondary=None,
+                ),
+                consume=_consume_window(daytime_min_price_time),
             )
         )
         stack.enter_context(
