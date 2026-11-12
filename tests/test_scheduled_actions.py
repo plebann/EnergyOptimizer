@@ -917,3 +917,51 @@ async def test_tariff_entity_change_reschedules_through_the_same_path() -> None:
     scheduler._schedule_afternoon_charge.reset_mock()
     scheduler._handle_coordinator_update()
     scheduler._schedule_afternoon_charge.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_window_changes_during_completion_restore_apply_once_it_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A coordinator update dropped during restoration is not lost."""
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_restore_charge_completions",
+        AsyncMock(),
+    )
+    resolver = _resolver()
+    scheduler = _scheduler_with_mocked_reschedules(resolver)
+
+    resolver.swap(evening_sell=_ranked(19))
+    await scheduler._restore_completions_then_schedule_morning_charge()
+
+    assert _called(scheduler) == {
+        "_schedule_morning_charge",
+        "_schedule_evening_sell",
+        "_schedule_sell_restores",
+    }
+
+
+def test_pending_completion_keeps_its_own_source_label() -> None:
+    """A completion's window is persisted, so the current window's source is not its source."""
+    sink = _FakeScheduledActionsSink()
+    scheduler = ActionScheduler(
+        MagicMock(), _mock_entry(), MagicMock(), _resolver()
+    )
+    scheduler.hass.data = {
+        DOMAIN: {
+            "entry-1": {
+                "scheduled_actions_sensor": sink,
+                "charge_completion_plans": {
+                    "morning": {"complete_at": "2026-03-11T06:00:00+01:00"}
+                },
+            }
+        }
+    }
+    scheduler.coordinator.get_morning_charge_start.return_value = None
+
+    scheduler._publish_schedule_snapshot()
+
+    completion = next(
+        a for a in sink.snapshot["actions"] if a["key"] == "morning_charge_completion"
+    )
+    assert completion["source"] == "morning_buy_window_end"

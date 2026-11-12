@@ -235,7 +235,7 @@ class ActionScheduler:
     async def _restore_completions_then_schedule_morning_charge(self) -> None:
         """Restore completions before scheduling a possible startup charge."""
         await async_restore_charge_completions(self.hass, self.entry)
-        self._schedule_morning_charge()
+        self._reschedule_changed_windows("_schedule_morning_charge")
 
     def stop(self) -> None:
         """Stop all scheduled listeners."""
@@ -1006,11 +1006,7 @@ class ActionScheduler:
                         label=f"{str(charge_type).title()} charge completion",
                         scheduled_for=dt_util.as_local(scheduled_for),
                         kind="dynamic",
-                        source=(
-                            windows.night_buy
-                            if charge_type == "morning"
-                            else windows.day_buy
-                        ).source.value,
+                        source=f"{charge_type}_buy_window_end",
                         order=105 if charge_type == "morning" else 106,
                     )
                 )
