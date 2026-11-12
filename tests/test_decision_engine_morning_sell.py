@@ -1343,3 +1343,30 @@ async def test_morning_sell_demand_end_source_is_the_day_buy_window_when_resolve
     assert details["morning_price_source"] == "prices"
     assert details["evening_price_source"] == "prices"
     assert details["demand_end_source"] == "prices"
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_logs_sell_with_none_price_when_morning_price_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    hass = _setup_hass(
+        config,
+        _base_states(),
+        morning_sell=default_market_windows(MARKET_WINDOWS_NOW).morning_sell,
+    )
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+    _patch_forecasts(monkeypatch, sufficiency=(3.0, 2.0, 1.0, 13, False))
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_battery_reserve", lambda *args, **kwargs: 10.0
+    )
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_surplus_energy", lambda reserve, required, pv: 5.0
+    )
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes
+    assert outcomes[-1].action_type == "sell"
+    assert outcomes[-1].details["morning_price"] is None
