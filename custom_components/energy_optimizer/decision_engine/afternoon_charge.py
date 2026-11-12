@@ -104,15 +104,15 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
         day_buy = self.windows.day_buy
         self._day_buy_start_hour = day_buy.hour
         self._day_buy_end_hour = day_buy.end_hour
-        night_after = self.windows.night_buy_after
-        if night_after.is_fallback:
+        upcoming_night = self.windows.night_buy
+        if upcoming_night.is_fallback:
             self._forecast_end_kind = "night_start_fallback"
             return (
                 self._day_buy_start_hour,
                 NIGHT_BUY_WINDOW_START_HOUR,
                 {"apply_efficiency": False},
             )
-        tomorrow_night_start = night_after.hour
+        tomorrow_night_start = upcoming_night.hour
 
         self._forecast_end_kind = "nb_t_s"
         return (

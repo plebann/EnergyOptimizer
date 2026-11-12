@@ -176,11 +176,12 @@ async def _run(
     hass.data[DOMAIN]["entry-1"]["market_windows"] = StaticMarketWindowResolver(
         market_windows(
             day_buy=window(12, day_buy_end_hour, 0.3),
-            night_buy_after=(
-                window(22, 23, 0.3, next_day=True)
+            night_buy=(
+                market_windows().night_buy
                 if tomorrow_start_hour is None
                 else window(tomorrow_start_hour, 6, 0.3, next_day=True)
             ),
+            night_buy_after=window(1, 5, 0.3, next_day=True),
             evening_sell=RankedMarketWindow(primary=window(18, 19, 1.0), secondary=None),
             high_tariff_start=ResolvedHour(14, MarketWindowSource.PRICES),
         )
