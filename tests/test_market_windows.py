@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from homeassistant.util import dt as dt_util
 
 from custom_components.energy_optimizer.const import (
     CONF_BUY_PRICE_SENSOR,
@@ -41,6 +42,12 @@ from custom_components.energy_optimizer.night_buy_window_manager import (
 from tests.conftest import MARKET_WINDOWS_NOW, market_windows, window
 
 TZ = ZoneInfo("Europe/Warsaw")
+
+
+@pytest.fixture(autouse=True)
+def _home_assistant_local_time_is_warsaw(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The resolver anchors every snapshot in Home Assistant's local zone."""
+    monkeypatch.setattr(dt_util, "DEFAULT_TIME_ZONE", TZ)
 
 
 def _dt(day: int, hour: int, minute: int = 0) -> datetime:
@@ -652,6 +659,19 @@ class TestCoordinatorMarketWindowResolverHighTariff:
         assert snapshot.high_tariff_start == ResolvedHour(0, MarketWindowSource.CONFIG_ENTITY)
         assert snapshot.high_tariff_end == ResolvedHour(7, MarketWindowSource.CONFIG_ENTITY)
 
+    def test_an_iso_datetime_state_is_read_as_its_local_hour(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.tariff_start": "2026-05-08T14:00:00+00:00"}),
+            entry=_entry(**{CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start"}),
+        )
+
+        with patch(
+            "custom_components.energy_optimizer.market_windows.dt_util.DEFAULT_TIME_ZONE", TZ
+        ):
+            snapshot = resolver.windows(NOW)
+
+        assert snapshot.high_tariff_start == ResolvedHour(16, MarketWindowSource.CONFIG_ENTITY)
+
     def test_an_end_hour_of_24_is_accepted(self) -> None:
         resolver = _resolver(
             hass=_hass({"sensor.tariff_end": "24"}),
@@ -749,6 +769,26 @@ class TestCoordinatorMarketWindowResolverNightBuyAfter:
         )
         resolver = _resolver(
             coordinator=_coordinator(_buy_payload(prices=after_tonight)),
+            night_next=TONIGHT,
+        )
+
+        after = resolver.windows(NOW).night_buy_after
+        assert (after.start, after.end, after.price, after.source) == (
+            _dt(9, 22),
+            _dt(10, 0),
+            0.50,
+            MarketWindowSource.PRICES,
+        )
+
+    def test_night_buy_after_joins_todays_and_tomorrows_lists_once_per_hour(self) -> None:
+        tonight = _hourly(9, {22: 0.50, 23: 0.50})
+        after_midnight = _hourly(10, {0: 0.90, 1: 0.90, 2: 0.90, 3: 0.90, 4: 0.90, 5: 0.90})
+        resolver = _resolver(
+            coordinator=_coordinator(
+                _buy_payload(
+                    prices_today=tonight, prices_tomorrow=tonight[-1:] + after_midnight
+                )
+            ),
             night_next=TONIGHT,
         )
 
@@ -1024,6 +1064,41 @@ class TestCoordinatorMarketWindowResolverLegacyEntities:
         primary = resolver.windows(NOW).morning_sell.primary
         assert (primary.source, primary.reason) == (MarketWindowSource.DEFAULT, "unavailable")
 
+    def test_a_legacy_sell_hour_with_minutes_starts_on_the_whole_hour(self) -> None:
+        resolver = _resolver(
+            hass=_hass({**EVENING_LEGACY_STATES, "sensor.evening_hour": "18:30"}),
+            entry=_entry(**EVENING_LEGACY),
+        )
+
+        assert resolver.windows(NOW).evening_sell.primary == _legacy(
+            _dt(8, 18), _dt(8, 19), 1.25
+        )
+
+    def test_a_legacy_consume_range_ends_at_the_ranges_end(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.min_hour": "10:00-12:00", "sensor.min_price": "0.2"}),
+            entry=_entry(
+                **{
+                    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR: "sensor.min_hour",
+                    CONF_DAYTIME_MIN_PRICE_SENSOR: "sensor.min_price",
+                }
+            ),
+        )
+
+        consume = resolver.windows(NOW).consume
+        assert consume == _legacy(_dt(8, 10), _dt(8, 12), 0.2)
+        assert consume.contains(_dt(8, 11, 30)) is True
+
+    def test_a_non_finite_legacy_secondary_hour_keeps_the_primary(self) -> None:
+        resolver = _resolver(
+            hass=_hass({**EVENING_LEGACY_STATES, "sensor.evening_second_hour": "inf"}),
+            entry=_entry(**EVENING_LEGACY),
+        )
+
+        assert resolver.windows(NOW).evening_sell == RankedMarketWindow(
+            primary=_legacy(_dt(8, 18), _dt(8, 19), 1.25), secondary=None
+        )
+
     def test_a_legacy_range_state_starts_the_window_at_its_first_time(self) -> None:
         resolver = _resolver(
             hass=_hass({"sensor.min_hour": "11:00-12:00", "sensor.min_price": "0.2"}),
@@ -1160,6 +1235,21 @@ class TestCoordinatorMarketWindowResolverInvariants:
             assert resolved.start.tzinfo is not None and resolved.end.tzinfo is not None
             assert resolved.start.utcoffset() == NOW.utcoffset()
         assert snapshot.now is NOW
+
+    def test_an_aware_now_in_another_zone_is_read_in_home_assistant_local_time(self) -> None:
+        resolver = _resolver(
+            coordinator=_coordinator(_sell_payload(prices_today=_hourly(8, EVENING_PRICES))),
+            night_next=TONIGHT,
+        )
+
+        with patch(
+            "custom_components.energy_optimizer.market_windows.dt_util.DEFAULT_TIME_ZONE", TZ
+        ):
+            snapshot = resolver.windows(NOW.astimezone(UTC))
+
+        assert snapshot.now == NOW and snapshot.now.utcoffset() == NOW.utcoffset()
+        assert snapshot.evening_sell.primary == window(17, 18, price=1.30)
+        assert snapshot.consume.start == _dt(8, 12)
 
     def test_a_naive_now_is_read_in_home_assistant_local_time(self) -> None:
         resolver = _resolver(night_next=TONIGHT)

@@ -421,6 +421,14 @@ def _ranked(spans: _RankedSpans, source: MarketWindowSource) -> RankedMarketWind
     )
 
 
+def _parse_range_end(state_value: object) -> time | None:
+    """Return the end time of an `HH:MM-HH:MM` entity state, if it is one."""
+    raw_value = str(state_value)
+    if not _TIME_RANGE.match(raw_value):
+        return None
+    return dt_util.parse_time(raw_value.split("-", 1)[1].strip())
+
+
 def _parse_clock(state_value: object) -> time | None:
     """Parse a wall time from a datetime, time or `HH:MM-HH:MM` range entity state."""
     raw_value = str(state_value)
@@ -434,7 +442,10 @@ def _parse_clock(state_value: object) -> time | None:
 
 def _parse_hour_number(state_value: object) -> int:
     """Parse a whole hour from a numeric entity state."""
-    return int(float(str(state_value)))
+    value = float(str(state_value))
+    if not isfinite(value):
+        raise ValueError(f"hour {state_value!r} is not finite")
+    return int(value)
 
 
 def _parse_hour(state_value: object) -> int:
@@ -581,6 +592,7 @@ class CoordinatorMarketWindowResolver:
         current = now or dt_util.now()
         if current.tzinfo is None:
             current = current.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+        current = dt_util.as_local(current)
         tz = current.tzinfo
         today = current.date()
         tomorrow = today + timedelta(days=1)
@@ -744,7 +756,11 @@ class CoordinatorMarketWindowResolver:
                 sell_entity,
                 current,
                 legacy=lambda: self._legacy_span(
-                    today, tz, CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR, CONF_DAYTIME_MIN_PRICE_SENSOR
+                    today,
+                    tz,
+                    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
+                    CONF_DAYTIME_MIN_PRICE_SENSOR,
+                    whole_hour=False,
                 ),
             ),
             consume_tomorrow=self._consume(sell_tomorrow, sell_entity, tomorrow_local),
@@ -854,17 +870,34 @@ class CoordinatorMarketWindowResolver:
         return hour
 
     def _legacy_span(
-        self, day: date, tz: tzinfo, time_key: str, price_key: str
+        self,
+        day: date,
+        tz: tzinfo,
+        time_key: str,
+        price_key: str,
+        *,
+        whole_hour: bool = True,
     ) -> _Span | None:
-        """A one-hour window at a legacy hour entity's time, priced by its price entity."""
+        """A window at a legacy time entity's time, priced by its price entity.
+
+        A sell window is the whole hour the entity names. The Consume Window
+        keeps the entity's minutes and, for an `HH:MM-HH:MM` state, its end;
+        otherwise a window lasts one hour.
+        """
         raw_time = self._entity_state(time_key)
         if raw_time is None:
             return None
         clock = _parse_clock(raw_time)
         if clock is None:
             clock = time(_parse_hour_number(raw_time))
+        if whole_hour:
+            clock = time(clock.hour)
         start = datetime.combine(day, clock, tzinfo=tz)
-        return start, start + timedelta(hours=1), self._legacy_price(price_key)
+        end = start + timedelta(hours=1)
+        range_end = None if whole_hour else _parse_range_end(raw_time)
+        if range_end is not None and datetime.combine(day, range_end, tzinfo=tz) > start:
+            end = datetime.combine(day, range_end, tzinfo=tz)
+        return start, end, self._legacy_price(price_key)
 
     def _legacy_price(self, price_key: str) -> float | None:
         """The legacy price entity's finite price, or None when it has none."""
