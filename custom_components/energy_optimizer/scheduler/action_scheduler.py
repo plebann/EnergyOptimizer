@@ -60,13 +60,7 @@ from ..service_handlers.charge_completion import (
 from ..market_windows import MarketWindowResolver, MarketWindows
 from ..helpers import (
     day_buy_window_missing_for_today,
-    resolve_day_buy_window_start_hour,
-    resolve_daytime_min_price_time,
-    resolve_evening_max_price_hour,
-    resolve_evening_second_max_price_hour,
-    resolve_morning_max_price_hour,
     resolve_prog4_start_time,
-    resolve_tariff_start_hour,
 )
 
 if TYPE_CHECKING:
@@ -365,19 +359,15 @@ class ActionScheduler:
         )
         self._publish_schedule_snapshot()
 
+    def _evening_second_hour(self) -> int | None:
+        """Return the Secondary evening sell hour, if the snapshot has one."""
+        secondary = self._windows.evening_sell.secondary
+        return None if secondary is None else secondary.hour
+
     def _primary_evening_window_is_first(self) -> bool:
         """Return whether the primary evening window occurs before the secondary one."""
-        primary_hour = resolve_evening_max_price_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-            default_hour=17,
-        )
-        secondary_hour = resolve_evening_second_max_price_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-        )
+        primary_hour = self._windows.evening_sell.primary.hour
+        secondary_hour = self._evening_second_hour()
         if secondary_hour is None:
             return True
         return primary_hour <= secondary_hour
@@ -569,14 +559,7 @@ class ActionScheduler:
             self._publish_schedule_snapshot()
             return
 
-        tariff_start_hour = resolve_tariff_start_hour(self.hass, self.entry.data)
-        fallback_hour = (tariff_start_hour - 2) % 24
-        hour = resolve_day_buy_window_start_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-            default_hour=fallback_hour,
-        )
+        hour = self._windows.day_buy.hour
         self._afternoon_listener = async_track_time_change(
             self.hass,
             self._handle_afternoon_charge,
@@ -597,13 +580,7 @@ class ActionScheduler:
             self._publish_schedule_snapshot()
             return
 
-        tariff_start_hour = resolve_tariff_start_hour(self.hass, self.entry.data)
-        afternoon_charge_hour = resolve_day_buy_window_start_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-            default_hour=(tariff_start_hour - 2) % 24,
-        )
+        afternoon_charge_hour = self._windows.day_buy.hour
         if start_time.hour >= afternoon_charge_hour:
             _LOGGER.debug(
                 "Program 4 solar reset disabled: start hour %02d is not before afternoon charge hour %02d",
@@ -655,12 +632,7 @@ class ActionScheduler:
             self._evening_sell_second_listener()
             self._evening_sell_second_listener = None
 
-        hour = resolve_evening_max_price_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-            default_hour=17,
-        )
+        hour = self._windows.evening_sell.primary.hour
         self._evening_sell_listener = async_track_time_change(
             self.hass,
             self._handle_evening_sell,
@@ -669,11 +641,7 @@ class ActionScheduler:
             second=1,
         )
 
-        second_hour = resolve_evening_second_max_price_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-        )
+        second_hour = self._evening_second_hour()
         if second_hour is not None:
             self._evening_sell_second_listener = async_track_time_change(
                 self.hass,
@@ -690,12 +658,7 @@ class ActionScheduler:
             self._morning_sell_listener()
             self._morning_sell_listener = None
 
-        hour = resolve_morning_max_price_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-            default_hour=7,
-        )
+        hour = self._windows.morning_sell.primary.hour
         self._morning_sell_listener = async_track_time_change(
             self.hass,
             self._handle_morning_sell,
@@ -711,11 +674,7 @@ class ActionScheduler:
             self._daytime_min_price_listener()
             self._daytime_min_price_listener = None
 
-        daytime_min_price_time = resolve_daytime_min_price_time(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-        )
+        daytime_min_price_time = self._windows.consume.start.time()
         hour = daytime_min_price_time.hour
         minute = daytime_min_price_time.minute
         self._daytime_min_price_listener = async_track_time_change(
@@ -763,12 +722,7 @@ class ActionScheduler:
             self._evening_restore_listener()
             self._evening_restore_listener = None
 
-        morning_hour = resolve_morning_max_price_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-            default_hour=7,
-        )
+        morning_hour = self._windows.morning_sell.primary.hour
         self._morning_restore_listener = async_track_time_change(
             self.hass,
             self._handle_morning_restore,
@@ -777,17 +731,8 @@ class ActionScheduler:
             second=1,
         )
 
-        evening_hour = resolve_evening_max_price_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-            default_hour=17,
-        )
-        second_evening_hour = resolve_evening_second_max_price_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-        )
+        evening_hour = self._windows.evening_sell.primary.hour
+        second_evening_hour = self._evening_second_hour()
         effective_evening_restore_hour = (
             (max(evening_hour, second_evening_hour) + 1) % 24
             if second_evening_hour is not None
@@ -857,13 +802,7 @@ class ActionScheduler:
             )
         )
 
-        tariff_start_hour = resolve_tariff_start_hour(self.hass, self.entry.data)
-        afternoon_charge_hour = resolve_day_buy_window_start_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-            default_hour=(tariff_start_hour - 2) % 24,
-        )
+        afternoon_charge_hour = self._windows.day_buy.hour
         if not day_buy_window_missing_for_today(self.hass, entry_id=self.entry.entry_id):
             actions.append(
                 self._build_action_entry(
@@ -900,12 +839,7 @@ class ActionScheduler:
                 )
             )
 
-        morning_sell_hour = resolve_morning_max_price_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-            default_hour=7,
-        )
+        morning_sell_hour = self._windows.morning_sell.primary.hour
         actions.append(
             self._build_action_entry(
                 key="morning_sell",
@@ -935,12 +869,7 @@ class ActionScheduler:
             )
         )
 
-        evening_sell_hour = resolve_evening_max_price_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-            default_hour=17,
-        )
+        evening_sell_hour = self._windows.evening_sell.primary.hour
         actions.append(
             self._build_action_entry(
                 key="evening_sell",
@@ -956,11 +885,7 @@ class ActionScheduler:
             )
         )
 
-        second_evening_sell_hour = resolve_evening_second_max_price_hour(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-        )
+        second_evening_sell_hour = self._evening_second_hour()
         evening_restore_source = windows.evening_sell.primary.source.value
         effective_evening_restore_hour = (evening_sell_hour + 1) % 24
         if second_evening_sell_hour is not None:
@@ -1001,11 +926,7 @@ class ActionScheduler:
             )
         )
 
-        daytime_min_price_time = resolve_daytime_min_price_time(
-            self.hass,
-            self.entry.data,
-            entry_id=self.entry.entry_id,
-        )
+        daytime_min_price_time = self._windows.consume.start.time()
         actions.append(
             self._build_action_entry(
                 key="daytime_min_price_restore",

@@ -276,7 +276,11 @@ def test_scheduler_publishes_structured_daily_snapshot(
             day_buy=_hour_window(13, length=2, source=MarketWindowSource.PLAN),
             morning_sell=_ranked(7),
             evening_sell=_ranked(18, 20),
-            consume=_hour_window(12, source=MarketWindowSource.CONFIG_ENTITY),
+            consume=replace(
+                _hour_window(12, source=MarketWindowSource.CONFIG_ENTITY),
+                start=datetime(2026, 3, 11, 12, 30, tzinfo=_TZ),
+                end=datetime(2026, 3, 11, 13, 30, tzinfo=_TZ),
+            ),
         )
         scheduler = ActionScheduler(hass, entry, coordinator, resolver)
         scheduler.start()
@@ -373,26 +377,6 @@ def test_scheduler_describes_solar_charge_block_sell_price_source(
             CONF_BUY_PRICE_SENSOR: "sensor.buy_price",
             CONF_SELL_PRICE_SENSOR: "sensor.sell_price",
         }
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_morning_max_price_hour",
-        lambda *args, **kwargs: 7,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_tariff_start_hour",
-        lambda *args, **kwargs: 15,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_evening_max_price_hour",
-        lambda *args, **kwargs: 18,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_evening_second_max_price_hour",
-        lambda *args, **kwargs: 20,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_daytime_min_price_time",
-        lambda *args, **kwargs: datetime(2026, 3, 11, 12, 30).time(),
     )
 
     scheduler = ActionScheduler(hass, entry, resolver=_resolver())
@@ -548,61 +532,25 @@ def test_schedule_morning_charge_uses_planned_window_timestamp(
 def test_schedule_afternoon_charge_uses_day_buy_window_hour(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Scheduler should use the internal day buy window start hour."""
+    """Scheduler should use the snapshot's Day Buy Window start hour."""
     hass = MagicMock()
     hass.data = {DOMAIN: {"entry-1": {}}}
     entry = _mock_entry(data={})
 
     captured_hours: list[int] = []
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_tariff_start_hour",
-        lambda hass, config: 15,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_day_buy_window_start_hour",
-        lambda hass, config, entry_id, default_hour: 11,
-    )
-    monkeypatch.setattr(
         "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
         lambda _hass, _callback, *, hour, minute, second: captured_hours.append(hour)
         or (lambda: None),
     )
 
-    scheduler = ActionScheduler(hass, entry)
+    scheduler = ActionScheduler(
+        hass, entry, resolver=_resolver(day_buy=_hour_window(11, length=2))
+    )
     scheduler._publish_schedule_snapshot = MagicMock()
     scheduler._schedule_afternoon_charge()
 
     assert captured_hours == [11]
-
-
-def test_schedule_afternoon_charge_falls_back_before_high_tariff(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Scheduler should fall back to two hours before high tariff starts."""
-    hass = MagicMock()
-    hass.data = {DOMAIN: {"entry-1": {}}}
-    entry = _mock_entry(data={})
-
-    captured_hours: list[int] = []
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_tariff_start_hour",
-        lambda hass, config: 15,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_day_buy_window_start_hour",
-        lambda hass, config, entry_id, default_hour: default_hour,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
-        lambda _hass, _callback, *, hour, minute, second: captured_hours.append(hour)
-        or (lambda: None),
-    )
-
-    scheduler = ActionScheduler(hass, entry)
-    scheduler._publish_schedule_snapshot = MagicMock()
-    scheduler._schedule_afternoon_charge()
-
-    assert captured_hours == [13]
 
 
 def _manager_with_day_plan(
@@ -625,16 +573,12 @@ def test_schedule_afternoon_charge_is_skipped_without_a_day_buy_window(
 
     captured_hours: list[int] = []
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_tariff_start_hour",
-        lambda hass, config: 15,
-    )
-    monkeypatch.setattr(
         "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
         lambda _hass, _callback, *, hour, minute, second: captured_hours.append(hour)
         or (lambda: None),
     )
 
-    scheduler = ActionScheduler(hass, entry)
+    scheduler = ActionScheduler(hass, entry, resolver=_resolver())
     scheduler._publish_schedule_snapshot = MagicMock()
     scheduler._schedule_afternoon_charge()
 
@@ -828,7 +772,7 @@ async def test_start_registers_sunrise_callback_that_runs_without_datetime_argum
         lambda *args, **kwargs: (lambda: None),
     )
 
-    scheduler = ActionScheduler(hass, entry)
+    scheduler = ActionScheduler(hass, entry, resolver=_resolver())
     scheduler._publish_schedule_snapshot = MagicMock()
     scheduler.start()
 
@@ -852,14 +796,10 @@ async def test_evening_scheduler_passes_primary_and_first_flags(
             CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak_2",
         }
     )
-    scheduler = ActionScheduler(hass, entry)
+    scheduler = ActionScheduler(
+        hass, entry, resolver=_resolver(evening_sell=_ranked(19, 18))
+    )
     scheduler._publish_schedule_snapshot = MagicMock()
-
-    states = {
-        "sensor.evening_peak": _state("19:00"),
-        "sensor.evening_peak_2": _state("18:00"),
-    }
-    hass.states.get.side_effect = states.get
 
     evening_mock = AsyncMock()
     monkeypatch.setattr(

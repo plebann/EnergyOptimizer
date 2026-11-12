@@ -1,7 +1,9 @@
 """Tests for the Program 4 solar-surplus reset."""
 from __future__ import annotations
 
-from datetime import time
+from dataclasses import replace
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,9 +15,29 @@ from custom_components.energy_optimizer.const import (
 from custom_components.energy_optimizer.decision_engine.program4_solar_reset import (
     async_run_program4_solar_reset,
 )
+from custom_components.energy_optimizer.market_windows import (
+    MarketWindowSource,
+    ResolvedMarketWindow,
+    StaticMarketWindowResolver,
+    default_market_windows,
+)
 from custom_components.energy_optimizer.scheduler.action_scheduler import ActionScheduler
 
 pytestmark = pytest.mark.enable_socket
+
+
+def _resolver_with_day_buy_hour(hour: int) -> StaticMarketWindowResolver:
+    now = datetime(2026, 3, 11, 0, 5, tzinfo=ZoneInfo("Europe/Warsaw"))
+    start = now.replace(hour=hour, minute=0)
+    day_buy = ResolvedMarketWindow(
+        start=start,
+        end=start + timedelta(hours=2),
+        price=0.5,
+        source=MarketWindowSource.PRICES,
+    )
+    return StaticMarketWindowResolver(
+        replace(default_market_windows(now), day_buy=day_buy)
+    )
 
 
 def _entry() -> MagicMock:
@@ -179,14 +201,6 @@ def test_scheduler_uses_program4_start_hour_and_minute(
         lambda *_args, **_kwargs: time(9, 30),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_tariff_start_hour",
-        lambda *_args, **_kwargs: 15,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_day_buy_window_start_hour",
-        lambda *_args, **_kwargs: 13,
-    )
-    monkeypatch.setattr(
         "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
         lambda _hass, _callback, *, hour, minute, second: captured.update(
             hour=hour,
@@ -196,7 +210,7 @@ def test_scheduler_uses_program4_start_hour_and_minute(
         or (lambda: None),
     )
 
-    scheduler = ActionScheduler(hass, entry)
+    scheduler = ActionScheduler(hass, entry, resolver=_resolver_with_day_buy_hour(13))
     scheduler._publish_schedule_snapshot = MagicMock()
     scheduler._schedule_program4_solar_reset()
 
@@ -217,19 +231,11 @@ def test_scheduler_does_not_schedule_reset_when_hours_match(
         lambda *_args, **_kwargs: time(10),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_tariff_start_hour",
-        lambda *_args, **_kwargs: 15,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_day_buy_window_start_hour",
-        lambda *_args, **_kwargs: 10,
-    )
-    monkeypatch.setattr(
         "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
         track_time_change,
     )
 
-    scheduler = ActionScheduler(hass, entry)
+    scheduler = ActionScheduler(hass, entry, resolver=_resolver_with_day_buy_hour(10))
     scheduler._publish_schedule_snapshot = MagicMock()
     scheduler._schedule_program4_solar_reset()
 
