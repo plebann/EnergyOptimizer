@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +18,12 @@ from custom_components.energy_optimizer.night_buy_window import (
 )
 from custom_components.energy_optimizer.const import CONF_BUY_PRICE_SENSOR
 from custom_components.energy_optimizer.coordinator import EnergyOptimizerCoordinator
+from custom_components.energy_optimizer.market_windows import (
+    MarketWindowSource,
+    ResolvedMarketWindow,
+    StaticMarketWindowResolver,
+    default_market_windows,
+)
 from custom_components.energy_optimizer.entities.sensors.pricing import (
     NightBuyWindowSensor,
     NightBuyWindowTomorrowSensor,
@@ -216,29 +223,36 @@ async def test_coordinator_creates_first_valid_plan_from_combined_prices(
 
 
 @pytest.mark.unit
-def test_night_sensors_publish_persisted_plan_slots() -> None:
-    """The window sensor reads the `window` slot, the next sensor the `next` slot."""
-    plan = {
-        "start_time": "2026-10-27T22:00:00+01:00",
-        "end_time": "2026-10-28T00:00:00+01:00",
-        "duration_hours": 2,
-        "price": 0.935,
-        "validated_complete": True,
-    }
+def test_night_sensors_project_the_snapshot_night_windows() -> None:
+    """The window sensor reads `night_buy_completed`, the next sensor `night_buy`."""
+    start = datetime(2026, 10, 27, 22, 0, tzinfo=TZ)
+    plan = ResolvedMarketWindow(
+        start=start,
+        end=start + timedelta(hours=2),
+        price=0.935,
+        source=MarketWindowSource.PLAN,
+    )
     coordinator = MagicMock()
-    coordinator.data = {
-        "buy_window_plans": {"night": {"window": None, "next": plan}, "day": {}}
-    }
+    coordinator.data = {}
     entry = MagicMock(entry_id="entry-1", data={}, options={})
     config = {CONF_BUY_PRICE_SENSOR: "sensor.buy"}
-    current = NightBuyWindowSensor(coordinator, entry, config)
-    upcoming = NightBuyWindowTomorrowSensor(coordinator, entry, config)
+    now = start - timedelta(hours=1)
 
+    def _sensors(**fields):
+        resolver = StaticMarketWindowResolver(
+            replace(default_market_windows(now), **fields)
+        )
+        return (
+            NightBuyWindowSensor(coordinator, entry, config, resolver),
+            NightBuyWindowTomorrowSensor(coordinator, entry, config, resolver),
+        )
+
+    current, upcoming = _sensors(night_buy=plan)
     assert current.native_value is None
     assert upcoming.native_value == "22:00-00:00"
     assert upcoming.extra_state_attributes["plan_date"] == "2026-10-28"
 
-    coordinator.data["buy_window_plans"]["night"] = {"window": plan, "next": None}
+    current, upcoming = _sensors(night_buy_completed=plan)
     assert current.native_value == "22:00-00:00"
     assert upcoming.native_value is None
     assert upcoming.extra_state_attributes == {}

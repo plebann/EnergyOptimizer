@@ -1,20 +1,13 @@
 """Price-related sensors for Energy Optimizer."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
+from math import copysign
 
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.util import dt as dt_util
 
 from ..base import EnergyOptimizerSensor
-from ...calculations.price_windows import (
-    BuyWindowResult,
-    build_average_buy_price_result,
-    build_best_buy_window_result,
-    build_consume_window_result,
-    build_ranked_sell_window_result,
-    format_consume_window,
-)
 from ...const import (
     CONF_BUY_PRICE_SENSOR,
     CONF_MIN_ARBITRAGE_PRICE,
@@ -22,7 +15,6 @@ from ...const import (
     DEFAULT_MIN_ARBITRAGE_PRICE,
     PRICE_UNIT_PLN_PER_KWH,
 )
-from ...helpers import resolve_morning_max_price_hour, resolve_tariff_end_hour
 
 
 class _PriceValueSensor(EnergyOptimizerSensor):
@@ -88,63 +80,75 @@ class MinArbitrageMarginSensor(_PriceValueSensor):
 
 
 def _local_now() -> datetime:
-    """Return the tz-aware local time used to judge whether a window is active."""
+    """Return the tz-aware local time used to resolve and judge Market Windows."""
     now_local = dt_util.now()
     if now_local.tzinfo is None:
         now_local = now_local.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
     return now_local
 
 
-class _BuyWindowBaseSensor(EnergyOptimizerSensor):
-    """Base sensor for derived buy-price windows."""
+class SnapshotCache:
+    """Shares one Market Window snapshot among the window sensors.
+
+    Resolves again only when the coordinator published new data or the minute
+    changed, so one refresh of every window sensor reads the resolver once.
+    """
+
+    def __init__(self, coordinator, resolver) -> None:
+        self._coordinator = coordinator
+        self._resolver = resolver
+        self._data: object = None
+        self._minute: datetime | None = None
+        self._snapshot = None
+
+    def windows(self, now: datetime):
+        """Return the cached snapshot, resolving it when stale."""
+        minute = now.replace(second=0, microsecond=0)
+        data = self._coordinator.data
+        if self._snapshot is None or data is not self._data or minute != self._minute:
+            self._snapshot = self._resolver.windows(now)
+            self._data = data
+            self._minute = minute
+        return self._snapshot
+
+
+class _SnapshotSensor(EnergyOptimizerSensor):
+    """Base sensor projecting one field of the Market Window snapshot."""
+
+    _snapshot_field: str
+
+    def __init__(self, coordinator, config_entry, config, resolver) -> None:
+        """Initialize the sensor with the resolver handed over by the platform."""
+        self._resolver = resolver
+        super().__init__(coordinator, config_entry, config)
+
+    def _snapshot_window(self):
+        """Return this sensor's field of the snapshot resolved now."""
+        return getattr(self._resolver.windows(_local_now()), self._snapshot_field)
+
+
+class _BuyWindowBaseSensor(_SnapshotSensor):
+    """Base sensor for buy-price windows."""
 
     _attr_icon = "mdi:clock-time-two-outline"
-    _payload_key: str
-    _range_key: str
-    _range_start_hour: int
-    _range_end_hour: int
-    _day_offset: int = 0
     _display_window_range: bool = True
     _include_timestamps: bool = True
     _include_plan_date: bool = False
     _include_is_active: bool = False
 
-    def __init__(self, coordinator, config_entry, config) -> None:
-        """Initialize the sensor with the current coordinator snapshot."""
-        super().__init__(coordinator, config_entry, config)
+    def __init__(self, coordinator, config_entry, config, resolver) -> None:
+        """Initialize the sensor with the current snapshot."""
+        super().__init__(coordinator, config_entry, config, resolver)
         self._attr_available = False
         self._apply_result(self._get_result())
 
     def _get_result(self):
-        """Return the selected buy window result for this sensor variant."""
-        entity_id = self.config.get(CONF_BUY_PRICE_SENSOR)
-        if not entity_id or self.coordinator.data is None:
-            return None
-
-        payloads = self.coordinator.data.get("price_payloads")
-        if not isinstance(payloads, dict):
-            return None
-
-        payload = payloads.get(entity_id)
-        if not isinstance(payload, dict):
-            return None
-
-        prices = payload.get(self._payload_key)
-        if not isinstance(prices, list) or not prices:
-            return None
-
-        now_local = dt_util.now() + timedelta(days=self._day_offset)
-        return build_best_buy_window_result(
-            prices,
-            entity_id,
-            range_key=self._range_key,
-            range_start_hour=self._range_start_hour,
-            range_end_hour=self._range_end_hour,
-            now_local=now_local,
-        )
+        """Return the projected window, or None for a Default Market Window."""
+        window = self._snapshot_window()
+        return None if window.is_fallback else window
 
     def _apply_result(self, result) -> None:
-        """Update cached state and attributes from a computed buy window result."""
+        """Update cached state and attributes from the projected buy window."""
         if result is None:
             self._attr_available = False
             self._attr_native_value = None
@@ -153,29 +157,25 @@ class _BuyWindowBaseSensor(EnergyOptimizerSensor):
 
         self._attr_available = True
         self._attr_native_value = (
-            f"{result.start_local:%H:%M}-{result.end_local:%H:%M}"
+            f"{result.start:%H:%M}-{result.end:%H:%M}"
             if self._display_window_range
-            else result.start_local.strftime("%H:%M")
+            else result.start.strftime("%H:%M")
         )
         self._attr_extra_state_attributes = {
-            "end": result.end_local.strftime("%H:%M"),
-            "duration_hours": int(
-                (result.end_local - result.start_local).total_seconds() // 3600
-            ),
-            "price": round(result.average_price, 3),
-            "is_negative": result.average_price < 0,
+            "end": result.end.strftime("%H:%M"),
+            "duration_hours": int(result.duration_hours),
+            "price": round(result.price, 3),
+            # The resolver rounds -0.0004 to -0.0: the sign bit keeps it negative, a true 0.0 is not.
+            "is_negative": copysign(1.0, result.price) < 0,
         }
         if self._include_plan_date:
-            self._attr_extra_state_attributes["plan_date"] = (
-                result.end_local.date().isoformat()
-            )
+            self._attr_extra_state_attributes["plan_date"] = result.plan_date.isoformat()
         if self._include_timestamps:
-            self._attr_extra_state_attributes["start_time"] = result.start_local.isoformat()
-            self._attr_extra_state_attributes["end_time"] = result.end_local.isoformat()
+            self._attr_extra_state_attributes["start_time"] = result.start.isoformat()
+            self._attr_extra_state_attributes["end_time"] = result.end.isoformat()
         if self._include_is_active:
-            now_local = _local_now()
             self._attr_extra_state_attributes["is_active"] = (
-                "on" if result.start_local <= now_local < result.end_local else "off"
+                "on" if result.contains(_local_now()) else "off"
             )
 
     @property
@@ -208,30 +208,7 @@ class NightBuyWindowSensor(_BuyWindowBaseSensor):
     _include_is_active = True
     _attr_translation_key = "night_buy_window"
     _attr_unique_id = "night_buy_window"
-    _payload_key = "prices_today"
-    _range_key = "night"
-
-    def _get_result(self) -> BuyWindowResult | None:
-        """Return the executing plan from either slot, otherwise the completed plan.
-
-        Tonight's plan stays in the ``next`` slot until the 06:01 rotation, so
-        while it executes the ``window`` slot still holds the previous night.
-        """
-        plans = (
-            self.coordinator.data.get("buy_window_plans")
-            or self.coordinator.data.get("night_buy_window_plans")
-            if isinstance(self.coordinator.data, dict)
-            else None
-        )
-        if not isinstance(plans, dict):
-            return None
-        night = plans.get("night", {})
-        now_local = _local_now()
-        for slot in ("window", "next"):
-            result = _night_plan_to_result(night.get(slot))
-            if result is not None and result.start_local <= now_local < result.end_local:
-                return result
-        return _night_plan_to_result(night.get("window"))
+    _snapshot_field = "night_buy_completed"
 
 
 class NightBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
@@ -240,37 +217,7 @@ class NightBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
     _include_plan_date = True
     _attr_translation_key = "night_buy_next_window"
     _attr_unique_id = "night_buy_next_window"
-    _payload_key = "prices_tomorrow"
-    _range_key = "night"
-
-    def _get_result(self) -> BuyWindowResult | None:
-        """Return the persisted upcoming night plan without recalculation."""
-        plans = (
-            self.coordinator.data.get("buy_window_plans")
-            or self.coordinator.data.get("night_buy_window_plans")
-            if isinstance(self.coordinator.data, dict)
-            else None
-        )
-        return (
-            _night_plan_to_result(plans.get("night", {}).get("next"))
-            if isinstance(plans, dict)
-            else None
-        )
-
-
-def _night_plan_to_result(raw_plan: object) -> BuyWindowResult | None:
-    """Convert a persisted coordinator plan into the shared sensor result type."""
-    if not isinstance(raw_plan, dict):
-        return None
-    try:
-        start = datetime.fromisoformat(str(raw_plan["start_time"]))
-        end = datetime.fromisoformat(str(raw_plan["end_time"]))
-        price = float(raw_plan["price"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    if start.tzinfo is None or end.tzinfo is None or end <= start:
-        return None
-    return BuyWindowResult(start_local=start, end_local=end, average_price=price)
+    _snapshot_field = "night_buy"
 
 
 class DayBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
@@ -279,20 +226,7 @@ class DayBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
     _include_plan_date = True
     _attr_translation_key = "day_buy_next_window"
     _attr_unique_id = "day_buy_next_window"
-    _payload_key = "prices_tomorrow"
-    _range_key = "day"
-
-    def _get_result(self) -> BuyWindowResult | None:
-        plans = (
-            self.coordinator.data.get("buy_window_plans")
-            if isinstance(self.coordinator.data, dict)
-            else None
-        )
-        return (
-            _night_plan_to_result(plans.get("day", {}).get("next"))
-            if isinstance(plans, dict)
-            else None
-        )
+    _snapshot_field = "day_buy_next"
 
 
 class DayBuyWindowSensor(_BuyWindowBaseSensor):
@@ -302,20 +236,7 @@ class DayBuyWindowSensor(_BuyWindowBaseSensor):
     _include_is_active = True
     _attr_translation_key = "day_buy_window"
     _attr_unique_id = "day_buy_window"
-    _payload_key = "prices_today"
-    _range_key = "day"
-
-    def _get_result(self) -> BuyWindowResult | None:
-        plans = (
-            self.coordinator.data.get("buy_window_plans")
-            if isinstance(self.coordinator.data, dict)
-            else None
-        )
-        return (
-            _night_plan_to_result(plans.get("day", {}).get("window"))
-            if isinstance(plans, dict)
-            else None
-        )
+    _snapshot_field = "day_buy"
 
 
 # Public names retain their Python API while exposing the new entity names.
@@ -328,105 +249,40 @@ class MorningSellBuyReferenceSensor(_BuyWindowBaseSensor):
 
     _attr_translation_key = "morning_sell_buy_reference"
     _attr_unique_id = "morning_sell_buy_reference"
-    _payload_key = "prices_today"
+    _snapshot_field = "morning_sell_buy_reference"
     _display_window_range = False
     _include_timestamps = False
 
-    def _get_result(self):
-        """Return the averaged buy-price window used for morning sell arbitrage."""
-        hass = getattr(self, "hass", None) or getattr(self.coordinator, "hass", None)
-        if hass is None:
-            return None
 
-        entity_id = self.config.get(CONF_BUY_PRICE_SENSOR)
-        if not entity_id or self.coordinator.data is None:
-            return None
-
-        payloads = self.coordinator.data.get("price_payloads")
-        if not isinstance(payloads, dict):
-            return None
-
-        payload = payloads.get(entity_id)
-        if not isinstance(payload, dict):
-            return None
-
-        prices = payload.get(self._payload_key)
-        if not isinstance(prices, list) or not prices:
-            return None
-
-        morning_sell_hour = resolve_morning_max_price_hour(
-            hass,
-            self.config,
-            entry_id=self.config_entry.entry_id,
-            default_hour=7,
-        )
-        restore_hour = (morning_sell_hour + 1) % 24
-        tariff_end_hour = resolve_tariff_end_hour(
-            hass,
-            self.config,
-            default_hour=13,
-        )
-        return build_average_buy_price_result(
-            prices,
-            entity_id,
-            start_hour=restore_hour,
-            end_hour=tariff_end_hour,
-            now_local=dt_util.now(),
-        )
-
-
-class _ConsumeWindowBaseSensor(EnergyOptimizerSensor):
+class _ConsumeWindowBaseSensor(_SnapshotSensor):
     """Base sensor for day-scoped consume windows."""
 
     _attr_icon = "mdi:clock-time-eight-outline"
-    _payload_key: str
-    _day_offset: int = 0
     _include_is_active: bool = False
 
-    def __init__(self, coordinator, config_entry, config) -> None:
-        """Initialize the sensor with the current coordinator snapshot."""
-        super().__init__(coordinator, config_entry, config)
+    def __init__(self, coordinator, config_entry, config, resolver) -> None:
+        """Initialize the sensor with the current snapshot."""
+        super().__init__(coordinator, config_entry, config, resolver)
         self._apply_result(self._get_result())
 
     def _get_result(self):
-        """Return the selected consume window result for this sensor variant."""
-        entity_id = self.config.get(CONF_SELL_PRICE_SENSOR)
-        if not entity_id or self.coordinator.data is None:
-            return None
-
-        payloads = self.coordinator.data.get("price_payloads")
-        if not isinstance(payloads, dict):
-            return None
-
-        payload = payloads.get(entity_id)
-        if not isinstance(payload, dict):
-            return None
-
-        prices = payload.get(self._payload_key)
-        if not isinstance(prices, list) or not prices:
-            return None
-
-        now_local = dt_util.now() + timedelta(days=self._day_offset)
-        return build_consume_window_result(prices, entity_id, now_local=now_local)
+        """Return the projected window, or None for a Default Market Window."""
+        window = self._snapshot_window()
+        return None if window.is_fallback else window
 
     def _apply_result(self, result) -> None:
-        """Update cached state and attributes from a computed window result."""
+        """Update cached state and attributes from the projected window."""
         if result is None:
             self._attr_native_value = None
             self._attr_extra_state_attributes = {}
             return
 
-        self._attr_native_value = format_consume_window(result)
-        attributes: dict[str, object] = {
-            "price": round(result.average_price, 2)
-        }
+        self._attr_native_value = f"{result.start:%H:%M}-{result.end:%H:%M}"
+        attributes: dict[str, object] = {}
+        if result.price is not None:
+            attributes["price"] = round(result.price, 2)
         if self._include_is_active:
-            now_local = dt_util.now()
-            if now_local.tzinfo is None:
-                now_local = now_local.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
-            attributes["is_active"] = (
-                "on" if result.start_local <= now_local < result.end_local else "off"
-            )
+            attributes["is_active"] = "on" if result.contains(_local_now()) else "off"
 
         self._attr_extra_state_attributes = attributes
 
@@ -453,7 +309,7 @@ class ConsumeWindowSensor(_ConsumeWindowBaseSensor):
 
     _attr_translation_key = "consume_window"
     _attr_unique_id = "consume_window"
-    _payload_key = "prices_today"
+    _snapshot_field = "consume"
     _include_is_active = True
 
 
@@ -462,54 +318,27 @@ class ConsumeWindowTomorrowSensor(_ConsumeWindowBaseSensor):
 
     _attr_translation_key = "consume_window_tomorrow"
     _attr_unique_id = "consume_window_tomorrow"
-    _payload_key = "prices_tomorrow"
-    _day_offset = 1
+    _snapshot_field = "consume_tomorrow"
 
 
-class _RankedSellWindowBaseSensor(EnergyOptimizerSensor):
+class _RankedSellWindowBaseSensor(_SnapshotSensor):
     """Base sensor for ranked one-hour sell windows."""
 
     _attr_icon = "mdi:clock-time-four-outline"
-    _payload_key: str
-    _range_start_hour: int
-    _range_end_hour: int
-    _day_offset: int = 0
 
-    def __init__(self, coordinator, config_entry, config) -> None:
-        """Initialize the sensor with the current coordinator snapshot."""
-        super().__init__(coordinator, config_entry, config)
+    def __init__(self, coordinator, config_entry, config, resolver) -> None:
+        """Initialize the sensor with the current snapshot."""
+        super().__init__(coordinator, config_entry, config, resolver)
         self._attr_available = False
         self._apply_result(self._get_result())
 
     def _get_result(self):
-        """Return the ranked sell window result for this sensor variant."""
-        entity_id = self.config.get(CONF_SELL_PRICE_SENSOR)
-        if not entity_id or self.coordinator.data is None:
-            return None
-
-        payloads = self.coordinator.data.get("price_payloads")
-        if not isinstance(payloads, dict):
-            return None
-
-        payload = payloads.get(entity_id)
-        if not isinstance(payload, dict):
-            return None
-
-        prices = payload.get(self._payload_key)
-        if not isinstance(prices, list) or not prices:
-            return None
-
-        now_local = dt_util.now() + timedelta(days=self._day_offset)
-        return build_ranked_sell_window_result(
-            prices,
-            entity_id,
-            range_start_hour=self._range_start_hour,
-            range_end_hour=self._range_end_hour,
-            now_local=now_local,
-        )
+        """Return the projected ranking, or None for a Default Market Window."""
+        ranked = self._snapshot_window()
+        return None if ranked.primary.is_fallback else ranked
 
     def _apply_result(self, result) -> None:
-        """Update cached state and attributes from a computed ranking result."""
+        """Update cached state and attributes from the projected ranking."""
         if result is None:
             self._attr_available = False
             self._attr_native_value = None
@@ -517,15 +346,20 @@ class _RankedSellWindowBaseSensor(EnergyOptimizerSensor):
             return
 
         self._attr_available = True
-        attributes: dict[str, object] = {
-            "price": round(result.best_price, 3),
-            "second_window_start": result.second_best_start_local.strftime("%H:%M"),
-            "second_window_price": round(result.second_best_price, 3),
-        }
-        if result.second_window_gap_pct is not None:
-            attributes["second_window_gap_pct"] = round(result.second_window_gap_pct, 1)
+        primary, secondary = result.primary, result.secondary
+        attributes: dict[str, object] = {}
+        if primary.price is not None:
+            attributes["price"] = round(primary.price, 3)
+        if secondary is not None:
+            attributes["second_window_start"] = secondary.start.strftime("%H:%M")
+            if secondary.price is not None:
+                attributes["second_window_price"] = round(secondary.price, 3)
+                if primary.price:
+                    attributes["second_window_gap_pct"] = round(
+                        (primary.price - secondary.price) / primary.price * 100, 1
+                    )
 
-        self._attr_native_value = result.best_start_local.strftime("%H:%M")
+        self._attr_native_value = primary.start.strftime("%H:%M")
         self._attr_extra_state_attributes = attributes
 
     @property
@@ -556,9 +390,7 @@ class MorningSellWindowSensor(_RankedSellWindowBaseSensor):
 
     _attr_translation_key = "morning_sell_window"
     _attr_unique_id = "morning_sell_window"
-    _payload_key = "prices_today"
-    _range_start_hour = 4
-    _range_end_hour = 10
+    _snapshot_field = "morning_sell"
 
 
 class EveningSellWindowSensor(_RankedSellWindowBaseSensor):
@@ -566,9 +398,7 @@ class EveningSellWindowSensor(_RankedSellWindowBaseSensor):
 
     _attr_translation_key = "evening_sell_window"
     _attr_unique_id = "evening_sell_window"
-    _payload_key = "prices_today"
-    _range_start_hour = 16
-    _range_end_hour = 22
+    _snapshot_field = "evening_sell"
 
 
 class MorningSellWindowTomorrowSensor(_RankedSellWindowBaseSensor):
@@ -576,10 +406,7 @@ class MorningSellWindowTomorrowSensor(_RankedSellWindowBaseSensor):
 
     _attr_translation_key = "morning_sell_window_tomorrow"
     _attr_unique_id = "morning_sell_window_tomorrow"
-    _payload_key = "prices_tomorrow"
-    _range_start_hour = 4
-    _range_end_hour = 10
-    _day_offset = 1
+    _snapshot_field = "morning_sell_tomorrow"
 
 
 class EveningSellWindowTomorrowSensor(_RankedSellWindowBaseSensor):
@@ -587,7 +414,4 @@ class EveningSellWindowTomorrowSensor(_RankedSellWindowBaseSensor):
 
     _attr_translation_key = "evening_sell_window_tomorrow"
     _attr_unique_id = "evening_sell_window_tomorrow"
-    _payload_key = "prices_tomorrow"
-    _range_start_hour = 16
-    _range_end_hour = 22
-    _day_offset = 1
+    _snapshot_field = "evening_sell_tomorrow"
