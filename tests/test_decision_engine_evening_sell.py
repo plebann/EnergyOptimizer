@@ -249,6 +249,18 @@ class _CountingStoreStub:
         return self.__class__.load_data
 
 
+async def _run_window_pair(hass: MagicMock, *, first_primary: bool) -> None:
+    """Run the first, then the second evening window of an A/B pair."""
+    for is_primary, is_first in ((first_primary, True), (not first_primary, False)):
+        await async_run_evening_sell(
+            hass,
+            entry_id="entry-1",
+            margin=1.0,
+            is_primary=is_primary,
+            is_first=is_first,
+        )
+
+
 def _sell_request(surplus_kwh: float) -> SellRequest:
     return SellRequest(
         surplus_kwh=surplus_kwh,
@@ -829,7 +841,13 @@ async def test_evening_sell_a_first_splits_primary_then_secondary(
     config[CONF_MAX_EXPORT_POWER] = 9000
     states = _base_states()
     states["sensor.pv_today"] = "20"
-    hass = _setup_hass(config, states, windows=_windows(primary_hour=18, secondary_hour=19, secondary_price=600.0, tomorrow_morning_price=500.0))
+    hass = _setup_hass(config, states, windows=_windows(
+            primary_hour=18,
+            secondary_hour=19,
+            secondary_price=600.0,
+            tomorrow_morning_price=500.0,
+        ),
+    )
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -841,20 +859,7 @@ async def test_evening_sell_a_first_splits_primary_then_secondary(
     _CountingStoreStub.load_data = None
     monkeypatch.setattr(f"{SELL_BASE}.Store", _CountingStoreStub)
 
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=True,
-        is_first=True,
-    )
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=False,
-        is_first=False,
-    )
+    await _run_window_pair(hass, first_primary=True)
 
     assert [outcome.details["surplus_kwh"] for outcome in outcomes[-2:]] == [9.0, 3.0]
     assert len(_CountingStoreStub.save_calls) == 1
@@ -868,7 +873,13 @@ async def test_evening_sell_b_first_sells_only_overflow_before_primary_window(
     config[CONF_MAX_EXPORT_POWER] = 9000
     states = _base_states()
     states["sensor.pv_today"] = "20"
-    hass = _setup_hass(config, states, windows=_windows(primary_hour=19, secondary_hour=18, secondary_price=600.0, tomorrow_morning_price=500.0))
+    hass = _setup_hass(config, states, windows=_windows(
+            primary_hour=19,
+            secondary_hour=18,
+            secondary_price=600.0,
+            tomorrow_morning_price=500.0,
+        ),
+    )
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -882,20 +893,7 @@ async def test_evening_sell_b_first_sells_only_overflow_before_primary_window(
     _CountingStoreStub.load_data = None
     monkeypatch.setattr(f"{SELL_BASE}.Store", _CountingStoreStub)
 
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=False,
-        is_first=True,
-    )
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=True,
-        is_first=False,
-    )
+    await _run_window_pair(hass, first_primary=False)
 
     assert [outcome.details["surplus_kwh"] for outcome in outcomes[-2:]] == [3.0, 9.0]
     assert len(_CountingStoreStub.save_calls) == 1
@@ -909,7 +907,13 @@ async def test_evening_sell_second_window_early_exit_restores_active_sell(
     config[CONF_MAX_EXPORT_POWER] = 9000
     config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
     states = _base_states()
-    hass = _setup_hass(config, states, windows=_windows(primary_hour=18, secondary_hour=19, secondary_price=400.0, tomorrow_morning_price=500.0))
+    hass = _setup_hass(config, states, windows=_windows(
+            primary_hour=18,
+            secondary_hour=19,
+            secondary_price=400.0,
+            tomorrow_morning_price=500.0,
+        ),
+    )
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -921,20 +925,7 @@ async def test_evening_sell_second_window_early_exit_restores_active_sell(
     restore_mock = AsyncMock()
     monkeypatch.setattr(f"{EVENING}.async_handle_sell_restore", restore_mock)
 
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=True,
-        is_first=True,
-    )
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=False,
-        is_first=False,
-    )
+    await _run_window_pair(hass, first_primary=True)
 
     assert restore_mock.await_count == 1
     assert outcomes[-1].action_type == "sell_restore"
@@ -948,7 +939,13 @@ async def test_evening_sell_second_window_zero_surplus_restores_active_sell(
     config = _base_config()
     config[CONF_MAX_EXPORT_POWER] = 9000
     states = _base_states()
-    hass = _setup_hass(config, states, windows=_windows(primary_hour=18, secondary_hour=19, secondary_price=600.0, tomorrow_morning_price=500.0))
+    hass = _setup_hass(config, states, windows=_windows(
+            primary_hour=18,
+            secondary_hour=19,
+            secondary_price=600.0,
+            tomorrow_morning_price=500.0,
+        ),
+    )
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -968,20 +965,7 @@ async def test_evening_sell_second_window_zero_surplus_restores_active_sell(
     restore_mock = AsyncMock()
     monkeypatch.setattr(f"{EVENING}.async_handle_sell_restore", restore_mock)
 
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=True,
-        is_first=True,
-    )
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=False,
-        is_first=False,
-    )
+    await _run_window_pair(hass, first_primary=True)
 
     assert restore_mock.await_count == 1
     assert outcomes[-1].action_type == "sell_restore"
