@@ -595,8 +595,8 @@ class CoordinatorMarketWindowResolver:
         current = dt_util.as_local(current)
         tz = current.tzinfo
         today = current.date()
-        tomorrow = today + timedelta(days=1)
         tomorrow_local = current + timedelta(days=1)
+        tomorrow = tomorrow_local.date()
         buy_entity = str(self._entry.data.get(CONF_BUY_PRICE_SENSOR))
         sell_entity = str(self._entry.data.get(CONF_SELL_PRICE_SENSOR))
         data = self._coordinator.data
@@ -755,6 +755,9 @@ class CoordinatorMarketWindowResolver:
                 sell_today,
                 sell_entity,
                 current,
+                default=lambda reason: _default_hour_window(
+                    today, DEFAULT_CONSUME_HOUR, tz, reason=reason
+                ),
                 legacy=lambda: self._legacy_span(
                     today,
                     tz,
@@ -763,7 +766,14 @@ class CoordinatorMarketWindowResolver:
                     whole_hour=False,
                 ),
             ),
-            consume_tomorrow=self._consume(sell_tomorrow, sell_entity, tomorrow_local),
+            consume_tomorrow=self._consume(
+                sell_tomorrow,
+                sell_entity,
+                tomorrow_local,
+                default=lambda reason: _default_hour_window(
+                    tomorrow, DEFAULT_CONSUME_HOUR, tz, reason=reason
+                ),
+            ),
             morning_sell_buy_reference=morning_sell_buy_reference,
             high_tariff_start=high_tariff_start,
             high_tariff_end=high_tariff_end,
@@ -829,6 +839,7 @@ class CoordinatorMarketWindowResolver:
         entity_id: str,
         now_local: datetime,
         *,
+        default: Callable[[DefaultReason], ResolvedMarketWindow],
         legacy: Callable[[], _Span | None] | None = None,
     ) -> ResolvedMarketWindow:
         """Consume Window: the price payload, the legacy entities, else the default."""
@@ -840,14 +851,7 @@ class CoordinatorMarketWindowResolver:
         ]
         if legacy is not None:
             chain.append((MarketWindowSource.LEGACY_ENTITY, legacy))
-        return _resolve(
-            chain,
-            build=_window,
-            default=lambda reason: _default_hour_window(
-                now_local.date(), DEFAULT_CONSUME_HOUR, now_local.tzinfo, reason=reason
-            ),
-            name="Consume Window",
-        )
+        return _resolve(chain, build=_window, default=default, name="Consume Window")
 
     # --- entity reads -------------------------------------------------------
 
