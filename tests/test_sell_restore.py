@@ -13,11 +13,13 @@ from custom_components.energy_optimizer.decision_engine.sell_base import (
     BaseSellStrategy,
     SellRequest,
 )
+from custom_components.energy_optimizer.market_windows import ResolvedMarketWindow
 from custom_components.energy_optimizer.scheduler.action_scheduler import ActionScheduler
 from custom_components.energy_optimizer.service_handlers.sell_restore import (
     async_check_pending_sell_restore,
     async_handle_sell_restore,
 )
+from tests.conftest import market_windows
 
 
 class _TestSellStrategy(BaseSellStrategy):
@@ -30,12 +32,8 @@ class _TestSellStrategy(BaseSellStrategy):
         return "evening"
 
     @property
-    def arbitrage_buy_reference_suffix(self) -> str:
-        return "night_buy_next_window"
-
-    @property
-    def arbitrage_buy_reference_name(self) -> str:
-        return "Night buy window tomorrow"
+    def arbitrage_buy_reference(self) -> ResolvedMarketWindow:
+        return market_windows().night_buy
 
     def _get_prog_soc_state(self) -> tuple[str, float] | None:
         return None

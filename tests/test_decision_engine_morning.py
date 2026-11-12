@@ -44,6 +44,8 @@ from custom_components.energy_optimizer.decision_engine.common import (
     build_forecast_hour_window,
 )
 from custom_components.energy_optimizer.utils.pv_forecast import MorningPVForecast
+from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
+from tests.conftest import market_windows
 
 pytestmark = pytest.mark.enable_socket
 
@@ -99,6 +101,7 @@ def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
             entry.entry_id: {
                 "last_optimization_sensor": mock_opt_sensor,
                 "optimization_history_sensor": mock_hist_sensor,
+                "market_windows": StaticMarketWindowResolver(market_windows()),
             }
         }
     }

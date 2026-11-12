@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -47,6 +47,13 @@ from ..const import (
     DOMAIN,
 )
 from ..helpers import get_internal_window_price, get_required_float_state
+from ..market_windows import (
+    MarketWindowResolver,
+    MarketWindows,
+    MarketWindowSource,
+    ResolvedMarketWindow,
+    market_window_resolver,
+)
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.pv_forecast import MorningPVForecast, get_morning_pv_forecast
 from ..utils.logging import DecisionOutcome, log_decision_unified
@@ -302,41 +309,76 @@ def compute_sufficiency(
     return result
 
 
-def resolve_arbitrage_margin_gate(
+def legacy_buy_reference(
     hass: HomeAssistant,
     *,
     entry_id: str,
+    unique_id_suffix: str,
+    entity_name: str,
+    fallback_entity_id: str | None = None,
+) -> ResolvedMarketWindow:
+    """Wrap a price read through the old helpers as an Arbitrage Buy Reference.
+
+    Bridge for the charge flows that have not moved to the Market Window
+    snapshot yet: only the price is real, the endpoints are a placeholder hour
+    at now and the source is LEGACY_ENTITY (DEFAULT when the price is missing).
+    """
+    price = get_internal_window_price(
+        hass,
+        entry_id=entry_id,
+        unique_id_suffix=unique_id_suffix,
+        entity_name=entity_name,
+        attribute_name="price",
+        fallback_entity_id=fallback_entity_id,
+    )
+    start = dt_util.now()
+    end = start + timedelta(hours=1)
+    if price is None:
+        return ResolvedMarketWindow(
+            start=start,
+            end=end,
+            price=None,
+            source=MarketWindowSource.DEFAULT,
+            reason="unavailable",
+        )
+    return ResolvedMarketWindow(
+        start=start,
+        end=end,
+        price=price,
+        source=MarketWindowSource.LEGACY_ENTITY,
+    )
+
+
+def resolve_arbitrage_margin_gate(
     sell_price: float,
     min_arbitrage_price: float,
-    buy_reference_unique_id_suffix: str,
-    buy_reference_entity_name: str,
-    fallback_buy_reference_entity_id: str | None = None,
+    buy_reference: ResolvedMarketWindow,
 ) -> tuple[bool, dict[str, float | str]]:
     """Return the Arbitrage Margin gate result and diagnostic details.
 
     The `min_arbitrage_price` config key now represents a minimum Arbitrage
     Margin threshold instead of an absolute sell-price floor. The margin is
-    calculated as `sell_price - buy_reference_price` and acts only as a strict
-    on/off gate; it does not scale the arbitrage energy volume.
+    calculated as `sell_price - buy_reference.price` and acts only as a strict
+    on/off gate; it does not scale the arbitrage energy volume. A reference
+    without a price fails the gate closed.
     """
+    buy_reference_price = buy_reference.price
+    buy_reference_source = str(buy_reference.source)
     details: dict[str, float | str] = {
         "sell_price": round(sell_price, 2),
         "min_arbitrage_price": round(float(min_arbitrage_price or 0.0), 2),
+        "buy_reference_source": buy_reference_source,
     }
-    buy_reference_price = get_internal_window_price(
-        hass,
-        entry_id=entry_id,
-        unique_id_suffix=buy_reference_unique_id_suffix,
-        entity_name=buy_reference_entity_name,
-        attribute_name="price",
-        fallback_entity_id=fallback_buy_reference_entity_id,
-    )
     if buy_reference_price is None:
         details["arbitrage_reason"] = "missing_buy_reference_price"
         record_step(
             "arbitrage_margin_gate",
             kind="gate",
-            inputs={"sell_price": round(sell_price, 2), "buy_reference_price": None},
+            inputs={
+                "sell_price": round(sell_price, 2),
+                "buy_reference_price": None,
+                "buy_reference_source": buy_reference_source,
+            },
             result=False,
         )
         return False, details
@@ -352,6 +394,7 @@ def resolve_arbitrage_margin_gate(
             inputs={
                 "sell_price": round(sell_price, 2),
                 "buy_reference_price": round(buy_reference_price, 2),
+                "buy_reference_source": buy_reference_source,
                 "arbitrage_margin": round(arbitrage_margin, 2),
                 "threshold": round(float(min_arbitrage_price or 0.0), 2),
             },
@@ -366,6 +409,7 @@ def resolve_arbitrage_margin_gate(
         inputs={
             "sell_price": round(sell_price, 2),
             "buy_reference_price": round(buy_reference_price, 2),
+            "buy_reference_source": buy_reference_source,
             "arbitrage_margin": round(arbitrage_margin, 2),
             "threshold": round(float(min_arbitrage_price or 0.0), 2),
         },
@@ -567,6 +611,29 @@ def resolve_entry(hass: HomeAssistant, entry_id: str | None) -> ConfigEntry | No
         return None
 
     return entries[0]
+
+
+class MarketWindowReader:
+    """Mixin for strategies that read one Market Window snapshot per run.
+
+    The injected resolver wins; otherwise the entry's own is used. The strategy
+    entry points validate the entry before building a strategy, so it resolves.
+    """
+
+    hass: HomeAssistant
+    _entry_id: str | None
+    _injected_resolver: MarketWindowResolver | None
+    windows: MarketWindows
+
+    @property
+    def _resolver(self) -> MarketWindowResolver:
+        """Return the injected resolver, else the entry's own."""
+        if self._injected_resolver is not None:
+            return self._injected_resolver
+        entry = resolve_entry(self.hass, self._entry_id)
+        if entry is None:
+            raise ValueError("Market Window Resolver needs a valid config entry")
+        return market_window_resolver(self.hass, entry.entry_id)
 
 
 def get_entry_data(hass: HomeAssistant, entry_id: str) -> dict[str, Any] | None:

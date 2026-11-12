@@ -32,11 +32,13 @@ from ..controllers.inverter import (
     set_work_mode,
 )
 from ..helpers import get_float_state_info
+from ..market_windows import MarketWindowResolver, ResolvedMarketWindow
 from ..utils.decision_dump import record_input, record_step
 from ..utils.logging import DecisionOutcome, log_decision_unified
 from ..utils.time_window import build_hour_window
 from .common import (
     BatteryConfig,
+    MarketWindowReader,
     get_battery_config,
     get_required_current_soc_state,
     resolve_arbitrage_margin_gate,
@@ -73,7 +75,7 @@ class SellRegulator:
     previous_value: float | None
 
 
-class BaseSellStrategy(ABC):
+class BaseSellStrategy(MarketWindowReader, ABC):
     """Template-method base for sell decision strategies."""
 
     def __init__(
@@ -82,11 +84,13 @@ class BaseSellStrategy(ABC):
         *,
         entry_id: str | None,
         margin: float | None,
+        resolver: MarketWindowResolver | None = None,
     ) -> None:
         """Initialize strategy with runtime inputs."""
         self.hass = hass
         self._entry_id = entry_id
         self._raw_margin = margin
+        self._injected_resolver = resolver
 
         self.entry: ConfigEntry
         self.config: dict[str, Any]
@@ -120,13 +124,8 @@ class BaseSellStrategy(ABC):
 
     @property
     @abstractmethod
-    def arbitrage_buy_reference_suffix(self) -> str:
-        """Unique-id suffix of the Arbitrage Buy Reference sensor."""
-
-    @property
-    @abstractmethod
-    def arbitrage_buy_reference_name(self) -> str:
-        """Human-readable name of the Arbitrage Buy Reference sensor."""
+    def arbitrage_buy_reference(self) -> ResolvedMarketWindow:
+        """Return the Arbitrage Buy Reference window of this run's snapshot."""
 
     def _get_target_soc_floor(self, *, surplus_kwh: float) -> float:
         """Return minimal target SOC clamp for current strategy context."""
@@ -160,12 +159,9 @@ class BaseSellStrategy(ABC):
     def _resolve_arbitrage_margin_gate(self) -> tuple[bool, dict[str, float | str]]:
         """Resolve the shared Arbitrage Margin gate for high-price sell paths."""
         return resolve_arbitrage_margin_gate(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            sell_price=self.price,
-            min_arbitrage_price=self.threshold_price,
-            buy_reference_unique_id_suffix=self.arbitrage_buy_reference_suffix,
-            buy_reference_entity_name=self.arbitrage_buy_reference_name,
+            self.price,
+            self.threshold_price,
+            self.arbitrage_buy_reference,
         )
 
     def _arbitrage_gate_details_for_outcome(self) -> dict[str, float | str]:
@@ -291,6 +287,7 @@ class BaseSellStrategy(ABC):
 
     async def run(self) -> None:
         """Execute common sell workflow and delegate decision logic to subclass."""
+        self.windows = self._resolver.windows()
         self.integration_context = Context()
 
         entry = resolve_entry(self.hass, self._entry_id)

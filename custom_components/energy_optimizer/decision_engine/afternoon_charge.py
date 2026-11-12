@@ -31,6 +31,7 @@ from ..decision_engine.common import (
     ForecastData,
     get_entry_data,
     get_required_prog4_soc_state,
+    legacy_buy_reference,
     resolve_arbitrage_margin_gate,
     resolve_entry,
 )
@@ -886,14 +887,14 @@ def _build_afternoon_plan(
             arbitrage_details["arbitrage_reason"] = "missing_sell_price"
         else:
             margin_ok, margin_details = resolve_arbitrage_margin_gate(
-                hass,
-                entry_id=entry_id,
-                sell_price=sell_price,
-                min_arbitrage_price=float(
-                    config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0
+                sell_price,
+                float(config.get(CONF_MIN_ARBITRAGE_PRICE, 0.0) or 0.0),
+                legacy_buy_reference(
+                    hass,
+                    entry_id=entry_id,
+                    unique_id_suffix="day_buy_window",
+                    entity_name="Day buy window",
                 ),
-                buy_reference_unique_id_suffix="day_buy_window",
-                buy_reference_entity_name="Day buy window",
             )
             arbitrage_details.update(margin_details)
             horizon_hours = build_hour_window(

@@ -19,13 +19,9 @@ from ..calculations.price_windows import find_first_arbitrage_buy_hour
 from ..const import (
     ARBITRAGE_BUY_WINDOW_PRICE_MULTIPLIER,
     CONF_BUY_PRICE_SENSOR,
-    CONF_EVENING_MAX_PRICE_SENSOR,
-    CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
     CONF_MAX_EXPORT_POWER,
-    CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
     DEFAULT_MAX_EXPORT_POWER,
     DOMAIN,
-    NIGHT_BUY_WINDOW_START_HOUR,
 )
 from ..const import CONF_MIN_ARBITRAGE_PRICE
 from ..decision_engine.common import (
@@ -37,16 +33,8 @@ from ..decision_engine.common import (
     get_required_prog5_soc_state,
     resolve_entry,
 )
-from ..helpers import (
-    get_buy_price_payload,
-    get_internal_window_price,
-    resolve_evening_max_price_hour,
-    resolve_evening_second_max_price_hour,
-    resolve_night_buy_window_tomorrow_start_hour,
-    resolve_night_buy_window_tomorrow_start_datetime,
-    resolve_tariff_end_hour,
-    resolve_tariff_start_hour,
-)
+from ..helpers import get_buy_price_payload
+from ..market_windows import MarketWindowResolver, ResolvedMarketWindow
 from ..service_handlers.sell_restore import async_handle_sell_restore
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.logging import DecisionOutcome
@@ -72,14 +60,16 @@ class EveningSellStrategy(BaseSellStrategy):
         margin: float | None,
         is_primary: bool = True,
         is_first: bool = True,
+        resolver: MarketWindowResolver | None = None,
     ) -> None:
         """Initialize evening sell strategy."""
-        super().__init__(hass, entry_id=entry_id, margin=margin)
+        super().__init__(hass, entry_id=entry_id, margin=margin, resolver=resolver)
         self._is_primary = is_primary
         self._is_first = is_first
         self._has_secondary_window = False
         self._primary_sell_hour = 17
         self._secondary_sell_hour: int | None = None
+        self._current_window: ResolvedMarketWindow
         self._current_window_hour = 17
         self._other_window_hour: int | None = None
         self._current_window_label = "A"
@@ -96,14 +86,9 @@ class EveningSellStrategy(BaseSellStrategy):
         return "evening"
 
     @property
-    def arbitrage_buy_reference_suffix(self) -> str:
-        """Return the evening sell Arbitrage Buy Reference sensor suffix."""
-        return "night_buy_next_window"
-
-    @property
-    def arbitrage_buy_reference_name(self) -> str:
-        """Return the evening sell Arbitrage Buy Reference sensor name."""
-        return "Night buy window tomorrow"
+    def arbitrage_buy_reference(self) -> ResolvedMarketWindow:
+        """Return the evening sell Arbitrage Buy Reference: the Night Buy Window."""
+        return self.windows.night_buy
 
     @property
     def clamp_surplus_to_pv(self) -> bool:
@@ -114,23 +99,7 @@ class EveningSellStrategy(BaseSellStrategy):
 
     def _get_price(self) -> float | None:
         self._resolve_window_context()
-        if self._has_secondary_window and not self._is_primary:
-            return get_internal_window_price(
-                self.hass,
-                entry_id=self.entry.entry_id,
-                unique_id_suffix="evening_sell_window",
-                entity_name="Evening second max price sensor",
-                attribute_name="second_window_price",
-                fallback_entity_id=self.config.get(CONF_EVENING_SECOND_MAX_PRICE_SENSOR),
-            )
-        return get_internal_window_price(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            unique_id_suffix="evening_sell_window",
-            entity_name="Evening max price sensor",
-            attribute_name="price",
-            fallback_entity_id=self.config.get(CONF_EVENING_MAX_PRICE_SENSOR),
-        )
+        return self._current_window.price
 
     def _resolve_sell_hour(self) -> int:
         self._resolve_window_context()
@@ -140,25 +109,21 @@ class EveningSellStrategy(BaseSellStrategy):
 
     def _resolve_window_context(self) -> None:
         """Resolve current and other evening window metadata."""
-        self._primary_sell_hour = resolve_evening_max_price_hour(
-            self.hass,
-            self.config,
-            entry_id=self.entry.entry_id,
-            default_hour=17,
+        ranked = self.windows.evening_sell
+        self._primary_sell_hour = ranked.primary.hour
+        self._secondary_sell_hour = (
+            ranked.secondary.hour if ranked.secondary is not None else None
         )
-        self._secondary_sell_hour = resolve_evening_second_max_price_hour(
-            self.hass,
-            self.config,
-            entry_id=self.entry.entry_id,
-        )
-        self._has_secondary_window = self._secondary_sell_hour is not None
+        self._has_secondary_window = ranked.secondary is not None
 
-        if self._has_secondary_window and not self._is_primary:
+        if ranked.secondary is not None and not self._is_primary:
+            self._current_window = ranked.secondary
             self._current_window_label = "B"
             self._other_window_label = "A"
-            self._current_window_hour = self._secondary_sell_hour or self._primary_sell_hour
+            self._current_window_hour = ranked.secondary.hour
             self._other_window_hour = self._primary_sell_hour
         else:
+            self._current_window = ranked.primary
             self._current_window_label = "A"
             self._other_window_label = "B" if self._has_secondary_window else None
             self._current_window_hour = self._primary_sell_hour
@@ -190,6 +155,7 @@ class EveningSellStrategy(BaseSellStrategy):
         details = {
             "window": self._current_window_label,
             "window_hour": self._current_window_hour,
+            "window_source": str(self._current_window.source),
             "evening_price": round(self.price, 2),
         }
         if self._tomorrow_morning_price is not None:
@@ -239,22 +205,9 @@ class EveningSellStrategy(BaseSellStrategy):
             }
             return await self._surplus_sell(require_sufficiency=True)
 
-        night_buy_start = resolve_night_buy_window_tomorrow_start_datetime(
-            self.hass,
-            entry_id=self.entry.entry_id,
-        )
-        night_buy_start_hour = resolve_night_buy_window_tomorrow_start_hour(
-            self.hass,
-            self.config,
-            entry_id=self.entry.entry_id,
-            default_hour=NIGHT_BUY_WINDOW_START_HOUR,
-        )
-        buy_window_reference_price = get_internal_window_price(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            unique_id_suffix="night_buy_next_window",
-            entity_name="Tomorrow night buy window sensor",
-        )
+        buy_window_reference = self.arbitrage_buy_reference
+        buy_window_reference_price = buy_window_reference.price
+        buy_window_reference_source = str(buy_window_reference.source)
         buy_window_price_limit = (
             buy_window_reference_price * ARBITRAGE_BUY_WINDOW_PRICE_MULTIPLIER
             if buy_window_reference_price is not None
@@ -266,11 +219,11 @@ class EveningSellStrategy(BaseSellStrategy):
             time((self._current_window_hour + 1) % 24),
             tzinfo=local_now.tzinfo,
         )
-        search_end = night_buy_start or datetime.combine(
-            local_now.date() + timedelta(days=1),
-            time(night_buy_start_hour),
-            tzinfo=local_now.tzinfo,
-        )
+        search_end = buy_window_reference.start
+        if buy_window_reference.is_fallback:
+            # A Default Night Buy Window is only a guess at tonight's start;
+            # the search has always run to the start hour of tomorrow instead.
+            search_end += timedelta(days=1)
         arbitrage = find_first_arbitrage_buy_hour(
             prices,
             str(self.config[CONF_BUY_PRICE_SENSOR]),
@@ -291,6 +244,7 @@ class EveningSellStrategy(BaseSellStrategy):
                 "arbitrage_buy_price": round(arbitrage.average_price, 2),
                 "arbitrage_margin": round(arbitrage.arbitrage_margin, 2),
                 "buy_window_reference_price": round(buy_window_reference_price, 2),
+                "buy_window_reference_source": buy_window_reference_source,
                 "buy_window_price_limit": round(buy_window_price_limit, 2),
                 "selected_end_hour": arbitrage_hour,
                 "history_end_kind": "arb_b",
@@ -310,6 +264,7 @@ class EveningSellStrategy(BaseSellStrategy):
                 if buy_window_reference_price is not None
                 else None
             ),
+            "buy_window_reference_source": buy_window_reference_source,
             "buy_window_price_limit": (
                 round(buy_window_price_limit, 2)
                 if buy_window_price_limit is not None
@@ -360,8 +315,9 @@ class EveningSellStrategy(BaseSellStrategy):
     async def _on_price_unavailable(self) -> bool:
         """Fall back to surplus sell when evening price sensor is unavailable."""
         _LOGGER.info(
-            "Evening %s price sensor unavailable - falling back to surplus sell",
+            "Evening %s price unavailable (window source %s) - falling back to surplus sell",
             self._current_window_label,
+            self._current_window.source,
         )
         self.price = 0.0
         self._price_unavailable = True
@@ -375,14 +331,7 @@ class EveningSellStrategy(BaseSellStrategy):
             return None
         if not self.config.get(CONF_BUY_PRICE_SENSOR):
             return None
-        self._tomorrow_morning_price = get_internal_window_price(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            unique_id_suffix="morning_sell_window_tomorrow",
-            entity_name="Tomorrow morning max price sensor",
-            attribute_name="price",
-            fallback_entity_id=self.config.get(CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR),
-        )
+        self._tomorrow_morning_price = self.windows.morning_sell_tomorrow.primary.price
         if self._tomorrow_morning_price is None:
             return None
         if self.price > self._tomorrow_morning_price:
@@ -405,6 +354,7 @@ class EveningSellStrategy(BaseSellStrategy):
                 "evening_price": round(self.price, 2),
                 "tomorrow_morning_price": round(self._tomorrow_morning_price, 2),
                 "window": self._current_window_label,
+                "window_source": str(self._current_window.source),
             },
         )
 
@@ -637,7 +587,7 @@ class EveningSellStrategy(BaseSellStrategy):
             efficiency=self.battery_config.efficiency,
         )
 
-        tomorrow_end = resolve_tariff_end_hour(self.hass, self.config, default_hour=13)
+        tomorrow_end = self.windows.high_tariff_end.hour
         tomorrow_hp_kwh, tomorrow_hp_hourly = await get_heat_pump_forecast_window(
             self.hass,
             self.config,
@@ -950,4 +900,3 @@ async def async_run_evening_sell(
     )
     async with active_decision_audit(hass, entry, trigger=trigger):
         await strategy.run()
-    resolve_night_buy_window_tomorrow_start_hour,

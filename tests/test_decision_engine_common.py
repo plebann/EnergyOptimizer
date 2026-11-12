@@ -5,8 +5,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.energy_optimizer.decision_engine.common import resolve_entry
+from custom_components.energy_optimizer.decision_engine.common import (
+    resolve_arbitrage_margin_gate,
+    resolve_entry,
+)
 from custom_components.energy_optimizer.const import DOMAIN
+from tests.conftest import market_windows, window
 
 pytestmark = pytest.mark.enable_socket
 
@@ -65,3 +69,50 @@ def test_resolve_entry_no_entries() -> None:
     result = resolve_entry(hass, None)
 
     assert result is None
+
+
+def test_arbitrage_margin_gate_enabled_carries_reference_source() -> None:
+    reference = window(22, 6, price=200.0, next_day=True)
+
+    margin_ok, details = resolve_arbitrage_margin_gate(
+        sell_price=700.0, min_arbitrage_price=400.0, buy_reference=reference
+    )
+
+    assert margin_ok is True
+    assert details == {
+        "sell_price": 700.0,
+        "min_arbitrage_price": 400.0,
+        "buy_reference_price": 200.0,
+        "arbitrage_margin": 500.0,
+        "arbitrage_reason": "enabled",
+        "buy_reference_source": "prices",
+    }
+
+
+def test_arbitrage_margin_gate_below_threshold_closes() -> None:
+    reference = window(22, 6, price=400.0, next_day=True)
+
+    margin_ok, details = resolve_arbitrage_margin_gate(
+        sell_price=700.0, min_arbitrage_price=300.0, buy_reference=reference
+    )
+
+    assert margin_ok is False
+    assert details["arbitrage_reason"] == "margin_below_threshold"
+    assert details["arbitrage_margin"] == 300.0
+
+
+def test_arbitrage_margin_gate_fails_closed_without_reference_price() -> None:
+    reference = market_windows().night_buy
+
+    margin_ok, details = resolve_arbitrage_margin_gate(
+        sell_price=700.0, min_arbitrage_price=400.0, buy_reference=reference
+    )
+
+    assert reference.price is None
+    assert margin_ok is False
+    assert details == {
+        "sell_price": 700.0,
+        "min_arbitrage_price": 400.0,
+        "arbitrage_reason": "missing_buy_reference_price",
+        "buy_reference_source": "default",
+    }

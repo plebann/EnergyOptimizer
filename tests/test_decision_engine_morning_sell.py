@@ -34,6 +34,8 @@ from custom_components.energy_optimizer.decision_engine.morning_sell import (
     async_run_morning_sell,
 )
 from custom_components.energy_optimizer.calculations.price_windows import ArbitrageBuyHourResult
+from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
+from tests.conftest import market_windows, window
 from custom_components.energy_optimizer.utils.pv_forecast import MorningPVForecast
 
 pytestmark = pytest.mark.enable_socket
@@ -80,6 +82,9 @@ def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
             entry.entry_id: {
                 "last_optimization_sensor": mock_opt_sensor,
                 "optimization_history_sensor": mock_hist_sensor,
+                "market_windows": StaticMarketWindowResolver(
+                    market_windows(morning_sell_buy_reference=window(8, 10, price=50.0))
+                ),
                 "battery_space_sensor": SimpleNamespace(
                     entity_id="sensor.energy_optimizer_battery_space"
                 ),

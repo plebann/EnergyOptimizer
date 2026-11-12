@@ -47,6 +47,7 @@ from ..helpers import (
     resolve_morning_max_price_hour,
     resolve_tariff_end_hour,
 )
+from ..market_windows import ResolvedMarketWindow
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.logging import DecisionOutcome
 from ..utils.decision_dump import active_decision_audit, record_step
@@ -119,14 +120,9 @@ class MorningSellStrategy(BaseSellStrategy):
         return "morning"
 
     @property
-    def arbitrage_buy_reference_suffix(self) -> str:
-        """Return the morning sell Arbitrage Buy Reference sensor suffix."""
-        return "morning_sell_buy_reference"
-
-    @property
-    def arbitrage_buy_reference_name(self) -> str:
-        """Return the morning sell Arbitrage Buy Reference sensor name."""
-        return "Morning sell buy reference"
+    def arbitrage_buy_reference(self) -> ResolvedMarketWindow:
+        """Return the morning sell Arbitrage Buy Reference window."""
+        return self.windows.morning_sell_buy_reference
 
     def _get_target_soc_floor(self, *, surplus_kwh: float) -> float:
         """Use PV floor only when sufficiency is confirmed for morning sell."""

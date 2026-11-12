@@ -25,9 +25,11 @@ from custom_components.energy_optimizer.decision_engine.afternoon_charge import 
     async_run_afternoon_charge,
 )
 from custom_components.energy_optimizer.decision_engine.common import ForecastData
+from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
 from custom_components.energy_optimizer.night_buy_window_manager import (
     NightBuyWindowPlanManager,
 )
+from tests.conftest import market_windows
 
 pytestmark = pytest.mark.enable_socket
 
@@ -127,6 +129,7 @@ def _hass(
             "entry-1": {
                 "last_optimization_sensor": optimization,
                 "optimization_history_sensor": history,
+                "market_windows": StaticMarketWindowResolver(market_windows()),
                 "afternoon_grid_assist_sensor": assist,
             }
         }

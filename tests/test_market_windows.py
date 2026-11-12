@@ -22,6 +22,7 @@ from custom_components.energy_optimizer.const import (
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_SELL_PRICE_SENSOR,
+    CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
     DOMAIN,
 )
 from custom_components.energy_optimizer.market_windows import (
@@ -922,6 +923,34 @@ BUY_PRICES_TODAY = {
 }
 
 
+class TestCoordinatorMarketWindowResolverDecisionPrecision:
+    """Prices the strategies compare against strict thresholds keep three decimals."""
+
+    def test_a_plan_price_is_rounded_to_three_decimals(self) -> None:
+        resolver = _resolver(night_next=_plan(_dt(8, 22), _dt(9, 6), 299.9996))
+
+        assert resolver.windows(NOW).night_buy.price == 300.0
+
+    def test_ranked_sell_prices_are_rounded_to_three_decimals(self) -> None:
+        resolver = _resolver(
+            coordinator=_coordinator(
+                _sell_payload(prices_today=_hourly(8, {17: 1.30049, 18: 1.25049}))
+            )
+        )
+
+        ranked = resolver.windows(NOW).evening_sell
+        assert (ranked.primary.price, ranked.secondary.price) == (1.3, 1.25)
+
+    def test_the_buy_reference_average_is_rounded_to_three_decimals(self) -> None:
+        resolver = _resolver(
+            coordinator=_coordinator(
+                _buy_payload(prices_today=_hourly(8, {8: 0.30004, 9: 0.30004, 10: 0.30004}))
+            )
+        )
+
+        assert resolver.windows(NOW).morning_sell_buy_reference.price == 0.3
+
+
 class TestCoordinatorMarketWindowResolverBuyReference:
     def test_averages_buy_prices_from_the_hour_after_the_morning_sell_to_the_tariff_end(
         self,
@@ -952,7 +981,7 @@ class TestCoordinatorMarketWindowResolverBuyReference:
 
         reference = resolver.windows(NOW).morning_sell_buy_reference
         assert (reference.start, reference.end) == (_dt(8, 9), _dt(8, 12))
-        assert reference.price == pytest.approx(0.7333, abs=1e-4)
+        assert reference.price == 0.733
 
     def test_a_reference_starting_at_the_tariff_end_wraps_to_the_next_day(self) -> None:
         resolver = _resolver(
@@ -1080,6 +1109,30 @@ class TestCoordinatorMarketWindowResolverLegacyEntities:
 
         primary = resolver.windows(NOW).morning_sell.primary
         assert (primary.source, primary.reason) == (MarketWindowSource.DEFAULT, "unavailable")
+
+    def test_a_configured_price_without_its_hour_entity_keeps_the_default_hour(
+        self,
+    ) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.evening_price": "1.25"}),
+            entry=_entry(**{CONF_EVENING_MAX_PRICE_SENSOR: "sensor.evening_price"}),
+        )
+
+        assert resolver.windows(NOW).evening_sell == RankedMarketWindow(
+            primary=_legacy(_dt(8, 17), _dt(8, 18), 1.25), secondary=None
+        )
+
+    def test_tomorrows_morning_price_entity_prices_the_default_morning_hour(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.tomorrow_morning": "750"}),
+            entry=_entry(
+                **{CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR: "sensor.tomorrow_morning"}
+            ),
+        )
+
+        assert resolver.windows(NOW).morning_sell_tomorrow == RankedMarketWindow(
+            primary=_legacy(_dt(9, 7), _dt(9, 8), 750.0), secondary=None
+        )
 
     def test_a_legacy_sell_hour_with_minutes_starts_on_the_whole_hour(self) -> None:
         resolver = _resolver(

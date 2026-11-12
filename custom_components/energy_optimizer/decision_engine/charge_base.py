@@ -18,6 +18,7 @@ from ..controllers.inverter import (
     set_program_soc,
 )
 from ..helpers import get_float_state_info
+from ..market_windows import MarketWindowResolver
 from ..utils.logging import log_decision_unified
 from ..utils.pv_forecast import get_pv_compensation_factor
 from .common import (
@@ -27,6 +28,7 @@ from .common import (
     ForecastData,
     calculate_charge_action,
     gather_forecasts,
+    MarketWindowReader,
     get_battery_config,
     get_required_current_soc_state,
     resolve_entry,
@@ -41,7 +43,7 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
-class BaseChargeStrategy(ABC):
+class BaseChargeStrategy(MarketWindowReader, ABC):
     """Template-method base for charge decision strategies."""
 
     def __init__(
@@ -50,11 +52,13 @@ class BaseChargeStrategy(ABC):
         *,
         entry_id: str | None,
         margin: float | None,
+        resolver: MarketWindowResolver | None = None,
     ) -> None:
         """Initialize strategy with runtime inputs."""
         self.hass = hass
         self._entry_id = entry_id
         self._raw_margin = margin
+        self._injected_resolver = resolver
 
         self.entry: ConfigEntry
         self.config: dict[str, Any]
@@ -231,6 +235,7 @@ class BaseChargeStrategy(ABC):
 
     async def run(self) -> None:
         """Execute common charge workflow and delegate strategy specifics."""
+        self.windows = self._resolver.windows()
         self.integration_context = Context()
         self._charge_failure_reported = False
 

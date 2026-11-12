@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -14,10 +16,6 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
     CONF_BUY_PRICE_SENSOR,
-    CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
-    CONF_EVENING_MAX_PRICE_SENSOR,
-    CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
-    CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
     CONF_EXPORT_POWER_ENTITY,
     CONF_MAX_EXPORT_POWER,
     CONF_MIN_ARBITRAGE_PRICE,
@@ -25,23 +23,30 @@ from custom_components.energy_optimizer.const import (
     CONF_PROG5_SOC_ENTITY,
     CONF_PV_PRODUCTION_SENSOR,
     CONF_TEST_MODE,
-    CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
     CONF_WORK_MODE_ENTITY,
     DOMAIN,
     CONF_MAX_DISCHARGE_POWER,
 )
 from custom_components.energy_optimizer.decision_engine.evening_sell import (
+    EveningSellStrategy,
     async_run_evening_sell,
 )
 from custom_components.energy_optimizer.decision_engine.sell_base import SellRequest
 from custom_components.energy_optimizer.calculations.price_windows import ArbitrageBuyHourResult
+from custom_components.energy_optimizer.market_windows import (
+    MarketWindows,
+    MarketWindowSource,
+    RankedMarketWindow,
+    ResolvedMarketWindow,
+    StaticMarketWindowResolver,
+    default_market_windows,
+)
 from custom_components.energy_optimizer.utils.logging import DecisionOutcome
 
 pytestmark = pytest.mark.enable_socket
 
 SELL_BASE = "custom_components.energy_optimizer.decision_engine.sell_base"
 EVENING = "custom_components.energy_optimizer.decision_engine.evening_sell"
-HELPERS = "custom_components.energy_optimizer.helpers"
 
 
 def _state(value: str) -> MagicMock:
@@ -54,7 +59,75 @@ def _state(value: str) -> MagicMock:
     return state
 
 
-def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
+_NOW = datetime(2026, 2, 24, 17, tzinfo=ZoneInfo("Europe/Warsaw"))
+
+
+def _hour_window(
+    day_offset: int, hour: int, price: float | None
+) -> ResolvedMarketWindow:
+    """Build a one-hour price-resolved window on the day of _NOW."""
+    start = datetime.combine(
+        _NOW.date() + timedelta(days=day_offset), time(hour), tzinfo=_NOW.tzinfo
+    )
+    return ResolvedMarketWindow(
+        start=start,
+        end=start + timedelta(hours=1),
+        price=price,
+        source=MarketWindowSource.PRICES,
+    )
+
+
+def _default_night_buy() -> ResolvedMarketWindow:
+    return default_market_windows(_NOW).night_buy
+
+
+def _windows(
+    *,
+    primary_hour: int = 17,
+    primary_price: float = 700.0,
+    secondary_hour: int | None = None,
+    secondary_price: float | None = None,
+    tomorrow_morning_price: float | None = None,
+    night_buy: ResolvedMarketWindow | None = None,
+    night_buy_start_hour: int = 1,
+) -> MarketWindows:
+    """Build the Market Window snapshot an Evening Sell run reads."""
+    if night_buy is None:
+        start = datetime.combine(
+            _NOW.date() + timedelta(days=1),
+            time(night_buy_start_hour),
+            tzinfo=_NOW.tzinfo,
+        )
+        night_buy = ResolvedMarketWindow(
+            start=start,
+            end=start + timedelta(hours=5),
+            price=200.0,
+            source=MarketWindowSource.PLAN,
+        )
+    secondary = (
+        _hour_window(0, secondary_hour, secondary_price)
+        if secondary_hour is not None
+        else None
+    )
+    overrides: dict[str, object] = {
+        "evening_sell": RankedMarketWindow(
+            primary=_hour_window(0, primary_hour, primary_price),
+            secondary=secondary,
+        ),
+        "night_buy": night_buy,
+    }
+    if tomorrow_morning_price is not None:
+        overrides["morning_sell_tomorrow"] = RankedMarketWindow(
+            primary=_hour_window(1, 7, tomorrow_morning_price), secondary=None
+        )
+    return replace(default_market_windows(_NOW), **overrides)
+
+
+def _setup_hass(
+    config: dict[str, object],
+    states: dict[str, str],
+    windows: MarketWindows | None = None,
+) -> MagicMock:
     hass = MagicMock()
     entry = MagicMock()
     entry.entry_id = "entry-1"
@@ -81,6 +154,9 @@ def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
             entry.entry_id: {
                 "last_optimization_sensor": mock_opt_sensor,
                 "optimization_history_sensor": mock_hist_sensor,
+                "market_windows": StaticMarketWindowResolver(
+                    windows if windows is not None else _windows()
+                ),
             }
         }
     }
@@ -91,7 +167,6 @@ def _base_config() -> dict[str, object]:
     return {
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_PROG5_SOC_ENTITY: "number.prog5_soc",
-        CONF_EVENING_MAX_PRICE_SENSOR: "sensor.evening_price",
         CONF_MIN_ARBITRAGE_PRICE: 400.0,
         CONF_MAX_EXPORT_POWER: 12000,
         CONF_WORK_MODE_ENTITY: "select.work_mode",
@@ -108,9 +183,7 @@ def _base_states() -> dict[str, str]:
     return {
         "sensor.battery_soc": "90",
         "number.prog5_soc": "50",
-        "sensor.evening_price": "700",
         "sensor.pv_today": "8",
-        "sensor.night_buy_window_tomorrow_internal": ("01:00", {"price": 200.0}),
     }
 
 
@@ -160,22 +233,6 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, outcomes: list) -> None:
         f"{EVENING}.build_hourly_usage_array",
         lambda config, get_state, daily_load_fallback=None: [0.0] * 24,
     )
-    monkeypatch.setattr(
-        f"{EVENING}.resolve_tariff_start_hour",
-        lambda hass, config, default_hour=22: 22,
-    )
-    monkeypatch.setattr(
-        f"{EVENING}.resolve_tariff_end_hour",
-        lambda hass, config, default_hour=13: 13,
-    )
-    monkeypatch.setattr(
-        f"{HELPERS}.get_internal_sensor_entity_id",
-        lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": (
-            "sensor.night_buy_window_tomorrow_internal"
-            if unique_id_suffix == "night_buy_next_window"
-            else None
-        ),
-    )
 
 
 class _CountingStoreStub:
@@ -190,6 +247,18 @@ class _CountingStoreStub:
 
     async def async_load(self) -> dict[str, object] | None:
         return self.__class__.load_data
+
+
+async def _run_window_pair(hass: MagicMock, *, first_primary: bool) -> None:
+    """Run the first, then the second evening window of an A/B pair."""
+    for is_primary, is_first in ((first_primary, True), (not first_primary, False)):
+        await async_run_evening_sell(
+            hass,
+            entry_id="entry-1",
+            margin=1.0,
+            is_primary=is_primary,
+            is_first=is_first,
+        )
 
 
 def _sell_request(surplus_kwh: float) -> SellRequest:
@@ -248,6 +317,7 @@ async def test_evening_sell_high_sell_action_type(monkeypatch: pytest.MonkeyPatc
 
     assert outcomes
     assert outcomes[-1].action_type == "high_sell"
+    assert outcomes[-1].details["buy_reference_source"] == "plan"
 
 
 @pytest.mark.asyncio
@@ -257,17 +327,13 @@ async def test_evening_sell_uses_next_day_qualifying_buy_hour(
     config = _base_config()
     config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
     states = _base_states()
-    hass = _setup_hass(config, states)
+    hass = _setup_hass(config, states, windows=_windows(night_buy_start_hour=4))
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
     local_now = datetime(2026, 2, 24, 17, tzinfo=timezone.utc)
     monkeypatch.setattr(f"{EVENING}.dt_util.as_local", lambda _dt: local_now)
     monkeypatch.setattr(f"{EVENING}.get_buy_price_payload", lambda *args, **kwargs: [{}])
-    monkeypatch.setattr(
-        f"{EVENING}.resolve_night_buy_window_tomorrow_start_hour",
-        lambda *args, **kwargs: 4,
-    )
     bounds: dict[str, object] = {}
 
     def _find(_prices, _entity_id, **kwargs):
@@ -304,6 +370,7 @@ async def test_evening_sell_uses_next_day_qualifying_buy_hour(
     assert outcomes[-1].details["sell_horizon_mode"] == "arbitrage"
     assert outcomes[-1].details["arbitrage_hour"] == 1
     assert outcomes[-1].details["buy_window_reference_price"] == 200.0
+    assert outcomes[-1].details["buy_window_reference_source"] == "plan"
     assert outcomes[-1].details["buy_window_price_limit"] == 240.0
     assert outcomes[-1].history_windows == [["sr", 18, "next_h", 1, "arb_b", True]]
 
@@ -315,8 +382,7 @@ async def test_evening_sell_without_qualifying_buy_price_requires_pv_sufficiency
     config = _base_config()
     config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
     states = _base_states()
-    states.pop("sensor.night_buy_window_tomorrow_internal")
-    hass = _setup_hass(config, states)
+    hass = _setup_hass(config, states, windows=_windows(night_buy=_default_night_buy()))
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -347,6 +413,7 @@ async def test_evening_sell_without_qualifying_buy_price_requires_pv_sufficiency
     assert outcomes[-1].details["arbitrage_reason"] == "margin_not_reached"
     assert captured_max_buy_price is None
     assert outcomes[-1].details["buy_window_reference_price"] is None
+    assert outcomes[-1].details["buy_window_reference_source"] == "default"
     assert outcomes[-1].details["buy_window_price_limit"] is None
 
 
@@ -397,8 +464,7 @@ async def test_evening_sell_falls_back_to_surplus_sell_when_buy_reference_missin
 ) -> None:
     config = _base_config()
     states = _base_states()
-    del states["sensor.night_buy_window_tomorrow_internal"]
-    hass = _setup_hass(config, states)
+    hass = _setup_hass(config, states, windows=_windows(night_buy=_default_night_buy()))
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -428,6 +494,7 @@ async def test_evening_sell_falls_back_to_surplus_sell_when_buy_reference_missin
     assert outcomes
     assert outcomes[-1].action_type == "sell"
     assert outcomes[-1].details["arbitrage_reason"] == "missing_buy_reference_price"
+    assert outcomes[-1].details["buy_reference_source"] == "default"
 
 
 @pytest.mark.asyncio
@@ -436,8 +503,7 @@ async def test_evening_sell_surplus_sell_no_sufficiency_uses_full_tariff_window(
 ) -> None:
     config = _base_config()
     states = _base_states()
-    states["sensor.evening_price"] = "350"
-    hass = _setup_hass(config, states)
+    hass = _setup_hass(config, states, windows=_windows(primary_price=350.0))
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -477,11 +543,8 @@ async def test_evening_sell_skips_when_tomorrow_morning_price_is_higher(
 ) -> None:
     config = _base_config()
     config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
-    config[CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR] = "sensor.tomorrow_morning_price"
     states = _base_states()
-    states["sensor.evening_price"] = "700"
-    states["sensor.tomorrow_morning_price"] = "750"
-    hass = _setup_hass(config, states)
+    hass = _setup_hass(config, states, windows=_windows(primary_price=700.0, tomorrow_morning_price=750.0))
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -506,6 +569,7 @@ async def test_evening_sell_skips_when_tomorrow_morning_price_is_higher(
     assert outcomes
     assert outcomes[-1].action_type == "no_action"
     assert "not higher than tomorrow morning" in (outcomes[-1].reason or "").lower()
+    assert outcomes[-1].details["window_source"] == "prices"
     set_work_mode_mock.assert_not_awaited()
     set_program_soc_mock.assert_not_awaited()
     set_export_power_mock.assert_not_awaited()
@@ -515,8 +579,7 @@ async def test_evening_sell_skips_when_tomorrow_morning_price_is_higher(
 async def test_evening_sell_surplus_sell_success(monkeypatch: pytest.MonkeyPatch) -> None:
     config = _base_config()
     states = _base_states()
-    states["sensor.evening_price"] = "350"
-    hass = _setup_hass(config, states)
+    hass = _setup_hass(config, states, windows=_windows(primary_price=350.0))
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -566,9 +629,8 @@ async def test_evening_sell_no_action_when_battery_energy_below_floor(
     config = _base_config()
     config[CONF_MIN_SOC] = 18
     states = _base_states()
-    states["sensor.evening_price"] = "350"
     states["sensor.battery_soc"] = "19"
-    hass = _setup_hass(config, states)
+    hass = _setup_hass(config, states, windows=_windows(primary_price=350.0))
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -624,8 +686,7 @@ async def test_evening_sell_no_action_when_battery_energy_below_floor(
 async def test_evening_sell_surplus_sell_no_surplus(monkeypatch: pytest.MonkeyPatch) -> None:
     config = _base_config()
     states = _base_states()
-    states["sensor.evening_price"] = "350"
-    hass = _setup_hass(config, states)
+    hass = _setup_hass(config, states, windows=_windows(primary_price=350.0))
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -666,8 +727,7 @@ async def test_evening_sell_surplus_no_action_required_uses_sufficiency_window(
 ) -> None:
     config = _base_config()
     states = _base_states()
-    states["sensor.evening_price"] = "350"
-    hass = _setup_hass(config, states)
+    hass = _setup_hass(config, states, windows=_windows(primary_price=350.0))
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -778,18 +838,16 @@ async def test_evening_sell_a_first_splits_primary_then_secondary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _base_config()
-    config[CONF_EVENING_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_hour"
-    config[CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_second_hour"
-    config[CONF_EVENING_SECOND_MAX_PRICE_SENSOR] = "sensor.evening_second_price"
     config[CONF_MAX_EXPORT_POWER] = 9000
     states = _base_states()
-    states["sensor.evening_hour"] = "18"
-    states["sensor.evening_second_hour"] = "19"
-    states["sensor.evening_second_price"] = "600"
     states["sensor.pv_today"] = "20"
-    states["sensor.tomorrow_morning"] = "500"
-    config[CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR] = "sensor.tomorrow_morning"
-    hass = _setup_hass(config, states)
+    hass = _setup_hass(config, states, windows=_windows(
+            primary_hour=18,
+            secondary_hour=19,
+            secondary_price=600.0,
+            tomorrow_morning_price=500.0,
+        ),
+    )
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -801,20 +859,7 @@ async def test_evening_sell_a_first_splits_primary_then_secondary(
     _CountingStoreStub.load_data = None
     monkeypatch.setattr(f"{SELL_BASE}.Store", _CountingStoreStub)
 
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=True,
-        is_first=True,
-    )
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=False,
-        is_first=False,
-    )
+    await _run_window_pair(hass, first_primary=True)
 
     assert [outcome.details["surplus_kwh"] for outcome in outcomes[-2:]] == [9.0, 3.0]
     assert len(_CountingStoreStub.save_calls) == 1
@@ -825,18 +870,16 @@ async def test_evening_sell_b_first_sells_only_overflow_before_primary_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _base_config()
-    config[CONF_EVENING_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_hour"
-    config[CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_second_hour"
-    config[CONF_EVENING_SECOND_MAX_PRICE_SENSOR] = "sensor.evening_second_price"
     config[CONF_MAX_EXPORT_POWER] = 9000
     states = _base_states()
-    states["sensor.evening_hour"] = "19"
-    states["sensor.evening_second_hour"] = "18"
-    states["sensor.evening_second_price"] = "600"
     states["sensor.pv_today"] = "20"
-    states["sensor.tomorrow_morning"] = "500"
-    config[CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR] = "sensor.tomorrow_morning"
-    hass = _setup_hass(config, states)
+    hass = _setup_hass(config, states, windows=_windows(
+            primary_hour=19,
+            secondary_hour=18,
+            secondary_price=600.0,
+            tomorrow_morning_price=500.0,
+        ),
+    )
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -850,20 +893,7 @@ async def test_evening_sell_b_first_sells_only_overflow_before_primary_window(
     _CountingStoreStub.load_data = None
     monkeypatch.setattr(f"{SELL_BASE}.Store", _CountingStoreStub)
 
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=False,
-        is_first=True,
-    )
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=True,
-        is_first=False,
-    )
+    await _run_window_pair(hass, first_primary=False)
 
     assert [outcome.details["surplus_kwh"] for outcome in outcomes[-2:]] == [3.0, 9.0]
     assert len(_CountingStoreStub.save_calls) == 1
@@ -874,18 +904,16 @@ async def test_evening_sell_second_window_early_exit_restores_active_sell(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _base_config()
-    config[CONF_EVENING_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_hour"
-    config[CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_second_hour"
-    config[CONF_EVENING_SECOND_MAX_PRICE_SENSOR] = "sensor.evening_second_price"
     config[CONF_MAX_EXPORT_POWER] = 9000
     config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
     states = _base_states()
-    states["sensor.evening_hour"] = "18"
-    states["sensor.evening_second_hour"] = "19"
-    states["sensor.evening_second_price"] = "400"
-    states["sensor.tomorrow_morning"] = "500"
-    config[CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR] = "sensor.tomorrow_morning"
-    hass = _setup_hass(config, states)
+    hass = _setup_hass(config, states, windows=_windows(
+            primary_hour=18,
+            secondary_hour=19,
+            secondary_price=400.0,
+            tomorrow_morning_price=500.0,
+        ),
+    )
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -897,23 +925,11 @@ async def test_evening_sell_second_window_early_exit_restores_active_sell(
     restore_mock = AsyncMock()
     monkeypatch.setattr(f"{EVENING}.async_handle_sell_restore", restore_mock)
 
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=True,
-        is_first=True,
-    )
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=False,
-        is_first=False,
-    )
+    await _run_window_pair(hass, first_primary=True)
 
     assert restore_mock.await_count == 1
     assert outcomes[-1].action_type == "sell_restore"
+    assert outcomes[-1].details["window_source"] == "prices"
 
 
 @pytest.mark.asyncio
@@ -921,17 +937,15 @@ async def test_evening_sell_second_window_zero_surplus_restores_active_sell(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _base_config()
-    config[CONF_EVENING_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_hour"
-    config[CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR] = "sensor.evening_second_hour"
-    config[CONF_EVENING_SECOND_MAX_PRICE_SENSOR] = "sensor.evening_second_price"
     config[CONF_MAX_EXPORT_POWER] = 9000
     states = _base_states()
-    states["sensor.evening_hour"] = "18"
-    states["sensor.evening_second_hour"] = "19"
-    states["sensor.evening_second_price"] = "600"
-    states["sensor.tomorrow_morning"] = "500"
-    config[CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR] = "sensor.tomorrow_morning"
-    hass = _setup_hass(config, states)
+    hass = _setup_hass(config, states, windows=_windows(
+            primary_hour=18,
+            secondary_hour=19,
+            secondary_price=600.0,
+            tomorrow_morning_price=500.0,
+        ),
+    )
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
@@ -951,20 +965,67 @@ async def test_evening_sell_second_window_zero_surplus_restores_active_sell(
     restore_mock = AsyncMock()
     monkeypatch.setattr(f"{EVENING}.async_handle_sell_restore", restore_mock)
 
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=True,
-        is_first=True,
-    )
-    await async_run_evening_sell(
-        hass,
-        entry_id="entry-1",
-        margin=1.0,
-        is_primary=False,
-        is_first=False,
-    )
+    await _run_window_pair(hass, first_primary=True)
 
     assert restore_mock.await_count == 1
     assert outcomes[-1].action_type == "sell_restore"
+    assert outcomes[-1].details["window_source"] == "prices"
+
+
+@pytest.mark.asyncio
+async def test_evening_sell_reads_one_snapshot_per_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run asks the resolver once, however many windows it reads."""
+    hass = _setup_hass(_base_config(), _base_states())
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+    resolver = MagicMock(wraps=StaticMarketWindowResolver(_windows()))
+
+    async def _compute_base(self):
+        return _sell_request(2.0)
+
+    monkeypatch.setattr(f"{EVENING}.EveningSellStrategy._compute_base_evaluation", _compute_base)
+    strategy = EveningSellStrategy(
+        hass, entry_id="entry-1", margin=1.0, resolver=resolver
+    )
+
+    await strategy.run()
+
+    assert resolver.windows.call_count == 1
+    assert strategy.windows == _windows()
+
+
+@pytest.mark.asyncio
+async def test_evening_sell_default_night_buy_searches_to_tomorrows_start_hour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a resolved Night Buy Window the search runs to tomorrow's start hour."""
+    config = _base_config()
+    config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
+    hass = _setup_hass(
+        config, _base_states(), windows=_windows(night_buy=_default_night_buy())
+    )
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+    monkeypatch.setattr(f"{EVENING}.dt_util.as_local", lambda _dt: _NOW)
+    monkeypatch.setattr(f"{EVENING}.get_buy_price_payload", lambda *args, **kwargs: [{}])
+    bounds: dict[str, object] = {}
+
+    def _find(_prices, _entity_id, **kwargs):
+        bounds["end"] = kwargs["end_local"]
+        return ArbitrageBuyHourResult(None, None, None, "margin_not_reached")
+
+    monkeypatch.setattr(f"{EVENING}.find_first_arbitrage_buy_hour", _find)
+    monkeypatch.setattr(f"{EVENING}.get_heat_pump_forecast_window", AsyncMock(return_value=(1.0, {})))
+    monkeypatch.setattr(f"{EVENING}.get_pv_forecast_window", lambda *args, **kwargs: (2.0, {}))
+    monkeypatch.setattr(f"{EVENING}.calculate_losses", lambda *args, **kwargs: (0.0, 0.0))
+    monkeypatch.setattr(f"{EVENING}.calculate_battery_reserve", lambda *args, **kwargs: 10.0)
+    monkeypatch.setattr(
+        f"{EVENING}.calculate_sufficiency_window",
+        lambda **kwargs: (9.0, 8.0, 1.0, 13, False),
+    )
+
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert bounds["end"] == datetime(2026, 2, 25, 22, tzinfo=_NOW.tzinfo)
