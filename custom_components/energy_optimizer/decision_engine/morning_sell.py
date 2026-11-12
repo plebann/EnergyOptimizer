@@ -22,8 +22,6 @@ from ..const import (
     CONF_BATTERY_VOLTAGE_SENSOR,
     CONF_DISCHARGE_CURRENT_ENTITY,
     CONF_MAX_DISCHARGE_POWER,
-    CONF_EVENING_MAX_PRICE_SENSOR,
-    CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
     CONF_PV_FORECAST_TODAY,
     DOMAIN,
@@ -39,15 +37,10 @@ from ..decision_engine.common import (
     resolve_entry,
 )
 from ..helpers import (
-    get_plan_for_today,
     get_float_state_info,
     get_buy_price_payload,
-    get_internal_window_price,
-    resolve_day_buy_window_start_hour,
-    resolve_morning_max_price_hour,
-    resolve_tariff_end_hour,
 )
-from ..market_windows import ResolvedMarketWindow
+from ..market_windows import MarketWindowResolver, ResolvedMarketWindow
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.logging import DecisionOutcome
 from ..utils.decision_dump import active_decision_audit, record_step
@@ -102,9 +95,10 @@ class MorningSellStrategy(BaseSellStrategy):
         *,
         entry_id: str | None,
         margin: float | None,
+        resolver: MarketWindowResolver | None = None,
     ) -> None:
         """Initialize morning sell strategy."""
-        super().__init__(hass, entry_id=entry_id, margin=margin)
+        super().__init__(hass, entry_id=entry_id, margin=margin, resolver=resolver)
         self._allow_min_soc_pv = False
         self._use_discharge_current = False
         self._regulator_diagnostics: dict[str, object] = {}
@@ -145,23 +139,11 @@ class MorningSellStrategy(BaseSellStrategy):
 
     def _get_price(self) -> float | None:
         """Resolve morning max price state."""
-        return get_internal_window_price(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            unique_id_suffix="morning_sell_window",
-            entity_name="Morning max price sensor",
-            attribute_name="price",
-            fallback_entity_id=self.config.get(CONF_MORNING_MAX_PRICE_SENSOR),
-        )
+        return self.windows.morning_sell.primary.price
 
     def _resolve_sell_hour(self) -> int:
         """Resolve morning sell hour."""
-        return resolve_morning_max_price_hour(
-            self.hass,
-            self.config,
-            entry_id=self.entry.entry_id,
-            default_hour=7,
-        )
+        return self.windows.morning_sell.primary.hour
 
     async def _on_price_unavailable(self) -> bool:
         """Fall back to surplus-over-space sell when morning price sensor is unavailable."""
@@ -294,13 +276,8 @@ class MorningSellStrategy(BaseSellStrategy):
         """Run morning sell logic using a single surplus branch."""
         self._allow_min_soc_pv = False
         start_hour = (self._now_hour + 1) % 24
-        tariff_end_hour = resolve_tariff_end_hour(self.hass, self.config, default_hour=13)
-        base_end_hour = resolve_day_buy_window_start_hour(
-            self.hass,
-            self.config,
-            entry_id=self.entry.entry_id,
-            default_hour=tariff_end_hour,
-        )
+        day_buy = self.windows.day_buy
+        base_end_hour = day_buy.start_hour_or(self.windows.high_tariff_end.hour)
         sell_hour = self._resolve_sell_hour()
         sell_window_end_hour = (sell_hour + 1) % 24
         horizon_details: dict[str, object] = {
@@ -550,21 +527,8 @@ class MorningSellStrategy(BaseSellStrategy):
         arbitrage_hour: int | None = None
         margin_achievable = False
         if has_dynamic_buy_prices and prices:
-            day_plan = get_plan_for_today(
-                self.hass,
-                entry_id=self.entry.entry_id,
-                kind="day",
-            )
-            buy_window_reference_price = (
-                day_plan.price
-                if day_plan is not None
-                else get_internal_window_price(
-                    self.hass,
-                    entry_id=self.entry.entry_id,
-                    unique_id_suffix="day_buy_window",
-                    entity_name="Day buy window sensor",
-                )
-            )
+            buy_window_reference_price = day_buy.price
+            horizon_details["buy_window_reference_source"] = str(day_buy.source)
             if buy_window_reference_price is None:
                 horizon_details["arbitrage_reason"] = "missing_buy_window_reference"
             else:
@@ -576,17 +540,17 @@ class MorningSellStrategy(BaseSellStrategy):
                     2,
                 )
                 horizon_details["buy_window_price_limit"] = round(buy_window_price_limit, 2)
-                local_now = dt_util.as_local(dt_util.utcnow())
-                plan_date = day_plan.plan_date if day_plan is not None else local_now.date()
+                tzinfo = self.windows.now.tzinfo
+                plan_date = day_buy.plan_date
                 search_start = datetime.combine(
                     plan_date,
                     time(sell_window_end_hour),
-                    tzinfo=local_now.tzinfo,
+                    tzinfo=tzinfo,
                 )
                 search_end = datetime.combine(
                     plan_date,
                     time(base_end_hour),
-                    tzinfo=local_now.tzinfo,
+                    tzinfo=tzinfo,
                 )
                 arbitrage = find_first_arbitrage_buy_hour(
                     prices,
@@ -743,14 +707,7 @@ class MorningSellStrategy(BaseSellStrategy):
                 self.battery_config.voltage,
             )
 
-        evening_price = get_internal_window_price(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            unique_id_suffix="evening_sell_window",
-            entity_name="Evening max price sensor",
-            attribute_name="price",
-            fallback_entity_id=self.config.get(CONF_EVENING_MAX_PRICE_SENSOR),
-        )
+        evening_price = self.windows.evening_sell.primary.price
 
         selected_surplus_kwh = surplus_kwh
         surplus_to_sunset: float | None = None

@@ -34,15 +34,20 @@ from custom_components.energy_optimizer.decision_engine.morning_sell import (
     async_run_morning_sell,
 )
 from custom_components.energy_optimizer.calculations.price_windows import ArbitrageBuyHourResult
-from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
-from tests.conftest import market_windows, window
+from custom_components.energy_optimizer.market_windows import (
+    MarketWindowSource,
+    RankedMarketWindow,
+    ResolvedHour,
+    StaticMarketWindowResolver,
+    default_market_windows,
+)
+from tests.conftest import MARKET_WINDOWS_NOW, market_windows, window
 from custom_components.energy_optimizer.utils.pv_forecast import MorningPVForecast
 
 pytestmark = pytest.mark.enable_socket
 
 SELL_BASE = "custom_components.energy_optimizer.decision_engine.sell_base"
 MORNING = "custom_components.energy_optimizer.decision_engine.morning_sell"
-HELPERS = "custom_components.energy_optimizer.helpers"
 
 
 def _state(value: str) -> MagicMock:
@@ -55,7 +60,27 @@ def _state(value: str) -> MagicMock:
     return state
 
 
-def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
+def _snapshot_windows(states: dict[str, str], **overrides: object):
+    """Build the snapshot Morning Sell reads: the sell prices come from `states`."""
+    morning_price = float(states["sensor.morning_price"]) if "sensor.morning_price" in states else None
+    evening_price = float(states["sensor.evening_price"]) if "sensor.evening_price" in states else None
+    return market_windows(
+        **{
+            "morning_sell": RankedMarketWindow(window(7, 8, price=morning_price), None),
+            "evening_sell": RankedMarketWindow(window(17, 18, price=evening_price), None),
+            "day_buy": window(13, 15, price=50.0),
+            "high_tariff_end": ResolvedHour(13, MarketWindowSource.PRICES),
+            "morning_sell_buy_reference": window(8, 10, price=50.0),
+            **overrides,
+        }
+    )
+
+
+def _setup_hass(
+    config: dict[str, object],
+    states: dict[str, str],
+    **window_overrides: object,
+) -> MagicMock:
     hass = MagicMock()
     entry = MagicMock()
     entry.entry_id = "entry-1"
@@ -83,7 +108,7 @@ def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
                 "last_optimization_sensor": mock_opt_sensor,
                 "optimization_history_sensor": mock_hist_sensor,
                 "market_windows": StaticMarketWindowResolver(
-                    market_windows(morning_sell_buy_reference=window(8, 10, price=50.0))
+                    _snapshot_windows(states, **window_overrides)
                 ),
                 "battery_space_sensor": SimpleNamespace(
                     entity_id="sensor.energy_optimizer_battery_space"
@@ -126,7 +151,6 @@ def _base_states() -> dict[str, str]:
         "number.discharge_current": ("12", {"max": 30}),
         "sensor.pv_forecast_today": "2",
         "sensor.energy_optimizer_battery_space": "3",
-        "sensor.morning_sell_buy_reference_internal": ("08:00", {"price": 50.0}),
     }
 
 
@@ -195,18 +219,6 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, outcomes: list) -> None:
     monkeypatch.setattr(
         f"{MORNING}.build_hourly_usage_array",
         lambda config, get_state, daily_load_fallback=None: [0.0] * 24,
-    )
-    monkeypatch.setattr(
-        f"{MORNING}.resolve_tariff_end_hour",
-        lambda hass, config, default_hour=13: 13,
-    )
-    monkeypatch.setattr(
-        f"{HELPERS}.get_internal_sensor_entity_id",
-        lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": (
-            "sensor.morning_sell_buy_reference_internal"
-            if unique_id_suffix == "morning_sell_buy_reference"
-            else None
-        ),
     )
 
 
@@ -315,7 +327,6 @@ async def test_morning_sell_uses_first_qualifying_buy_hour_as_demand_end(
     local_now = datetime(2026, 2, 24, 7, tzinfo=timezone.utc)
     monkeypatch.setattr(f"{MORNING}.dt_util.as_local", lambda _dt: local_now)
     monkeypatch.setattr(f"{MORNING}.get_buy_price_payload", lambda *args, **kwargs: [{}])
-    monkeypatch.setattr(f"{MORNING}.get_internal_window_price", lambda *args, **kwargs: 50.0)
     bounds: dict[str, object] = {}
 
     def _find(_prices, _entity_id, **kwargs):
@@ -358,17 +369,11 @@ async def test_morning_sell_uses_pv_sufficiency_when_day_buy_reference_is_unavai
 ) -> None:
     config = _base_config()
     config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
-    hass = _setup_hass(config, _base_states())
+    hass = _setup_hass(config, _base_states(), day_buy=window(13, 15, price=None))
     outcomes: list = []
     _patch_common(monkeypatch, outcomes)
 
     monkeypatch.setattr(f"{MORNING}.get_buy_price_payload", lambda *args, **kwargs: [{}])
-    monkeypatch.setattr(
-        f"{MORNING}.get_internal_window_price",
-        lambda *args, **kwargs: (
-            None if kwargs["unique_id_suffix"] == "day_buy_window" else 250.0
-        ),
-    )
     monkeypatch.setattr(
         f"{MORNING}.find_first_arbitrage_buy_hour",
         lambda *args, **kwargs: pytest.fail("Arbitrage lookup must not run without reference"),
@@ -745,10 +750,6 @@ async def test_morning_sell_skips_when_required_reserve_exceeds_current_soc(
         f"{MORNING}.build_hourly_usage_array",
         lambda config, get_state, daily_load_fallback=None: [0.0] * 24,
     )
-    monkeypatch.setattr(
-        f"{MORNING}.resolve_tariff_end_hour",
-        lambda hass, config, default_hour=13: 13,
-    )
 
     async def _hp(*args, **kwargs):
         return 1.0, {}
@@ -843,10 +844,6 @@ async def test_morning_sell_no_action_when_battery_energy_below_floor(
     monkeypatch.setattr(
         f"{MORNING}.build_hourly_usage_array",
         lambda config, get_state, daily_load_fallback=None: [0.0] * 24,
-    )
-    monkeypatch.setattr(
-        f"{MORNING}.resolve_tariff_end_hour",
-        lambda hass, config, default_hour=13: 13,
     )
 
     async def _hp(*args, **kwargs):
@@ -1180,10 +1177,6 @@ async def test_morning_sell_skips_when_pv_floor_required_reserve_exceeds_current
         f"{MORNING}.build_hourly_usage_array",
         lambda config, get_state, daily_load_fallback=None: [0.0] * 24,
     )
-    monkeypatch.setattr(
-        f"{MORNING}.resolve_tariff_end_hour",
-        lambda hass, config, default_hour=13: 13,
-    )
 
     async def _hp(*args, **kwargs):
         return 1.0, {}
@@ -1214,3 +1207,92 @@ async def test_morning_sell_skips_when_pv_floor_required_reserve_exceeds_current
     assert outcomes
     assert outcomes[-1].action_type == "sell"
     set_program_soc.assert_awaited()
+
+
+def _patch_forecasts(monkeypatch: pytest.MonkeyPatch, *, sufficiency: tuple) -> None:
+    monkeypatch.setattr(
+        f"{MORNING}.get_heat_pump_forecast_window", AsyncMock(return_value=(1.0, {}))
+    )
+    monkeypatch.setattr(f"{MORNING}.get_pv_forecast_window", lambda *a, **k: (2.0, {}))
+    monkeypatch.setattr(f"{MORNING}.calculate_losses", lambda *a, **k: (0.0, 0.0))
+    monkeypatch.setattr(
+        f"{MORNING}.calculate_sufficiency_window", lambda **kwargs: sufficiency
+    )
+    monkeypatch.setattr(f"{MORNING}.calculate_battery_reserve", lambda *a, **k: 10.0)
+    monkeypatch.setattr(f"{MORNING}.calculate_surplus_energy", lambda *a, **k: 5.0)
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_records_the_source_of_the_day_buy_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
+    hass = _setup_hass(config, _base_states())
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+    monkeypatch.setattr(f"{MORNING}.get_buy_price_payload", lambda *a, **k: [{}])
+    monkeypatch.setattr(
+        f"{MORNING}.find_first_arbitrage_buy_hour",
+        lambda *a, **k: ArbitrageBuyHourResult(None, 0.0, 0.0, "margin_not_reached"),
+    )
+    _patch_forecasts(monkeypatch, sufficiency=(3.0, 2.0, 1.0, 13, False))
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert outcomes[-1].details["buy_window_reference_price"] == 50.0
+    assert outcomes[-1].details["buy_window_reference_source"] == "prices"
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_default_day_buy_window_has_no_reference_price(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
+    hass = _setup_hass(
+        config,
+        _base_states(),
+        day_buy=default_market_windows(MARKET_WINDOWS_NOW).day_buy,
+    )
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+    monkeypatch.setattr(f"{MORNING}.get_buy_price_payload", lambda *a, **k: [{}])
+    monkeypatch.setattr(
+        f"{MORNING}.find_first_arbitrage_buy_hour",
+        lambda *a, **k: pytest.fail("Arbitrage lookup must not run without reference"),
+    )
+    _patch_forecasts(monkeypatch, sufficiency=(3.0, 2.0, 1.0, 10, True))
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    details = outcomes[-1].details
+    assert details["arbitrage_reason"] == "missing_buy_window_reference"
+    assert details["buy_window_reference_source"] == "default"
+    assert details["buy_window_reference_price"] is None
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_arbitrage_margin_fails_closed_without_reference_price(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _base_config()
+    states = _base_states()
+    states["sensor.morning_price"] = "900"
+    hass = _setup_hass(
+        config,
+        states,
+        morning_sell_buy_reference=default_market_windows(
+            MARKET_WINDOWS_NOW
+        ).night_buy,
+    )
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+    _patch_forecasts(monkeypatch, sufficiency=(3.0, 2.0, 1.0, 13, False))
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    details = outcomes[-1].details
+    assert details["arbitrage_reason"] == "missing_buy_reference_price"
+    assert details["buy_reference_source"] == "default"
+    assert details["sell_horizon_mode"] == "sunset_overflow"
