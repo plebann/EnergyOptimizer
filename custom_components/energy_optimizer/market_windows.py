@@ -30,6 +30,7 @@ from .const import (
     CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_SELL_PRICE_SENSOR,
+    CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
     DOMAIN,
     NIGHT_BUY_WINDOW_END_HOUR,
     NIGHT_BUY_WINDOW_START_HOUR,
@@ -218,6 +219,10 @@ DEFAULT_EVENING_SELL_HOUR: Final = 17
 DEFAULT_CONSUME_HOUR: Final = 12
 DEFAULT_HIGH_TARIFF_START_HOUR: Final = 15
 DEFAULT_HIGH_TARIFF_END_HOUR: Final = 13
+
+# Decision inputs keep the precision the window sensors always exposed, so a
+# strict threshold judges the same price the sensor showed.
+DECISION_PRICE_DECIMALS: Final = 3
 
 # The hour ranges the ranked sell windows are chosen from.
 MORNING_SELL_RANGE_HOURS: Final = (4, 10)
@@ -457,7 +462,7 @@ def _plan_span(plan: NightBuyWindowPlan | None) -> _Span | None:
     """Project a buy-window plan onto a window span."""
     if plan is None:
         return None
-    return plan.start, plan.end, plan.price
+    return plan.start, plan.end, round(plan.price, DECISION_PRICE_DECIMALS)
 
 
 def _combined_prices(payload: object) -> list[dict[str, object]] | None:
@@ -515,11 +520,15 @@ def _ranked_from_prices(
         return None
     one_hour = timedelta(hours=1)
     return (
-        (result.best_start_local, result.best_start_local + one_hour, result.best_price),
+        (
+            result.best_start_local,
+            result.best_start_local + one_hour,
+            round(result.best_price, DECISION_PRICE_DECIMALS),
+        ),
         (
             result.second_best_start_local,
             result.second_best_start_local + one_hour,
-            result.second_best_price,
+            round(result.second_best_price, DECISION_PRICE_DECIMALS),
         ),
     )
 
@@ -552,7 +561,11 @@ def _average_buy_from_prices(
     )
     if result is None:
         return None
-    return result.start_local, result.end_local, result.average_price
+    return (
+        result.start_local,
+        result.end_local,
+        round(result.average_price, DECISION_PRICE_DECIMALS),
+    )
 
 
 def _hours_window(
@@ -682,7 +695,11 @@ class CoordinatorMarketWindowResolver:
                 today, DEFAULT_MORNING_SELL_HOUR, tz, reason=reason
             ),
             legacy=lambda: self._legacy_ranked(
-                today, tz, CONF_MORNING_MAX_PRICE_HOUR_SENSOR, CONF_MORNING_MAX_PRICE_SENSOR
+                today,
+                tz,
+                CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
+                CONF_MORNING_MAX_PRICE_SENSOR,
+                default_hour=DEFAULT_MORNING_SELL_HOUR,
             ),
         )
         reference_start_hour = (morning_sell.primary.hour + 1) % 24
@@ -723,6 +740,13 @@ class CoordinatorMarketWindowResolver:
                 default=lambda reason: _default_ranked(
                     tomorrow, DEFAULT_MORNING_SELL_HOUR, tz, reason=reason
                 ),
+                legacy=lambda: self._legacy_ranked(
+                    tomorrow,
+                    tz,
+                    None,
+                    CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
+                    default_hour=DEFAULT_MORNING_SELL_HOUR,
+                ),
             ),
             evening_sell=self._ranked_sell(
                 sell_today,
@@ -737,8 +761,9 @@ class CoordinatorMarketWindowResolver:
                     tz,
                     CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
                     CONF_EVENING_MAX_PRICE_SENSOR,
-                    CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
-                    CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
+                    default_hour=DEFAULT_EVENING_SELL_HOUR,
+                    second_hour_key=CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
+                    second_price_key=CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
                 ),
             ),
             evening_sell_tomorrow=self._ranked_sell(
@@ -939,15 +964,27 @@ class CoordinatorMarketWindowResolver:
         self,
         day: date,
         tz: tzinfo,
-        hour_key: str,
+        hour_key: str | None,
         price_key: str,
+        *,
+        default_hour: int,
         second_hour_key: str | None = None,
         second_price_key: str | None = None,
     ) -> _RankedSpans | None:
-        """Legacy Primary Market Window with its optional Secondary Market Window."""
-        primary = self._legacy_span(day, tz, hour_key, price_key)
+        """Legacy Primary Market Window with its optional Secondary Market Window.
+
+        A configured price without an hour entity (or whose hour entity has no
+        state) is still usable: it prices the default sell hour.
+        """
+        primary = (
+            self._legacy_span(day, tz, hour_key, price_key) if hour_key else None
+        )
         if primary is None:
-            return None
+            price = self._legacy_price(price_key)
+            if price is None:
+                return None
+            start = datetime.combine(day, time(default_hour), tzinfo=tz)
+            primary = (start, start + timedelta(hours=1), price)
         secondary = None
         if second_hour_key and second_price_key:
             try:
