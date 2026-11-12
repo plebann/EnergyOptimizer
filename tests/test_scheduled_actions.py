@@ -1,6 +1,7 @@
 """Tests for the scheduled actions diagnostic sensor and scheduler snapshot."""
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -22,6 +23,15 @@ from custom_components.energy_optimizer.const import (
     DOMAIN,
 )
 from custom_components.energy_optimizer.entities.sensors.tracking import ScheduledActionsSensor
+from custom_components.energy_optimizer.market_windows import (
+    MarketWindows,
+    MarketWindowSource,
+    RankedMarketWindow,
+    ResolvedHour,
+    ResolvedMarketWindow,
+    StaticMarketWindowResolver,
+    default_market_windows,
+)
 from custom_components.energy_optimizer.night_buy_window import NightBuyWindowPlan
 from custom_components.energy_optimizer.night_buy_window_manager import (
     NightBuyWindowPlanManager,
@@ -61,6 +71,70 @@ def _state(state: str) -> SimpleNamespace:
 
 def _sun_state(state: str) -> SimpleNamespace:
     return SimpleNamespace(state=state, attributes={})
+
+
+_TZ = ZoneInfo("Europe/Warsaw")
+_NOW = datetime(2026, 3, 11, 0, 5, tzinfo=_TZ)
+_RESCHEDULES = (
+        "_schedule_morning_charge",
+        "_schedule_afternoon_charge",
+        "_schedule_program4_solar_reset",
+        "_schedule_morning_sell",
+        "_schedule_evening_sell",
+        "_schedule_sell_restores",
+        "_schedule_daytime_min_price_restore",
+    )
+
+
+def _hour_window(
+    hour: int,
+    *,
+    price: float = 0.5,
+    source: MarketWindowSource = MarketWindowSource.PRICES,
+    length: int = 1,
+) -> ResolvedMarketWindow:
+    start = datetime(2026, 3, 11, hour, tzinfo=_TZ)
+    return ResolvedMarketWindow(
+        start=start,
+        end=start + timedelta(hours=length),
+        price=price,
+        source=source,
+    )
+
+
+def _ranked(
+    hour: int, second_hour: int | None = None, **kwargs
+) -> RankedMarketWindow:
+    return RankedMarketWindow(
+        primary=_hour_window(hour, **kwargs),
+        secondary=None if second_hour is None else _hour_window(second_hour, **kwargs),
+    )
+
+
+class _SwappableResolver(StaticMarketWindowResolver):
+    """Static resolver whose snapshot is swapped between coordinator updates."""
+
+    def swap(self, **changes) -> None:
+        self._windows = replace(self._windows, **changes)
+
+
+def _resolver(**changes) -> _SwappableResolver:
+    return _SwappableResolver(replace(default_market_windows(_NOW), **changes))
+
+
+def _scheduler_with_mocked_reschedules(
+    resolver: _SwappableResolver, *, data: dict | None = None
+) -> ActionScheduler:
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": {}}}
+    scheduler = ActionScheduler(hass, _mock_entry(data=data), MagicMock(), resolver)
+    for name in _RESCHEDULES:
+        setattr(scheduler, name, MagicMock())
+    return scheduler
+
+
+def _called(scheduler: ActionScheduler) -> set[str]:
+    return {name for name in _RESCHEDULES if getattr(scheduler, name).called}
 
 
 @pytest.mark.asyncio
@@ -147,15 +221,6 @@ def test_scheduler_publishes_structured_daily_snapshot(
         lambda *args, **kwargs: (lambda: None),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.get_internal_sensor_entity_id",
-        lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": {
-                "night_buy_next_window": "sensor.night_buy_window_tomorrow",
-            "morning_sell_window": "sensor.morning_peak",
-            "evening_sell_window": "sensor.evening_peak",
-            "consume_window": "sensor.daytime_min",
-        }.get(unique_id_suffix),
-    )
-    monkeypatch.setattr(
         "custom_components.energy_optimizer.helpers.get_internal_sensor_entity_id",
         lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": {
                 "night_buy_next_window": "sensor.night_buy_window_tomorrow",
@@ -206,7 +271,14 @@ def test_scheduler_publishes_structured_daily_snapshot(
         coordinator.get_morning_charge_start.return_value = datetime(
             2026, 3, 11, 22, 0, tzinfo=tz
         )
-        scheduler = ActionScheduler(hass, entry, coordinator)
+        resolver = _resolver(
+            night_buy=_hour_window(22, length=2, source=MarketWindowSource.PLAN),
+            day_buy=_hour_window(13, length=2, source=MarketWindowSource.PLAN),
+            morning_sell=_ranked(7),
+            evening_sell=_ranked(18, 20),
+            consume=_hour_window(12, source=MarketWindowSource.CONFIG_ENTITY),
+        )
+        scheduler = ActionScheduler(hass, entry, coordinator, resolver)
         scheduler.start()
 
         assert sink.snapshot is not None
@@ -226,13 +298,13 @@ def test_scheduler_publishes_structured_daily_snapshot(
         assert any(
             action["key"] == "morning_charge"
             and action["time_local"] == "22:00"
-            and action["source"] == "night_buy_next_window_sensor"
+            and action["source"] == "plan"
             for action in actions
         )
         assert any(
             action["key"] == "afternoon_charge"
             and action["time_local"] == "13:00"
-            and action["source"] == "day_buy_window_sensor"
+            and action["source"] == "plan"
             for action in actions
         )
         assert any(
@@ -241,8 +313,22 @@ def test_scheduler_publishes_structured_daily_snapshot(
             and action["source"] == "prog4_time_start_entity"
             for action in actions
         )
-        assert any(action["key"] == "daytime_min_price_restore" and action["time_local"] == "12:30" for action in actions)
-        assert any(action["key"] == "evening_sell_second" and action["time_local"] == "20:00" for action in actions)
+        assert any(
+            action["key"] == "daytime_min_price_restore"
+            and action["time_local"] == "12:30"
+            and action["source"] == "config_entity"
+            for action in actions
+        )
+        assert any(
+            action["key"] == "evening_sell_second"
+            and action["time_local"] == "20:00"
+            and action["source"] == "prices"
+            for action in actions
+        )
+        assert any(
+            action["key"] == "morning_sell" and action["source"] == "prices"
+            for action in actions
+        )
         assert any(
             action["key"] == "evening_behavior"
             and action["time_local"] == "21:59"
@@ -251,7 +337,7 @@ def test_scheduler_publishes_structured_daily_snapshot(
         assert any(
             action["key"] == "evening_sell_restore"
             and action["time_local"] == "21:00"
-            and action["source"] == "evening_second_max_price_hour_sensor_plus_1h"
+            and action["source"] == "prices"
             for action in actions
         )
         assert any(
@@ -309,7 +395,7 @@ def test_scheduler_describes_solar_charge_block_sell_price_source(
         lambda *args, **kwargs: datetime(2026, 3, 11, 12, 30).time(),
     )
 
-    scheduler = ActionScheduler(hass, entry)
+    scheduler = ActionScheduler(hass, entry, resolver=_resolver())
     scheduler._publish_schedule_snapshot()
 
     assert sink.snapshot is not None
@@ -320,54 +406,37 @@ def test_scheduler_describes_solar_charge_block_sell_price_source(
     )
 
 
-def test_start_registers_single_evening_sell_window_listener(
+def test_start_subscribes_only_to_the_high_tariff_entity_for_windows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Scheduler should only register one listener for the shared evening sell sensor."""
+    """Window changes arrive through the coordinator, not internal sensor events."""
     hass = MagicMock()
     hass.data = {DOMAIN: {"entry-1": {}}}
     hass.async_create_task.side_effect = lambda coro: coro.close()
-    entry = _mock_entry(data={})
+    entry = _mock_entry(data={CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start"})
     registered_entities: list[tuple[str, ...]] = []
 
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
-        lambda *args, **kwargs: (lambda: None),
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_sunrise",
-        lambda *args, **kwargs: (lambda: None),
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_sunset",
-        lambda *args, **kwargs: (lambda: None),
-    )
+    for name in ("async_track_time_change", "async_track_sunrise", "async_track_sunset"):
+        monkeypatch.setattr(
+            f"custom_components.energy_optimizer.scheduler.action_scheduler.{name}",
+            lambda *args, **kwargs: (lambda: None),
+        )
     monkeypatch.setattr(
         "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_state_change_event",
         lambda _hass, entities, _callback: registered_entities.append(tuple(entities))
         or (lambda: None),
     )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.get_internal_sensor_entity_id",
-        lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": (
-            f"{entity_domain}.{entry_id}_{unique_id_suffix}"
-        ),
-    )
 
-    scheduler = ActionScheduler(hass, entry)
-    scheduler._schedule_morning_charge = MagicMock()
-    scheduler._schedule_afternoon_charge = MagicMock()
-    scheduler._schedule_morning_sell = MagicMock()
-    scheduler._schedule_evening_sell = MagicMock()
-    scheduler._schedule_sell_restores = MagicMock()
-    scheduler._schedule_daytime_min_price_restore = MagicMock()
+    scheduler = _scheduler_with_mocked_reschedules(_resolver())
+    scheduler.hass = hass
+    scheduler.entry = entry
     scheduler._start_price_hourly_listener = MagicMock()
     scheduler._is_sun_above_horizon = MagicMock(return_value=False)
     scheduler._publish_schedule_snapshot = MagicMock()
 
     scheduler.start()
 
-    assert registered_entities.count(("sensor.entry-1_evening_sell_window",)) == 1
+    assert registered_entities == [("sensor.tariff_start",)]
 
 
 def test_start_registers_bev_charging_listener(
@@ -398,10 +467,6 @@ def test_start_registers_bev_charging_listener(
         "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_state_change_event",
         lambda _hass, entities, _callback: registered_entities.append(tuple(entities))
         or (lambda: None),
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.get_internal_sensor_entity_id",
-        lambda *_args, **_kwargs: None,
     )
 
     scheduler = ActionScheduler(hass, entry)
@@ -578,51 +643,26 @@ def test_schedule_afternoon_charge_is_skipped_without_a_day_buy_window(
     scheduler._publish_schedule_snapshot.assert_called_once()
 
 
-def test_coordinator_update_restores_afternoon_charge_once_a_day_plan_exists(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A plan created after startup restores the listener without a sensor event."""
-    hass = MagicMock()
-    entry = _mock_entry(data={})
-    manager = _manager_with_day_plan(hass, entry, None)
-    hass.data = {DOMAIN: {"entry-1": {"buy_window_manager": manager}}}
-    coordinator = MagicMock()
-    coordinator.get_morning_charge_start.return_value = None
+def test_coordinator_update_restores_afternoon_charge_once_a_day_plan_exists() -> None:
+    """A plan created after startup changes day_buy and restores the listener."""
+    resolver = _resolver()
+    scheduler = _scheduler_with_mocked_reschedules(resolver)
 
-    captured_hours: list[int] = []
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_tariff_start_hour",
-        lambda hass, config: 15,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
-        lambda _hass, _callback, *, hour, minute, second: captured_hours.append(hour)
-        or (lambda: None),
-    )
-
-    scheduler = ActionScheduler(hass, entry, coordinator)
-    scheduler._publish_schedule_snapshot = MagicMock()
-    scheduler._schedule_afternoon_charge()
-    assert captured_hours == []
-
-    start = dt_util.now().replace(hour=13, minute=0, second=0, microsecond=0)
-    manager._day_current = NightBuyWindowPlan(start, start + timedelta(hours=2), 0.5)
-
+    resolver.swap(day_buy=_hour_window(13, length=2, source=MarketWindowSource.PLAN))
     scheduler._handle_coordinator_update()
 
-    assert captured_hours == [13]
-    assert scheduler._afternoon_listener is not None
+    scheduler._schedule_afternoon_charge.assert_called_once()
+    scheduler._schedule_program4_solar_reset.assert_called_once()
 
 
 def test_schedule_snapshot_lists_afternoon_charge_only_with_a_day_buy_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The snapshot advertises no afternoon charge while today has no Day Buy Window."""
-    for module in ("scheduler.action_scheduler", "helpers"):
-        monkeypatch.setattr(
-            f"custom_components.energy_optimizer.{module}.get_internal_sensor_entity_id",
-            lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": None,
-        )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.helpers.get_internal_sensor_entity_id",
+        lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": None,
+    )
     hass = MagicMock()
     hass.states.get.return_value = None
     entry = _mock_entry(data={})
@@ -633,7 +673,7 @@ def test_schedule_snapshot_lists_afternoon_charge_only_with_a_day_buy_window(
     }
     coordinator = MagicMock()
     coordinator.get_morning_charge_start.return_value = None
-    scheduler = ActionScheduler(hass, entry, coordinator)
+    scheduler = ActionScheduler(hass, entry, coordinator, _resolver())
 
     scheduler._publish_schedule_snapshot()
 
@@ -834,3 +874,106 @@ async def test_evening_scheduler_passes_primary_and_first_flags(
     assert evening_mock.await_args_list[0].kwargs["is_first"] is False
     assert evening_mock.await_args_list[1].kwargs["is_primary"] is False
     assert evening_mock.await_args_list[1].kwargs["is_first"] is True
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        (
+            {"night_buy": _hour_window(23, length=2)},
+            {"_schedule_morning_charge"},
+        ),
+        (
+            {"day_buy": _hour_window(12, length=2)},
+            {
+                "_schedule_morning_charge",
+                "_schedule_afternoon_charge",
+                "_schedule_program4_solar_reset",
+            },
+        ),
+        (
+            {"morning_sell": _ranked(8)},
+            {
+                "_schedule_morning_charge",
+                "_schedule_morning_sell",
+                "_schedule_sell_restores",
+            },
+        ),
+        (
+            {"evening_sell": _ranked(18, 20)},
+            {
+                "_schedule_morning_charge",
+                "_schedule_evening_sell",
+                "_schedule_sell_restores",
+            },
+        ),
+        (
+            {"consume": _hour_window(11)},
+            {"_schedule_morning_charge", "_schedule_daytime_min_price_restore"},
+        ),
+        (
+            {"high_tariff_start": ResolvedHour(16, MarketWindowSource.CONFIG_ENTITY)},
+            {
+                "_schedule_morning_charge",
+                "_schedule_afternoon_charge",
+                "_schedule_program4_solar_reset",
+            },
+        ),
+    ],
+)
+def test_coordinator_update_reschedules_only_changed_windows(
+    changes: dict, expected: set[str]
+) -> None:
+    """Each changed window reschedules its mapped actions; Morning Charge always."""
+    resolver = _resolver()
+    scheduler = _scheduler_with_mocked_reschedules(resolver)
+
+    resolver.swap(**changes)
+    scheduler._handle_coordinator_update()
+
+    assert _called(scheduler) == expected
+
+
+def test_coordinator_update_with_identical_windows_reschedules_only_morning_charge() -> None:
+    """An unchanged snapshot leaves every window-driven action alone."""
+    scheduler = _scheduler_with_mocked_reschedules(_resolver())
+
+    scheduler._handle_coordinator_update()
+
+    assert _called(scheduler) == {"_schedule_morning_charge"}
+
+
+def test_coordinator_update_stores_the_new_snapshot_before_rescheduling() -> None:
+    """The reschedule callbacks read the snapshot that caused them."""
+    resolver = _resolver()
+    scheduler = _scheduler_with_mocked_reschedules(resolver)
+    seen: list[RankedMarketWindow] = []
+    scheduler._schedule_evening_sell = lambda: seen.append(scheduler._windows.evening_sell)
+
+    resolver.swap(evening_sell=_ranked(19))
+    scheduler._handle_coordinator_update()
+    scheduler._handle_coordinator_update()
+
+    assert [window.primary.hour for window in seen] == [19]
+
+
+@pytest.mark.asyncio
+async def test_tariff_entity_change_reschedules_through_the_same_path() -> None:
+    """A High-Tariff change takes a fresh snapshot and reschedules what changed."""
+    resolver = _resolver()
+    scheduler = _scheduler_with_mocked_reschedules(resolver)
+
+    resolver.swap(
+        high_tariff_start=ResolvedHour(16, MarketWindowSource.CONFIG_ENTITY),
+        day_buy=_hour_window(14, length=2),
+    )
+    await scheduler._handle_tariff_start_change(MagicMock())
+
+    assert {"_schedule_afternoon_charge", "_schedule_program4_solar_reset"} <= _called(
+        scheduler
+    )
+    assert "_schedule_evening_sell" not in _called(scheduler)
+
+    scheduler._schedule_afternoon_charge.reset_mock()
+    scheduler._handle_coordinator_update()
+    scheduler._schedule_afternoon_charge.assert_not_called()

@@ -57,9 +57,9 @@ from ..service_handlers.charge_completion import (
     async_restore_charge_completions,
     cancel_charge_completion_listeners,
 )
+from ..market_windows import MarketWindowResolver, MarketWindows
 from ..helpers import (
     day_buy_window_missing_for_today,
-    get_internal_sensor_entity_id,
     resolve_day_buy_window_start_hour,
     resolve_daytime_min_price_time,
     resolve_evening_max_price_hour,
@@ -75,6 +75,19 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# Window field -> the reschedule methods its change triggers.
+_WINDOW_RESCHEDULES: dict[str, tuple[str, ...]] = {
+    "night_buy": ("_schedule_morning_charge",),
+    "day_buy": ("_schedule_afternoon_charge", "_schedule_program4_solar_reset"),
+    "high_tariff_start": (
+        "_schedule_afternoon_charge",
+        "_schedule_program4_solar_reset",
+    ),
+    "morning_sell": ("_schedule_morning_sell", "_schedule_sell_restores"),
+    "evening_sell": ("_schedule_evening_sell", "_schedule_sell_restores"),
+    "consume": ("_schedule_daytime_min_price_restore",),
+}
+
 
 class ActionScheduler:
     """Scheduler for fixed and dynamic actions."""
@@ -84,12 +97,18 @@ class ActionScheduler:
         hass: HomeAssistant,
         entry: ConfigEntry,
         coordinator: Any | None = None,
+        resolver: MarketWindowResolver | None = None,
     ) -> None:
         """Initialize the scheduler."""
         self.hass = hass
         self.entry = entry
         self.coordinator = coordinator or (
             hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("coordinator")
+        )
+        entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+        self._resolver = resolver or entry_data.get("market_windows")
+        self._windows: MarketWindows | None = (
+            self._resolver.windows() if self._resolver is not None else None
         )
         self._listeners: list[Callable[[], None]] = []
         self._morning_charge_listener: Callable[[], None] | None = None
@@ -196,48 +215,6 @@ class ActionScheduler:
                 )
             )
 
-        evening_peak_hour_entity = get_internal_sensor_entity_id(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            unique_id_suffix="evening_sell_window",
-        )
-        if evening_peak_hour_entity:
-            self._listeners.append(
-                async_track_state_change_event(
-                    self.hass,
-                    [str(evening_peak_hour_entity)],
-                    self._handle_evening_peak_hour_change,
-                )
-            )
-
-        morning_peak_hour_entity = get_internal_sensor_entity_id(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            unique_id_suffix="morning_sell_window",
-        )
-        if morning_peak_hour_entity:
-            self._listeners.append(
-                async_track_state_change_event(
-                    self.hass,
-                    [str(morning_peak_hour_entity)],
-                    self._handle_morning_peak_hour_change,
-                )
-            )
-
-        night_buy_window_entity = get_internal_sensor_entity_id(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            unique_id_suffix="night_buy_next_window",
-        )
-        if night_buy_window_entity:
-            self._listeners.append(
-                async_track_state_change_event(
-                    self.hass,
-                    [str(night_buy_window_entity)],
-                    self._handle_night_buy_window_change,
-                )
-            )
-
         self._listeners.append(
             async_track_time_change(
                 self.hass,
@@ -248,20 +225,6 @@ class ActionScheduler:
             )
         )
 
-        day_buy_window_entity = get_internal_sensor_entity_id(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            unique_id_suffix="day_buy_window",
-        )
-        if day_buy_window_entity:
-            self._listeners.append(
-                async_track_state_change_event(
-                    self.hass,
-                    [str(day_buy_window_entity)],
-                    self._handle_day_buy_window_change,
-                )
-            )
-
         program4_start_entity = self.entry.data.get(CONF_PROG4_TIME_START_ENTITY)
         if program4_start_entity:
             self._listeners.append(
@@ -269,20 +232,6 @@ class ActionScheduler:
                     self.hass,
                     [str(program4_start_entity)],
                     self._handle_program4_start_time_change,
-                )
-            )
-
-        daytime_min_price_hour_entity = get_internal_sensor_entity_id(
-            self.hass,
-            entry_id=self.entry.entry_id,
-            unique_id_suffix="consume_window",
-        )
-        if daytime_min_price_hour_entity:
-            self._listeners.append(
-                async_track_state_change_event(
-                    self.hass,
-                    [str(daytime_min_price_hour_entity)],
-                    self._handle_daytime_min_price_hour_change,
                 )
             )
 
@@ -473,29 +422,46 @@ class ActionScheduler:
         )
         self._publish_schedule_snapshot()
 
-    async def _handle_tariff_start_change(self, event) -> None:
-        """Reschedule afternoon charge when tariff start hour changes."""
-        self._schedule_afternoon_charge()
-        self._schedule_program4_solar_reset()
+    def _reschedule_changed_windows(self, *always: str) -> None:
+        """Take a new snapshot and reschedule the actions of the windows that changed.
 
-    async def _handle_night_buy_window_change(self, event) -> None:
-        """Reschedule morning charge when the night buy window changes."""
-        self._schedule_morning_charge()
+        The new snapshot is stored first so no `_schedule_*` reads a stale one.
+        `always` names reschedule methods that run whether or not a window changed.
+        """
+        if self._resolver is None:
+            return
+        new = self._resolver.windows()
+        changed = new.changed_from(self._windows)
+        self._windows = new
+        callbacks = dict.fromkeys(
+            (
+                *always,
+                *(
+                    callback
+                    for field in sorted(changed)
+                    for callback in _WINDOW_RESCHEDULES.get(field, ())
+                ),
+            )
+        )
+        for callback in callbacks:
+            getattr(self, callback)()
+
+    async def _handle_tariff_start_change(self, event) -> None:
+        """Reschedule the actions of the windows a tariff start change moved."""
+        self._reschedule_changed_windows()
 
     def _handle_coordinator_update(self) -> None:
-        """Reschedule the charges when a persisted plan is created or changed.
+        """Reschedule Morning Charge, and the actions whose window changed.
 
-        Afternoon Charge is rescheduled here as well as on `day_buy_window`
-        state changes: a plan created after startup must restore the listener
-        even when that sensor entity is disabled and emits no event.
+        Morning Charge follows the coordinator's claim-aware start, which can
+        change without any window changing.
         """
         if (
             self._charge_completion_restore_task is not None
             and not self._charge_completion_restore_task.done()
         ):
             return
-        self._schedule_morning_charge()
-        self._schedule_afternoon_charge()
+        self._reschedule_changed_windows("_schedule_morning_charge")
 
     async def _handle_night_buy_window_rotation(self, now: datetime) -> None:
         """Rotate persisted night plans at 06:01 even without a source update."""
@@ -504,29 +470,9 @@ class ActionScheduler:
         self._schedule_morning_charge()
         self._publish_schedule_snapshot()
 
-    async def _handle_day_buy_window_change(self, event) -> None:
-        """Reschedule afternoon charge when the day buy window changes."""
-        self._schedule_afternoon_charge()
-        self._schedule_program4_solar_reset()
-
     async def _handle_program4_start_time_change(self, event) -> None:
         """Reschedule Program 4 solar reset when its start time changes."""
         self._schedule_program4_solar_reset()
-
-    async def _handle_evening_peak_hour_change(self, event) -> None:
-        """Reschedule evening peak sell when peak hour changes."""
-        self._schedule_evening_sell()
-        self._schedule_sell_restores()
-
-    async def _handle_evening_second_peak_hour_change(self, event) -> None:
-        """Reschedule evening sell when second-best price hour changes."""
-        self._schedule_evening_sell()
-        self._schedule_sell_restores()
-
-    async def _handle_morning_peak_hour_change(self, event) -> None:
-        """Reschedule morning peak sell when peak hour changes."""
-        self._schedule_morning_sell()
-        self._schedule_sell_restores()
 
     async def _handle_morning_restore(self, now: datetime) -> None:
         """Restore inverter state after morning sell window."""
@@ -759,10 +705,6 @@ class ActionScheduler:
         )
         self._publish_schedule_snapshot()
 
-    async def _handle_daytime_min_price_hour_change(self, event) -> None:
-        """Reschedule daytime min price restore when the hour sensor changes."""
-        self._schedule_daytime_min_price_restore()
-
     def _schedule_daytime_min_price_restore(self) -> None:
         """Schedule max charge current restore at daytime min price hour."""
         if self._daytime_min_price_listener is not None:
@@ -897,6 +839,7 @@ class ActionScheduler:
         """Build a structured snapshot of today's scheduled actions."""
         now = dt_util.now()
         timezone_name = str(now.tzinfo)
+        windows = self._windows
         actions: list[dict[str, Any]] = []
 
         actions.append(
@@ -909,7 +852,7 @@ class ActionScheduler:
                     else None
                 ),
                 kind="dynamic",
-                source="night_buy_next_window_sensor",
+                source=windows.night_buy.source.value,
                 order=10,
             )
         )
@@ -932,7 +875,7 @@ class ActionScheduler:
                         now=now,
                     ),
                     kind="dynamic",
-                    source="day_buy_window_sensor",
+                    source=windows.day_buy.source.value,
                     order=100,
                 )
             )
@@ -973,7 +916,7 @@ class ActionScheduler:
                     now=now,
                 ),
                 kind="dynamic",
-                source="morning_max_price_hour_sensor",
+                source=windows.morning_sell.primary.source.value,
                 order=110,
             )
         )
@@ -987,7 +930,7 @@ class ActionScheduler:
                     now=now,
                 ),
                 kind="derived_restore",
-                source="morning_max_price_hour_sensor_plus_1h",
+                source=windows.morning_sell.primary.source.value,
                 order=111,
             )
         )
@@ -1008,7 +951,7 @@ class ActionScheduler:
                     now=now,
                 ),
                 kind="dynamic",
-                source="evening_max_price_hour_sensor",
+                source=windows.evening_sell.primary.source.value,
                 order=120,
             )
         )
@@ -1018,7 +961,7 @@ class ActionScheduler:
             self.entry.data,
             entry_id=self.entry.entry_id,
         )
-        evening_restore_source = "evening_max_price_hour_sensor_plus_1h"
+        evening_restore_source = windows.evening_sell.primary.source.value
         effective_evening_restore_hour = (evening_sell_hour + 1) % 24
         if second_evening_sell_hour is not None:
             actions.append(
@@ -1031,13 +974,17 @@ class ActionScheduler:
                         now=now,
                     ),
                     kind="dynamic",
-                    source="evening_second_max_price_hour_sensor",
+                    source=(
+                        windows.evening_sell.secondary or windows.evening_sell.primary
+                    ).source.value,
                     order=121,
                 )
             )
             if second_evening_sell_hour >= evening_sell_hour:
                 effective_evening_restore_hour = (second_evening_sell_hour + 1) % 24
-                evening_restore_source = "evening_second_max_price_hour_sensor_plus_1h"
+                evening_restore_source = (
+                    windows.evening_sell.secondary or windows.evening_sell.primary
+                ).source.value
 
         actions.append(
             self._build_action_entry(
@@ -1069,7 +1016,7 @@ class ActionScheduler:
                     now=now,
                 ),
                 kind="dynamic",
-                source="daytime_min_price_hour_sensor",
+                source=windows.consume.source.value,
                 order=130,
             )
         )
@@ -1138,7 +1085,11 @@ class ActionScheduler:
                         label=f"{str(charge_type).title()} charge completion",
                         scheduled_for=dt_util.as_local(scheduled_for),
                         kind="dynamic",
-                        source=f"{charge_type}_buy_window_end",
+                        source=(
+                            windows.night_buy
+                            if charge_type == "morning"
+                            else windows.day_buy
+                        ).source.value,
                         order=105 if charge_type == "morning" else 106,
                     )
                 )
