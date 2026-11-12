@@ -919,7 +919,7 @@ def build_evening_sell_outcome(
     start_hour: int,
     end_hour: int,
     export_power_w: float,
-    evening_price: float,
+    evening_price: float | None,
     threshold_price: float,
 ) -> DecisionOutcome:
     """Build an evening sell decision outcome."""
@@ -943,7 +943,9 @@ def build_evening_sell_outcome(
             "heat_pump_kwh": round(heat_pump_kwh, 2),
             "losses_kwh": round(losses_kwh, 2),
             "export_power_w": round(export_power_w, 0),
-            price_metric_key: round(evening_price, 2),
+            price_metric_key: (
+                round(evening_price, 2) if evening_price is not None else None
+            ),
             threshold_metric_key: round(threshold_price, 2),
             "start_hour": start_hour,
             "end_hour": end_hour,
@@ -971,7 +973,7 @@ def build_surplus_sell_outcome(
     sufficiency_hour: int,
     sufficiency_reached: bool,
     export_power_w: float,
-    evening_price: float,
+    evening_price: float | None,
     threshold_price: float,
 ) -> DecisionOutcome:
     """Build a surplus-sell decision outcome."""
@@ -1000,7 +1002,9 @@ def build_surplus_sell_outcome(
             "sufficiency_hour": sufficiency_hour,
             "sufficiency_reached": sufficiency_reached,
             "export_power_w": round(export_power_w, 0),
-            price_metric_key: round(evening_price, 2),
+            price_metric_key: (
+                round(evening_price, 2) if evening_price is not None else None
+            ),
             threshold_metric_key: round(threshold_price, 2),
         },
     )
