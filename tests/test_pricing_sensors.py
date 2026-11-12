@@ -28,6 +28,7 @@ from custom_components.energy_optimizer.entities.sensors.pricing import (
     NightBuyWindowSensor,
     NightBuyWindowTomorrowSensor,
     SellPriceSensor,
+    SnapshotCache,
 )
 from custom_components.energy_optimizer.market_windows import (
     RankedMarketWindow,
@@ -462,3 +463,64 @@ async def test_coordinator_copies_price_payloads_to_avoid_in_place_source_mutati
 
     assert snapshot_tomorrow != prices_tomorrow
     assert snapshot_tomorrow
+
+
+@pytest.mark.unit
+def test_buy_window_sensor_keeps_the_sign_of_an_average_rounded_to_negative_zero() -> None:
+    """The resolver rounds -0.0004 to -0.0; the sensor still reports it as negative."""
+    tiny_negative = _sensor(DayBuyWindowSensor, day_buy=window(11, 13, round(-0.0004, 3)))
+    reference = _sensor(
+        MorningSellBuyReferenceSensor,
+        morning_sell_buy_reference=window(8, 13, round(-0.0004, 3)),
+    )
+    zero = _sensor(DayBuyWindowSensor, day_buy=window(11, 13, 0.0))
+
+    assert tiny_negative.extra_state_attributes["is_negative"] is True
+    assert reference.extra_state_attributes["is_negative"] is True
+    assert zero.extra_state_attributes["is_negative"] is False
+
+
+# --- Shared snapshot ---------------------------------------------------------
+
+
+def _counting_cache(coordinator):
+    resolver = MagicMock()
+    resolver.windows.side_effect = lambda now=None: market_windows()
+    return resolver, SnapshotCache(coordinator, resolver)
+
+
+@pytest.mark.unit
+def test_snapshot_cache_resolves_once_per_refresh_and_minute(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    coordinator = MagicMock()
+    coordinator.data = {"states": {}}
+    resolver, cache = _counting_cache(coordinator)
+
+    first = cache.windows(MARKET_WINDOWS_NOW)
+    assert cache.windows(MARKET_WINDOWS_NOW + timedelta(seconds=30)) is first
+    assert resolver.windows.call_count == 1
+
+    coordinator.data = {"states": {}}
+    assert cache.windows(MARKET_WINDOWS_NOW) is not first
+    assert resolver.windows.call_count == 2
+
+    cache.windows(MARKET_WINDOWS_NOW + timedelta(minutes=1))
+    assert resolver.windows.call_count == 3
+
+
+@pytest.mark.unit
+def test_window_sensors_of_one_platform_share_one_snapshot() -> None:
+    coordinator = MagicMock()
+    coordinator.data = {"states": {}}
+    resolver, cache = _counting_cache(coordinator)
+    sensors = [
+        cls(coordinator, _mock_entry(), {}, cache)
+        for cls in (ConsumeWindowSensor, DayBuyWindowSensor, MorningSellWindowSensor)
+    ]
+
+    for sensor in sensors:
+        sensor.native_value
+        sensor.extra_state_attributes
+
+    assert resolver.windows.call_count == 1

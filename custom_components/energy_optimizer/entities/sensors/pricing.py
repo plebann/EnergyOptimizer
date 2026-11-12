@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from math import copysign
 
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.util import dt as dt_util
@@ -86,6 +87,31 @@ def _local_now() -> datetime:
     return now_local
 
 
+class SnapshotCache:
+    """Shares one Market Window snapshot among the window sensors.
+
+    Resolves again only when the coordinator published new data or the minute
+    changed, so one refresh of every window sensor reads the resolver once.
+    """
+
+    def __init__(self, coordinator, resolver) -> None:
+        self._coordinator = coordinator
+        self._resolver = resolver
+        self._data: object = None
+        self._minute: datetime | None = None
+        self._snapshot = None
+
+    def windows(self, now: datetime):
+        """Return the cached snapshot, resolving it when stale."""
+        minute = now.replace(second=0, microsecond=0)
+        data = self._coordinator.data
+        if self._snapshot is None or data is not self._data or minute != self._minute:
+            self._snapshot = self._resolver.windows(now)
+            self._data = data
+            self._minute = minute
+        return self._snapshot
+
+
 class _SnapshotSensor(EnergyOptimizerSensor):
     """Base sensor projecting one field of the Market Window snapshot."""
 
@@ -139,7 +165,8 @@ class _BuyWindowBaseSensor(_SnapshotSensor):
             "end": result.end.strftime("%H:%M"),
             "duration_hours": int(result.duration_hours),
             "price": round(result.price, 3),
-            "is_negative": result.price < 0,
+            # The resolver rounds -0.0004 to -0.0: the sign bit keeps it negative, a true 0.0 is not.
+            "is_negative": copysign(1.0, result.price) < 0,
         }
         if self._include_plan_date:
             self._attr_extra_state_attributes["plan_date"] = result.plan_date.isoformat()

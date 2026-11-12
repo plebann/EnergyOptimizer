@@ -46,6 +46,7 @@ from .entities.sensors import (
     SellPriceSensor,
     UsableCapacitySensor,
 )
+from .entities.sensors.pricing import SnapshotCache
 from .market_windows import market_window_resolver
 from .services import check_and_update_balancing_completion
 
@@ -64,7 +65,9 @@ async def async_setup_entry(
         _LOGGER.error("Coordinator not available for entry %s", config_entry.entry_id)
         return
 
-    resolver = market_window_resolver(hass, config_entry.entry_id)
+    resolver = SnapshotCache(
+        coordinator, market_window_resolver(hass, config_entry.entry_id)
+    )
 
     sensors = [
         BatteryReserveSensor(coordinator, config_entry, config),
