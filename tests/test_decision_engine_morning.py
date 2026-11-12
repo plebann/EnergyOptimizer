@@ -47,6 +47,8 @@ from custom_components.energy_optimizer.decision_engine.common import (
 from custom_components.energy_optimizer.utils.pv_forecast import MorningPVForecast
 from custom_components.energy_optimizer.market_windows import (
     MarketWindows,
+    MarketWindowSource,
+    ResolvedMarketWindow,
     StaticMarketWindowResolver,
 )
 from tests.conftest import MARKET_WINDOWS_NOW, market_windows, window
@@ -968,6 +970,22 @@ def test_morning_charge_sizes_current_by_remaining_time_inside_the_window(
     assert strategy.windows.now == MARKET_WINDOWS_NOW
 
     assert strategy._resolve_charge_time_hours() == pytest.approx(expected_hours)
+
+
+def test_morning_charge_sizes_current_in_elapsed_time_across_a_dst_change() -> None:
+    """Warsaw springs forward at 02:00 on 2026-03-29: 23:00 to 06:00 is 6 h, not 7."""
+    tz = ZoneInfo("Europe/Warsaw")
+    night = ResolvedMarketWindow(
+        start=datetime(2026, 3, 28, 22, tzinfo=tz),
+        end=datetime(2026, 3, 29, 6, tzinfo=tz),
+        price=0.3,
+        source=MarketWindowSource.PRICES,
+    )
+    strategy = _strategy(
+        market_windows(night_buy=night, now=datetime(2026, 3, 28, 23, tzinfo=tz))
+    )
+
+    assert strategy._resolve_charge_time_hours() == pytest.approx(6.0)
 
 
 @pytest.mark.asyncio

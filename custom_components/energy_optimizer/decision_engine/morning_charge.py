@@ -180,7 +180,8 @@ class MorningChargeStrategy(BaseChargeStrategy):
             return 2.0
         if night.contains(self.windows.now):
             return max(
-                (night.end - self.windows.now).total_seconds() / 3600,
+                (dt_util.as_utc(night.end) - dt_util.as_utc(self.windows.now)).total_seconds()
+                / 3600,
                 0.0,
             )
         return night.duration_hours
