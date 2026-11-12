@@ -23,7 +23,7 @@ from ..const import (
     STORAGE_VERSION_CHARGE_COMPLETION,
 )
 from ..controllers.inverter import set_charge_current, set_program_soc
-from ..helpers import get_float_state_info, get_internal_sensor_entity_id
+from ..helpers import get_float_state_info
 from ..utils.decision_dump import active_decision_audit
 from ..utils.logging import DecisionOutcome, log_decision_unified
 
@@ -36,69 +36,6 @@ _LOGGER = logging.getLogger(__name__)
 _RUNTIME_KEY = "charge_completion_listeners"
 _PLANS_KEY = "charge_completion_plans"
 _SNAPSHOT_CALLBACK_KEY = "charge_completion_snapshot_callback"
-
-
-def resolve_charge_window(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    *,
-    charge_type: ChargeType,
-    fallback_start_hour: int,
-    fallback_end_hour: int,
-) -> tuple[datetime, datetime]:
-    """Resolve a buy window to concrete local datetimes."""
-    now = dt_util.now()
-    suffix = (
-        "night_buy_next_window" if charge_type == "morning" else "day_buy_window"
-    )
-    entity_id = get_internal_sensor_entity_id(
-        hass,
-        entry_id=entry.entry_id,
-        unique_id_suffix=suffix,
-    )
-    state = hass.states.get(entity_id) if entity_id else None
-    attributes = getattr(state, "attributes", {}) if state is not None else {}
-    if isinstance(attributes, dict):
-        start = dt_util.parse_datetime(str(attributes.get("start_time")))
-        end = dt_util.parse_datetime(str(attributes.get("end_time")))
-        if start is not None and end is not None:
-            return dt_util.as_local(start), dt_util.as_local(end)
-        state_time = dt_util.parse_time(str(getattr(state, "state", "")))
-        try:
-            duration_hours = float(attributes.get("duration_hours"))
-        except (TypeError, ValueError):
-            duration_hours = 0.0
-        if state_time is not None and duration_hours > 0:
-            start = now.replace(
-                hour=state_time.hour,
-                minute=state_time.minute,
-                second=0,
-                microsecond=0,
-            )
-            end = start + timedelta(hours=duration_hours)
-            if end <= now:
-                start += timedelta(days=1)
-                end += timedelta(days=1)
-            return start, end
-
-    start = now.replace(
-        hour=fallback_start_hour,
-        minute=0,
-        second=0,
-        microsecond=0,
-    )
-    end = now.replace(
-        hour=fallback_end_hour,
-        minute=0,
-        second=0,
-        microsecond=0,
-    )
-    if fallback_end_hour <= fallback_start_hour:
-        end += timedelta(days=1)
-    if end <= now:
-        start += timedelta(days=1)
-        end += timedelta(days=1)
-    return start, end
 
 
 def _store(hass: HomeAssistant, entry: ConfigEntry, charge_type: ChargeType) -> Store:

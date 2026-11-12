@@ -16,11 +16,8 @@ from ..const import (
     SUN_ENTITY,
 )
 from ..controllers.inverter import set_max_charge_current
-from ..helpers import (
-    get_float_state_info,
-    resolve_daytime_min_price_time,
-    resolve_morning_max_price_hour,
-)
+from ..helpers import get_float_state_info
+from ..market_windows import MarketWindows, market_window_resolver
 from ..utils.decision_dump import active_decision_audit, emit_decision_dump
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from .common import get_battery_config, get_entry_data, resolve_entry
@@ -34,6 +31,7 @@ async def _async_run_solar_charge_block(
     hass: HomeAssistant,
     *,
     entry_id: str | None = None,
+    windows: MarketWindows,
 ) -> None:
     """Block PV charging while morning export remains valuable."""
     entry = resolve_entry(hass, entry_id)
@@ -50,11 +48,7 @@ async def _async_run_solar_charge_block(
         return
 
     now = dt_util.now()
-    morning_sell_hour = resolve_morning_max_price_hour(
-        hass,
-        config,
-        entry_id=entry.entry_id,
-    )
+    morning_sell_hour = windows.morning_sell.primary.hour
     if now.hour < morning_sell_hour:
         _LOGGER.debug(
             "Solar charge block: before Morning Sell Window (%02d:00) — skip",
@@ -62,11 +56,7 @@ async def _async_run_solar_charge_block(
         )
         return
 
-    daytime_min_price_time = resolve_daytime_min_price_time(
-        hass,
-        config,
-        entry_id=entry.entry_id,
-    )
+    daytime_min_price_time = windows.consume.start.time()
     if now.time() >= daytime_min_price_time:
         current_max_charge, raw_max_charge, max_charge_error = get_float_state_info(
             hass,
@@ -250,8 +240,9 @@ async def async_run_solar_charge_block(
     entry = resolve_entry(hass, entry_id)
     if entry is None:
         return
+    windows = market_window_resolver(hass, entry.entry_id).windows()
     async with active_decision_audit(hass, entry, trigger=trigger) as audit:
-        await _async_run_solar_charge_block(hass, entry_id=entry_id)
+        await _async_run_solar_charge_block(hass, entry_id=entry_id, windows=windows)
         if not audit.actions:
             return
         emit_decision_dump(

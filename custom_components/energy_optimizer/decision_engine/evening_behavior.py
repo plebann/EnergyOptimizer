@@ -40,7 +40,8 @@ from ..decision_engine.common import (
     get_required_current_soc_state,
     resolve_entry,
 )
-from ..helpers import get_float_state_info, resolve_tariff_end_hour
+from ..helpers import get_float_state_info
+from ..market_windows import MarketWindows, market_window_resolver
 from ..utils.forecast import get_heat_pump_forecast_window, get_pv_forecast_window
 from ..utils.logging import DecisionOutcome, format_sufficiency_hour, log_decision_unified
 from ..utils.decision_dump import active_decision_audit, record_step
@@ -528,6 +529,7 @@ async def _calculate_preservation_context(
     config: dict[str, Any],
     *,
     entry_id: str,
+    windows: MarketWindows,
     current_soc: float,
     battery_config,
     margin: float,
@@ -544,7 +546,7 @@ async def _calculate_preservation_context(
     )
     hourly_usage = build_hourly_usage_array(config, hass.states.get, daily_load_fallback=None)
     start_hour = 22
-    tariff_end_hour = resolve_tariff_end_hour(hass, config)
+    tariff_end_hour = windows.high_tariff_end.hour
     hours = max(len(build_hour_window(start_hour, tariff_end_hour)), 1)
 
     heat_pump_window_kwh, heat_pump_hourly = await get_heat_pump_forecast_window(
@@ -697,6 +699,7 @@ async def _run_non_balancing_flow(
     balancing_data: BalancingData,
     pv_compensation_details: dict[str, float | None],
     afternoon_grid_assist_sensor,
+    windows: MarketWindows,
 ) -> None:
     """Handle preservation, restoration and no-action branches."""
     _LOGGER.debug("Balancing not triggered - checking preservation/normal operation modes")
@@ -718,6 +721,7 @@ async def _run_non_balancing_flow(
         hass,
         config,
         entry_id=entry.entry_id,
+        windows=windows,
         current_soc=current_soc,
         battery_config=battery_config,
         margin=margin,
@@ -817,7 +821,7 @@ async def _run_non_balancing_flow(
 
 
 async def _async_run_evening_behavior(
-    hass: HomeAssistant, *, entry_id: str | None = None
+    hass: HomeAssistant, *, entry_id: str | None = None, windows: MarketWindows
 ) -> None:
     """Run overnight schedule logic (22:00 behavior)."""
     _LOGGER.info("=== Battery Overnight Handling Started ===")
@@ -896,6 +900,7 @@ async def _async_run_evening_behavior(
         balancing_data=balancing_data,
         pv_compensation_details=pv_compensation_details,
         afternoon_grid_assist_sensor=afternoon_grid_assist_sensor,
+        windows=windows,
     )
 
 
@@ -909,5 +914,6 @@ async def async_run_evening_behavior(
     entry = resolve_entry(hass, entry_id)
     if entry is None:
         return
+    windows = market_window_resolver(hass, entry.entry_id).windows()
     async with active_decision_audit(hass, entry, trigger=trigger):
-        await _async_run_evening_behavior(hass, entry_id=entry_id)
+        await _async_run_evening_behavior(hass, entry_id=entry_id, windows=windows)

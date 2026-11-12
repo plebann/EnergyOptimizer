@@ -40,6 +40,17 @@ def _resolver_with_day_buy_hour(hour: int) -> StaticMarketWindowResolver:
     )
 
 
+def _hass(afternoon_hour: int = 13) -> MagicMock:
+    """Build a hass whose Market Window Resolver has the given Day Buy start."""
+    hass = MagicMock()
+    hass.data = {
+        "energy_optimizer": {
+            "entry-1": {"market_windows": _resolver_with_day_buy_hour(afternoon_hour)}
+        }
+    }
+    return hass
+
+
 def _entry() -> MagicMock:
     """Build a minimal config entry for the reset routine."""
     entry = MagicMock()
@@ -56,7 +67,6 @@ def _patch_common_dependencies(
     *,
     entry: MagicMock,
     start_hour: int = 9,
-    afternoon_hour: int = 13,
     pv_kwh: float = 8.0,
     usage_kwh_per_hour: float = 1.0,
     battery_soc: float | None = 60.0,
@@ -70,14 +80,6 @@ def _patch_common_dependencies(
     monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.program4_solar_reset.resolve_prog4_start_time",
         lambda *_args, **_kwargs: time(start_hour),
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.program4_solar_reset.resolve_tariff_start_hour",
-        lambda *_args, **_kwargs: 15,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.program4_solar_reset.resolve_day_buy_window_start_hour",
-        lambda *_args, **_kwargs: afternoon_hour,
     )
     monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.program4_solar_reset.get_required_prog4_soc_state",
@@ -128,7 +130,7 @@ async def test_resets_program4_to_min_of_battery_soc_and_min_soc_pv(
         battery_soc=battery_soc,
     )
 
-    await async_run_program4_solar_reset(MagicMock(), entry_id="entry-1")
+    await async_run_program4_solar_reset(_hass(), entry_id="entry-1")
 
     assert set_soc.await_count == 1
     assert set_soc.await_args.args[1:] == ("number.program4_soc", expected_target)
@@ -144,10 +146,9 @@ async def test_does_not_reset_when_start_and_afternoon_charge_share_hour(
         monkeypatch,
         entry=entry,
         start_hour=10,
-        afternoon_hour=10,
     )
 
-    await async_run_program4_solar_reset(MagicMock(), entry_id="entry-1")
+    await async_run_program4_solar_reset(_hass(10), entry_id="entry-1")
 
     set_soc.assert_not_awaited()
 
@@ -165,7 +166,7 @@ async def test_does_not_reset_without_positive_forecast_surplus(
         usage_kwh_per_hour=1.0,
     )
 
-    await async_run_program4_solar_reset(MagicMock(), entry_id="entry-1")
+    await async_run_program4_solar_reset(_hass(), entry_id="entry-1")
 
     set_soc.assert_not_awaited()
 
@@ -182,7 +183,7 @@ async def test_does_not_reset_when_required_input_is_unavailable(
         battery_soc=None,
     )
 
-    await async_run_program4_solar_reset(MagicMock(), entry_id="entry-1")
+    await async_run_program4_solar_reset(_hass(), entry_id="entry-1")
 
     set_soc.assert_not_awaited()
 

@@ -570,37 +570,6 @@ async def test_morning_completion_current_failure_keeps_and_reschedules_plan(
     assert outcome.action_type == "charge_completion_failed"  # type: ignore[attr-defined]
 
 
-def test_resolve_charge_window_uses_sensor_start_and_dynamic_duration(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Resolved completion timing follows the buy-window duration."""
-    now = datetime(2026, 8, 24, 1, 0, tzinfo=dt_util.UTC)
-    entry = _entry({})
-    state = MagicMock(
-        state="02:30",
-        attributes={"duration_hours": 3.5},
-    )
-    hass = MagicMock()
-    hass.states.get.return_value = state
-    monkeypatch.setattr(charge_completion.dt_util, "now", lambda: now)
-    monkeypatch.setattr(
-        charge_completion,
-        "get_internal_sensor_entity_id",
-        lambda *_args, **_kwargs: "sensor.night_buy_window",
-    )
-
-    start, end = charge_completion.resolve_charge_window(
-        hass,
-        entry,
-        charge_type="morning",
-        fallback_start_hour=4,
-        fallback_end_hour=6,
-    )
-
-    assert start == datetime(2026, 8, 24, 2, 30, tzinfo=dt_util.UTC)
-    assert end == datetime(2026, 8, 24, 6, 0, tzinfo=dt_util.UTC)
-
-
 @pytest.mark.asyncio
 async def test_schedule_completion_persists_and_tracks_window_end(
     monkeypatch: pytest.MonkeyPatch,
