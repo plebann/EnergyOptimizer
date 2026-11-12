@@ -87,6 +87,7 @@ def _ranked(
             if secondary
             else None
         ),
+        gap_pct=(primary[1] - secondary[1]) / primary[1] * 100 if secondary and primary[1] else None,
     )
 
 
@@ -238,6 +239,14 @@ def test_evening_sell_window_sensor_publishes_primary_and_secondary_window() -> 
         "second_window_price": 0.91,
         "second_window_gap_pct": 4.2,
     }
+
+
+@pytest.mark.unit
+def test_sell_window_sensor_publishes_the_gap_when_the_primary_price_rounds_to_zero() -> None:
+    ranked = replace(_ranked((17, 0.0), (20, 0.0)), gap_pct=32.2148)
+    sensor = _sensor(EveningSellWindowSensor, evening_sell=ranked)
+
+    assert sensor.extra_state_attributes["second_window_gap_pct"] == 32.2
 
 
 @pytest.mark.unit

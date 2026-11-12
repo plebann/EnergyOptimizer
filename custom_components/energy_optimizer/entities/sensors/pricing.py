@@ -354,10 +354,8 @@ class _RankedSellWindowBaseSensor(_SnapshotSensor):
             attributes["second_window_start"] = secondary.start.strftime("%H:%M")
             if secondary.price is not None:
                 attributes["second_window_price"] = round(secondary.price, 3)
-                if primary.price:
-                    attributes["second_window_gap_pct"] = round(
-                        (primary.price - secondary.price) / primary.price * 100, 1
-                    )
+                if result.gap_pct is not None:
+                    attributes["second_window_gap_pct"] = round(result.gap_pct, 1)
 
         self._attr_native_value = primary.start.strftime("%H:%M")
         self._attr_extra_state_attributes = attributes

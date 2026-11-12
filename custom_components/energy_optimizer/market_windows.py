@@ -160,6 +160,8 @@ class RankedMarketWindow:
 
     primary: ResolvedMarketWindow
     secondary: ResolvedMarketWindow | None
+    gap_pct: float | None = None
+    """Secondary price below the Primary price in percent, from unrounded prices."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -378,7 +380,7 @@ _UNAVAILABLE_STATES: Final = frozenset({"unknown", "unavailable"})
 _TIME_RANGE: Final = re.compile(r"^\s*\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\s*$")
 
 _Span = tuple[datetime, datetime, float | None]
-_RankedSpans = tuple[_Span, _Span | None]
+_RankedSpans = tuple[_Span, _Span | None, float | None]
 _T = TypeVar("_T")
 _R = TypeVar("_R")
 # A Market Window Source chain: sources in priority order, each answering None
@@ -419,11 +421,19 @@ def _window(span: _Span, source: MarketWindowSource) -> ResolvedMarketWindow:
 
 
 def _ranked(spans: _RankedSpans, source: MarketWindowSource) -> RankedMarketWindow:
-    primary, secondary = spans
+    primary, secondary, gap_pct = spans
     return RankedMarketWindow(
         primary=_window(primary, source),
         secondary=_window(secondary, source) if secondary is not None else None,
+        gap_pct=gap_pct,
     )
+
+
+def _gap_pct(primary_price: float | None, secondary_price: float | None) -> float | None:
+    """Percent by which the secondary price is below the primary; None without a base."""
+    if not primary_price or secondary_price is None:
+        return None
+    return (primary_price - secondary_price) / primary_price * 100
 
 
 def _split_range(state_value: object) -> tuple[str, str | None]:
@@ -530,6 +540,7 @@ def _ranked_from_prices(
             result.second_best_start_local + one_hour,
             round(result.second_best_price, DECISION_PRICE_DECIMALS),
         ),
+        _gap_pct(result.best_price, result.second_best_price),
     )
 
 
@@ -995,7 +1006,7 @@ class CoordinatorMarketWindowResolver:
                     self._entry.data.get(second_hour_key),
                     err,
                 )
-        return primary, secondary
+        return primary, secondary, _gap_pct(primary[2], secondary[2] if secondary else None)
 
 
 def market_window_resolver(hass: HomeAssistant, entry_id: str) -> MarketWindowResolver:

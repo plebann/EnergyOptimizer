@@ -846,7 +846,9 @@ class TestCoordinatorMarketWindowResolverSellWindows:
         )
 
         assert resolver.windows(NOW).morning_sell == RankedMarketWindow(
-            primary=window(7, 8, price=1.20), secondary=window(8, 9, price=1.10)
+            primary=window(7, 8, price=1.20),
+            secondary=window(8, 9, price=1.10),
+            gap_pct=pytest.approx(8.3333, abs=1e-3),
         )
 
     def test_evening_sell_ranks_todays_sell_prices_between_16_and_22(self) -> None:
@@ -855,7 +857,9 @@ class TestCoordinatorMarketWindowResolverSellWindows:
         )
 
         assert resolver.windows(NOW).evening_sell == RankedMarketWindow(
-            primary=window(17, 18, price=1.30), secondary=window(18, 19, price=1.25)
+            primary=window(17, 18, price=1.30),
+            secondary=window(18, 19, price=1.25),
+            gap_pct=pytest.approx(3.8462, abs=1e-3),
         )
 
     def test_tomorrows_sell_windows_rank_only_tomorrows_prices(self) -> None:
@@ -873,10 +877,12 @@ class TestCoordinatorMarketWindowResolverSellWindows:
         assert snapshot.morning_sell_tomorrow == RankedMarketWindow(
             primary=window(5, 6, price=1.50, next_day=True),
             secondary=window(6, 7, price=1.40, next_day=True),
+            gap_pct=pytest.approx(6.6667, abs=1e-3),
         )
         assert snapshot.evening_sell_tomorrow == RankedMarketWindow(
             primary=window(19, 20, price=1.60, next_day=True),
             secondary=window(20, 21, price=1.20, next_day=True),
+            gap_pct=pytest.approx(25.0),
         )
         assert snapshot.morning_sell.primary == window(7, 8, price=1.20)
 
@@ -940,6 +946,15 @@ class TestCoordinatorMarketWindowResolverDecisionPrecision:
 
         ranked = resolver.windows(NOW).evening_sell
         assert (ranked.primary.price, ranked.secondary.price) == (1.3, 1.25)
+
+    def test_ranked_gap_is_taken_from_the_unrounded_sell_prices(self) -> None:
+        resolver = _resolver(
+            coordinator=_coordinator(
+                _sell_payload(prices_today=_hourly(8, {17: 0.00149, 18: 0.00101}))
+            )
+        )
+
+        assert resolver.windows(NOW).evening_sell.gap_pct == pytest.approx(32.2148, abs=1e-3)
 
     def test_the_buy_reference_average_is_rounded_to_three_decimals(self) -> None:
         resolver = _resolver(
@@ -1044,6 +1059,7 @@ class TestCoordinatorMarketWindowResolverLegacyEntities:
         assert resolver.windows(NOW).evening_sell == RankedMarketWindow(
             primary=_legacy(_dt(8, 18), _dt(8, 19), 1.25),
             secondary=_legacy(_dt(8, 20), _dt(8, 21), 1.05),
+            gap_pct=pytest.approx(16.0),
         )
 
     def test_morning_sell_reads_the_legacy_entities_and_has_no_secondary(self) -> None:
