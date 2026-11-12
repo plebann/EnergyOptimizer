@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
+from tests.conftest import market_windows
+
 from custom_components.energy_optimizer.const import (
     CONF_BATTERY_CAPACITY_AH,
     CONF_BATTERY_EFFICIENCY,
@@ -124,6 +127,7 @@ def _hass(
             "entry-1": {
                 "last_optimization_sensor": optimization,
                 "optimization_history_sensor": history,
+                "market_windows": StaticMarketWindowResolver(market_windows()),
                 "afternoon_grid_assist_sensor": assist,
             }
         }

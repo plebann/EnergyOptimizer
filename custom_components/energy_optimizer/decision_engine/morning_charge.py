@@ -44,6 +44,7 @@ from ..decision_engine.common import (
     calculate_target_soc_from_needed_reserve,
     compute_sufficiency,
     get_required_prog2_soc_state,
+    legacy_buy_reference,
     resolve_arbitrage_margin_gate,
     resolve_entry,
 )
@@ -733,12 +734,14 @@ def _calculate_morning_arbitrage_kwh(
         return 0.0, details
 
     margin_ok, margin_details = resolve_arbitrage_margin_gate(
-        hass,
-        entry_id=entry_id,
-        sell_price=sell_price,
-        min_arbitrage_price=min_arbitrage_price,
-        buy_reference_unique_id_suffix="night_buy_next_window",
-        buy_reference_entity_name="Planned night buy window",
+        sell_price,
+        min_arbitrage_price,
+        legacy_buy_reference(
+            hass,
+            entry_id=entry_id,
+            unique_id_suffix="night_buy_next_window",
+            entity_name="Planned night buy window",
+        ),
     )
     details.update(margin_details)
     if not margin_ok:

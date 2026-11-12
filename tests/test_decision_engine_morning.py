@@ -7,6 +7,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
+from tests.conftest import market_windows
+
 from custom_components.energy_optimizer.const import (
     CONF_BATTERY_CAPACITY_AH,
     CONF_BATTERY_EFFICIENCY,
@@ -99,6 +102,7 @@ def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
             entry.entry_id: {
                 "last_optimization_sensor": mock_opt_sensor,
                 "optimization_history_sensor": mock_hist_sensor,
+                "market_windows": StaticMarketWindowResolver(market_windows()),
             }
         }
     }

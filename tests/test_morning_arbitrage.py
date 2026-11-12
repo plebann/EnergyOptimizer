@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
+from tests.conftest import market_windows
+
 from custom_components.energy_optimizer.const import (
     CONF_BATTERY_CAPACITY_AH,
     CONF_BATTERY_EFFICIENCY,
@@ -27,6 +30,7 @@ from custom_components.energy_optimizer.decision_engine.common import (
     BatteryConfig,
     ForecastData,
     _compute_arbitrage_from_cap,
+    legacy_buy_reference,
     resolve_arbitrage_margin_gate,
 )
 from custom_components.energy_optimizer.decision_engine.morning_charge import (
@@ -116,6 +120,7 @@ def _hass_with_states(config: dict, states: dict) -> MagicMock:
             "entry-1": {
                 "last_optimization_sensor": mock_opt,
                 "optimization_history_sensor": mock_hist,
+                "market_windows": StaticMarketWindowResolver(market_windows()),
             }
         }
     }
@@ -476,12 +481,14 @@ def test_resolve_arbitrage_margin_gate_for_day_window(_mock_internal):
     """Shared helper should resolve day buy window margin details."""
     hass = _arb_hass(sell_price="0.9", day_buy_price=0.3)
     margin_ok, details = resolve_arbitrage_margin_gate(
-        hass,
-        entry_id="entry-1",
-        sell_price=0.9,
-        min_arbitrage_price=0.2,
-        buy_reference_unique_id_suffix="day_buy_window",
-        buy_reference_entity_name="Day buy window",
+        0.9,
+        0.2,
+        legacy_buy_reference(
+            hass,
+            entry_id="entry-1",
+            unique_id_suffix="day_buy_window",
+            entity_name="Day buy window",
+        ),
     )
 
     assert margin_ok is True
@@ -494,12 +501,14 @@ def test_resolve_arbitrage_margin_gate_rounds_price_details(_mock_internal):
     """Shared helper should round price diagnostics to two decimal places."""
     hass = _arb_hass(day_buy_price=0.465)
     margin_ok, details = resolve_arbitrage_margin_gate(
-        hass,
-        entry_id="entry-1",
-        sell_price=1.2,
-        min_arbitrage_price=0.1,
-        buy_reference_unique_id_suffix="day_buy_window",
-        buy_reference_entity_name="Day buy window",
+        1.2,
+        0.1,
+        legacy_buy_reference(
+            hass,
+            entry_id="entry-1",
+            unique_id_suffix="day_buy_window",
+            entity_name="Day buy window",
+        ),
     )
 
     assert margin_ok is True
