@@ -669,6 +669,16 @@ class TestCoordinatorMarketWindowResolverHighTariff:
             15, MarketWindowSource.DEFAULT
         )
 
+    def test_a_negative_fraction_truncates_to_hour_zero_like_the_old_helper(self) -> None:
+        resolver = _resolver(
+            hass=_hass({"sensor.tariff_start": "-0.5"}),
+            entry=_entry(**{CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start"}),
+        )
+
+        assert resolver.windows(NOW).high_tariff_start == ResolvedHour(
+            0, MarketWindowSource.CONFIG_ENTITY
+        )
+
     def test_an_iso_datetime_state_is_read_as_its_local_hour(self) -> None:
         resolver = _resolver(
             hass=_hass({"sensor.tariff_start": "2026-05-08T14:00:00+00:00"}),
@@ -1079,6 +1089,19 @@ class TestCoordinatorMarketWindowResolverLegacyEntities:
 
         assert resolver.windows(NOW).evening_sell.primary == _legacy(
             _dt(8, 18), _dt(8, 19), 1.25
+        )
+
+    def test_a_range_state_is_not_a_legacy_sell_hour(self) -> None:
+        resolver = _resolver(
+            hass=_hass({**EVENING_LEGACY_STATES, "sensor.evening_hour": "18:00-19:00"}),
+            entry=_entry(**EVENING_LEGACY),
+        )
+
+        primary = resolver.windows(NOW).evening_sell.primary
+        assert (primary.start, primary.source, primary.reason) == (
+            _dt(8, 17),
+            MarketWindowSource.DEFAULT,
+            "unreliable",
         )
 
     def test_a_legacy_consume_range_ends_at_the_ranges_end(self) -> None:

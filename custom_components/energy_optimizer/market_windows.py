@@ -442,7 +442,7 @@ def _parse_clock(state_value: object) -> time | None:
 def _parse_hour_number(state_value: object) -> int:
     """Parse a whole hour (0-24) from a numeric entity state."""
     value = float(str(state_value))
-    if not isfinite(value) or not 0 <= value < 25:
+    if not isfinite(value) or not 0 <= int(value) <= 24:
         raise ValueError(f"hour {state_value!r} is not a clock hour")
     return int(value)
 
@@ -890,7 +890,7 @@ class CoordinatorMarketWindowResolver:
         raw_time = self._entity_state(time_key)
         if raw_time is None:
             return None
-        first, second = _split_range(raw_time)
+        first, second = (raw_time, None) if whole_hour else _split_range(raw_time)
         clock = _parse_clock(first)
         if clock is None:
             clock = time(_parse_hour_number(first))
@@ -898,14 +898,20 @@ class CoordinatorMarketWindowResolver:
             clock = time(clock.hour)
         start = datetime.combine(day, clock, tzinfo=tz)
         end = start + timedelta(hours=1)
-        if second is not None and not whole_hour:
+        if second is not None:
             range_end = dt_util.parse_time(second)
-            if range_end is not None and datetime.combine(day, range_end, tzinfo=tz) > start:
+            if range_end is None:
+                _LOGGER.warning(
+                    "Legacy time entity %s range %s has no readable end, window lasts one hour",
+                    self._entry.data.get(time_key),
+                    raw_time,
+                )
+            elif datetime.combine(day, range_end, tzinfo=tz) > start:
                 end = datetime.combine(day, range_end, tzinfo=tz)
             else:
                 _LOGGER.warning(
-                    "Legacy time entity %s range %s does not end after its start, "
-                    "window lasts one hour",
+                    "Legacy time entity %s range %s ends at or before its start on the same "
+                    "day, window lasts one hour",
                     self._entry.data.get(time_key),
                     raw_time,
                 )
