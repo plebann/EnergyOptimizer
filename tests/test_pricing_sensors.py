@@ -1,6 +1,7 @@
 """Tests for price-related Energy Optimizer sensors."""
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
@@ -8,16 +9,10 @@ import pytest
 
 from custom_components.energy_optimizer.const import (
     CONF_BUY_PRICE_SENSOR,
-    CONF_HIGH_TARIFF_END_HOUR_SENSOR,
-    CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_SELL_PRICE_SENSOR,
 )
 from custom_components.energy_optimizer.coordinator import EnergyOptimizerCoordinator
-from custom_components.energy_optimizer.night_buy_window import NightBuyWindowPlan
-from custom_components.energy_optimizer.night_buy_window_manager import (
-    NightBuyWindowPlanManager,
-)
 from custom_components.energy_optimizer.entities.sensors.pricing import (
     BuyPriceSensor,
     DayBuyWindowSensor,
@@ -33,9 +28,16 @@ from custom_components.energy_optimizer.entities.sensors.pricing import (
     NightBuyWindowSensor,
     NightBuyWindowTomorrowSensor,
     SellPriceSensor,
+    SnapshotCache,
 )
+from custom_components.energy_optimizer.market_windows import (
+    RankedMarketWindow,
+    StaticMarketWindowResolver,
+)
+from tests.conftest import MARKET_WINDOWS_NOW, market_windows, window
 
 TZ = timezone(timedelta(hours=2))
+LOCAL_TZ = MARKET_WINDOWS_NOW.tzinfo
 
 
 def _mock_entry() -> MagicMock:
@@ -46,22 +48,9 @@ def _mock_entry() -> MagicMock:
     return entry
 
 
-def _hourly_entry(hour: int, price: float | str) -> dict[str, object]:
-    dt = datetime(2026, 5, 8, hour, 0, tzinfo=TZ)
-    return {"time": dt.isoformat(), "price": price}
-
-
 def _hourly_entry_for_day(day: int, hour: int, price: float | str) -> dict[str, object]:
     dt = datetime(2026, 5, day, hour, 0, tzinfo=TZ)
     return {"time": dt.isoformat(), "price": price}
-
-
-def _payload(low_start_hour: int = 10, low_hours: int = 2) -> list[dict[str, object]]:
-    entries: list[dict[str, object]] = []
-    for hour in range(8, 16):
-        is_low = low_start_hour <= hour < low_start_hour + low_hours
-        entries.append(_hourly_entry(hour, 0.5 if is_low else 1.0))
-    return entries
 
 
 def _payload_for_day(day: int, low_start_hour: int = 10, low_hours: int = 2) -> list[dict[str, object]]:
@@ -72,267 +61,45 @@ def _payload_for_day(day: int, low_start_hour: int = 10, low_hours: int = 2) -> 
     return entries
 
 
-def _ranked_payload_for_hours(
-    day: int,
-    prices_by_hour: dict[int, float | str],
-) -> list[dict[str, object]]:
-    return [
-        _hourly_entry_for_day(day, hour, price)
-        for hour, price in sorted(prices_by_hour.items())
-    ]
+def _payload(low_start_hour: int = 10, low_hours: int = 2) -> list[dict[str, object]]:
+    return _payload_for_day(8, low_start_hour, low_hours)
 
 
-def _buy_payload_for_hours(
-    day: int,
-    prices_by_hour: dict[int, float | str],
-) -> list[dict[str, object]]:
-    return [
-        _hourly_entry_for_day(day, hour, price)
-        for hour, price in sorted(prices_by_hour.items())
-    ]
-
-
-def _coordinator_with_price_payloads(
-    price_payloads: dict[str, dict[str, object]],
-    *,
-    states: dict[str, object] | None = None,
-) -> MagicMock:
+def _sensor(sensor_cls, **fields):
+    """A window sensor fed by a static resolver holding the given snapshot fields."""
     coordinator = MagicMock()
-    coordinator.data = {
-        "states": states or {},
-        "price_payloads": price_payloads,
-    }
-    return coordinator
-
-
-def _coordinator_with_prices(
-    prices_today: list[dict[str, object]] | None = None,
-    prices_tomorrow: list[dict[str, object]] | None = None,
-    sell_entity: str = "sensor.sell",
-) -> MagicMock:
-    coordinator = MagicMock()
-    payload: dict[str, object] = {}
-    if prices_today is not None:
-        payload["prices_today"] = prices_today
-    if prices_tomorrow is not None:
-        payload["prices_tomorrow"] = prices_tomorrow
-    coordinator.data = {
-        "states": {},
-        "price_payloads": {
-            sell_entity: payload,
-        },
-    }
-    return coordinator
-
-
-def _consume_sensor(prices_today: list[dict[str, object]], config: dict[str, object] | None = None) -> ConsumeWindowSensor:
-    config = config or {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
-    coordinator = _coordinator_with_prices(prices_today, None, str(config[CONF_SELL_PRICE_SENSOR]))
-    sensor = ConsumeWindowSensor(coordinator, _mock_entry(), config)
-    sensor.hass = MagicMock()
-    return sensor
-
-
-def _consume_tomorrow_sensor(
-    prices_tomorrow: list[dict[str, object]],
-    config: dict[str, object] | None = None,
-) -> ConsumeWindowTomorrowSensor:
-    config = config or {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
-    coordinator = _coordinator_with_prices(None, prices_tomorrow, str(config[CONF_SELL_PRICE_SENSOR]))
-    sensor = ConsumeWindowTomorrowSensor(coordinator, _mock_entry(), config)
-    sensor.hass = MagicMock()
-    return sensor
-
-
-def _morning_sensor(prices_today: list[dict[str, object]]) -> MorningSellWindowSensor:
-    coordinator = _coordinator_with_prices(prices_today, None, "sensor.sell")
-    sensor = MorningSellWindowSensor(
+    coordinator.data = {}
+    return sensor_cls(
         coordinator,
         _mock_entry(),
-        {CONF_SELL_PRICE_SENSOR: "sensor.sell"},
+        {},
+        StaticMarketWindowResolver(market_windows(**fields)),
     )
-    sensor.hass = MagicMock()
-    return sensor
 
 
-def _morning_sell_buy_reference_sensor(
-    prices_today: list[dict[str, object]],
-    *,
-    config: dict[str, object] | None = None,
-) -> MorningSellBuyReferenceSensor:
-    config = config or {CONF_BUY_PRICE_SENSOR: "sensor.buy"}
-    coordinator = _coordinator_with_prices(
-        prices_today,
-        None,
-        str(config[CONF_BUY_PRICE_SENSOR]),
+def _ranked(
+    primary: tuple[int, float], secondary: tuple[int, float] | None, next_day: bool = False
+) -> RankedMarketWindow:
+    return RankedMarketWindow(
+        primary=window(primary[0], primary[0] + 1, primary[1], next_day),
+        secondary=(
+            window(secondary[0], secondary[0] + 1, secondary[1], next_day)
+            if secondary
+            else None
+        ),
+        gap_pct=(primary[1] - secondary[1]) / primary[1] * 100 if secondary and primary[1] else None,
     )
-    sensor = MorningSellBuyReferenceSensor(
-        coordinator,
-        _mock_entry(),
-        config,
-    )
-    sensor.hass = MagicMock()
-    return sensor
 
 
-def _evening_sensor(prices_today: list[dict[str, object]]) -> EveningSellWindowSensor:
-    coordinator = _coordinator_with_prices(prices_today, None, "sensor.sell")
-    sensor = EveningSellWindowSensor(
-        coordinator,
-        _mock_entry(),
-        {CONF_SELL_PRICE_SENSOR: "sensor.sell"},
-    )
-    sensor.hass = MagicMock()
-    return sensor
+def _at(monkeypatch: pytest.MonkeyPatch, now: datetime) -> None:
+    from homeassistant.util import dt as dt_util
+
+    monkeypatch.setattr(dt_util, "now", lambda: now)
 
 
-def _morning_tomorrow_sensor(
-    prices_tomorrow: list[dict[str, object]],
-) -> MorningSellWindowTomorrowSensor:
-    coordinator = _coordinator_with_prices(None, prices_tomorrow, "sensor.sell")
-    sensor = MorningSellWindowTomorrowSensor(
-        coordinator,
-        _mock_entry(),
-        {CONF_SELL_PRICE_SENSOR: "sensor.sell"},
-    )
-    sensor.hass = MagicMock()
-    return sensor
-
-
-def _evening_tomorrow_sensor(
-    prices_tomorrow: list[dict[str, object]],
-) -> EveningSellWindowTomorrowSensor:
-    coordinator = _coordinator_with_prices(None, prices_tomorrow, "sensor.sell")
-    sensor = EveningSellWindowTomorrowSensor(
-        coordinator,
-        _mock_entry(),
-        {CONF_SELL_PRICE_SENSOR: "sensor.sell"},
-    )
-    sensor.hass = MagicMock()
-    return sensor
-
-
-def _night_buy_sensor(
-    prices_today: list[dict[str, object]],
-    prices_tomorrow: list[dict[str, object]] | None = None,
-) -> NightBuyWindowSensor:
-    coordinator = _coordinator_with_prices(prices_today, prices_tomorrow, "sensor.buy")
-    sensor = NightBuyWindowSensor(
-        coordinator,
-        _mock_entry(),
-        {CONF_BUY_PRICE_SENSOR: "sensor.buy"},
-    )
-    sensor.hass = MagicMock()
-    return sensor
-
-
-def _day_plan_dict(prices: list[dict[str, object]]) -> dict[str, object] | None:
-    first = datetime.fromisoformat(str(prices[0]["time"]))
-    present_hours = {
-        datetime.fromisoformat(str(item["time"])).hour
-        for item in prices
-        if first.date() == datetime.fromisoformat(str(item["time"])).date()
-    }
-    prices = list(prices) + [
-        _hourly_entry_for_day(first.day, hour, 99.0)
-        for hour in range(9, 17)
-        if hour not in present_hours
-    ]
-    plan = _plan_manager(tariff_end=9, tariff_start=17)._day_plan(
-        prices, "sensor.buy", plan_date=first.date(), local_tz=first.tzinfo
-    )
-    return plan.as_dict() if plan is not None else None
-
-
-def _plan_manager(*, tariff_end: int, tariff_start: int) -> NightBuyWindowPlanManager:
-    """A plan manager whose high-tariff sensors report the given hours."""
-    states = {
-        "sensor.tariff_end": MagicMock(state=str(tariff_end)),
-        "sensor.tariff_start": MagicMock(state=str(tariff_start)),
-    }
-    hass = MagicMock()
-    hass.states.get.side_effect = lambda entity_id: states.get(entity_id)
-    entry = _mock_entry()
-    entry.data = {
-        CONF_BUY_PRICE_SENSOR: "sensor.buy",
-        CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end",
-        CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start",
-    }
-    return NightBuyWindowPlanManager(hass, entry)
-
-
-_COMPLETED_NIGHT = NightBuyWindowPlan(
-    datetime(2026, 5, 7, 23, 0, tzinfo=TZ), datetime(2026, 5, 8, 5, 0, tzinfo=TZ), 0.4
-)
-_TONIGHT = NightBuyWindowPlan(
-    datetime(2026, 5, 8, 22, 0, tzinfo=TZ), datetime(2026, 5, 9, 4, 0, tzinfo=TZ), 0.5
-)
-
-
-def _night_buy_sensor_from_manager(
-    completed: NightBuyWindowPlan | None, upcoming: NightBuyWindowPlan | None
-) -> NightBuyWindowSensor:
-    """A night sensor fed by the manager's own snapshot of its two slots."""
-    manager = _plan_manager(tariff_end=13, tariff_start=15)
-    manager._current = completed
-    manager._upcoming = upcoming
-    coordinator = _coordinator_with_prices([], None, "sensor.buy")
-    coordinator.data["buy_window_plans"] = manager.snapshot()
-    sensor = NightBuyWindowSensor(
-        coordinator,
-        _mock_entry(),
-        {CONF_BUY_PRICE_SENSOR: "sensor.buy"},
-    )
-    sensor.hass = MagicMock()
-    return sensor
-
-
-def _day_buy_sensor(
-    prices_today: list[dict[str, object]],
-    prices_tomorrow: list[dict[str, object]] | None = None,
-) -> DayBuyWindowSensor:
-    coordinator = _coordinator_with_prices(prices_today, prices_tomorrow, "sensor.buy")
-    coordinator.data["buy_window_plans"] = {
-        "night": {},
-        "day": {"window": _day_plan_dict(prices_today), "next": None},
-    }
-    sensor = DayBuyWindowSensor(
-        coordinator,
-        _mock_entry(),
-        {CONF_BUY_PRICE_SENSOR: "sensor.buy"},
-    )
-    sensor.hass = MagicMock()
-    return sensor
-
-
-def _night_buy_tomorrow_sensor(
-    prices_tomorrow: list[dict[str, object]],
-) -> NightBuyWindowTomorrowSensor:
-    coordinator = _coordinator_with_prices(None, prices_tomorrow, "sensor.buy")
-    sensor = NightBuyWindowTomorrowSensor(
-        coordinator,
-        _mock_entry(),
-        {CONF_BUY_PRICE_SENSOR: "sensor.buy"},
-    )
-    sensor.hass = MagicMock()
-    return sensor
-
-
-def _day_buy_tomorrow_sensor(
-    prices_tomorrow: list[dict[str, object]],
-) -> DayBuyWindowTomorrowSensor:
-    coordinator = _coordinator_with_prices(None, prices_tomorrow, "sensor.buy")
-    coordinator.data["buy_window_plans"] = {
-        "night": {},
-        "day": {"window": None, "next": _day_plan_dict(prices_tomorrow)},
-    }
-    sensor = DayBuyWindowTomorrowSensor(
-        coordinator,
-        _mock_entry(),
-        {CONF_BUY_PRICE_SENSOR: "sensor.buy"},
-    )
-    sensor.hass = MagicMock()
-    return sensor
+@pytest.fixture(autouse=True)
+def _now(monkeypatch: pytest.MonkeyPatch) -> None:
+    _at(monkeypatch, MARKET_WINDOWS_NOW)
 
 
 def test_price_sensors_round_source_values_to_three_decimals() -> None:
@@ -367,241 +134,90 @@ def test_min_arbitrage_margin_sensor_exposes_configured_value() -> None:
     assert sensor.native_value == 0.257
 
 
+# --- Consume windows ---------------------------------------------------------
+
+
 @pytest.mark.unit
-def test_consume_window_sensor_publishes_correct_window(monkeypatch: pytest.MonkeyPatch) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    sensor = _consume_sensor(_payload(low_start_hour=10))
+def test_consume_window_sensor_publishes_the_snapshot_window() -> None:
+    sensor = _sensor(ConsumeWindowSensor, consume=window(10, 12, 0.5))
 
     assert sensor.native_value == "10:00-12:00"
     assert sensor.extra_state_attributes == {"price": 0.5, "is_active": "off"}
 
 
 @pytest.mark.unit
-def test_consume_window_tomorrow_sensor_publishes_correct_window(monkeypatch: pytest.MonkeyPatch) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    sensor = _consume_tomorrow_sensor(_payload_for_day(9, low_start_hour=11))
+def test_consume_window_tomorrow_sensor_publishes_the_snapshot_window() -> None:
+    sensor = _sensor(
+        ConsumeWindowTomorrowSensor, consume_tomorrow=window(11, 13, 0.5, next_day=True)
+    )
 
     assert sensor.native_value == "11:00-13:00"
     assert sensor.extra_state_attributes == {"price": 0.5}
 
 
 @pytest.mark.unit
-def test_consume_window_sensor_sets_is_active_on_inside_window(
-    monkeypatch: pytest.MonkeyPatch,
+def test_consume_window_sensor_rounds_price_to_two_decimals() -> None:
+    sensor = _sensor(ConsumeWindowSensor, consume=window(8, 10, 0.5449))
+
+    assert sensor.native_value == "08:00-10:00"
+    assert sensor.extra_state_attributes["price"] == 0.54
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("hour", "minute", "expected"),
+    [(10, 30, "on"), (9, 59, "off"), (12, 0, "off")],
+)
+def test_consume_window_sensor_is_active_follows_the_window(
+    monkeypatch: pytest.MonkeyPatch, hour: int, minute: int, expected: str
 ) -> None:
-    from homeassistant.util import dt as dt_util
+    _at(monkeypatch, datetime(2026, 5, 8, hour, minute, tzinfo=LOCAL_TZ))
 
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 10, 30, tzinfo=TZ))
+    sensor = _sensor(ConsumeWindowSensor, consume=window(10, 12, 0.5))
 
-    sensor = _consume_sensor(_payload(low_start_hour=10))
+    assert sensor.extra_state_attributes["is_active"] == expected
+
+
+@pytest.mark.unit
+def test_consume_window_sensors_keep_unknown_state_for_a_default_window() -> None:
+    for sensor in (_sensor(ConsumeWindowSensor), _sensor(ConsumeWindowTomorrowSensor)):
+        assert sensor.native_value is None
+        assert sensor.extra_state_attributes == {}
+
+
+@pytest.mark.unit
+def test_consume_window_sensors_have_translation_keys_and_prefixed_unique_ids() -> None:
+    today = _sensor(ConsumeWindowSensor)
+    tomorrow = _sensor(ConsumeWindowTomorrowSensor)
+
+    assert today.translation_key == "consume_window"
+    assert today.unique_id == "entry-1_consume_window"
+    assert tomorrow.translation_key == "consume_window_tomorrow"
+    assert tomorrow.unique_id == "entry-1_consume_window_tomorrow"
+
+
+@pytest.mark.unit
+def test_consume_window_sensor_reads_the_resolver_on_every_update() -> None:
+    snapshot = market_windows(consume=window(10, 12, 0.5))
+    resolver = MagicMock()
+    resolver.windows.return_value = snapshot
+    coordinator = MagicMock()
+    coordinator.data = {}
+    sensor = ConsumeWindowSensor(coordinator, _mock_entry(), {}, resolver)
 
     assert sensor.native_value == "10:00-12:00"
-    assert sensor.extra_state_attributes == {"price": 0.5, "is_active": "on"}
 
-
-@pytest.mark.unit
-def test_consume_window_sensor_sets_is_active_off_outside_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 13, 0, tzinfo=TZ))
-
-    sensor = _consume_sensor(_payload(low_start_hour=10))
-
-    assert sensor.native_value == "10:00-12:00"
-    assert sensor.extra_state_attributes == {"price": 0.5, "is_active": "off"}
-
-
-@pytest.mark.unit
-def test_consume_window_tomorrow_sensor_does_not_publish_is_active(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 10, 30, tzinfo=TZ))
-
-    sensor = _consume_tomorrow_sensor(_payload_for_day(9, low_start_hour=11))
-
-    assert sensor.native_value == "11:00-13:00"
-    assert "is_active" not in sensor.extra_state_attributes
-
-
-@pytest.mark.unit
-def test_consume_window_sensor_ignores_buy_price_only_changes(monkeypatch: pytest.MonkeyPatch) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    config = {
-        CONF_SELL_PRICE_SENSOR: "sensor.sell",
-        CONF_BUY_PRICE_SENSOR: "sensor.buy",
-    }
-    coordinator = _coordinator_with_prices(
-        prices_today=_payload(low_start_hour=10),
-        sell_entity="sensor.sell",
-    )
-    coordinator.data["states"]["sensor.buy"] = 0.25
-
-    sensor = ConsumeWindowSensor(coordinator, _mock_entry(), config)
-    sensor.hass = MagicMock()
-
-    first_value = sensor.native_value
-    coordinator.data["states"]["sensor.buy"] = 9.99
-    second_value = sensor.native_value
-
-    assert first_value == "10:00-12:00"
-    assert second_value == first_value
-
-
-@pytest.mark.unit
-def test_consume_window_sensor_uses_hhmm_hhmm_format(monkeypatch: pytest.MonkeyPatch) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    sensor = _consume_sensor(_payload(low_start_hour=8))
+    resolver.windows.return_value = replace(snapshot, consume=window(8, 10, 0.5))
 
     assert sensor.native_value == "08:00-10:00"
 
 
-@pytest.mark.unit
-def test_consume_window_sensor_updates_when_shared_payload_changes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    coordinator = _coordinator_with_prices(_payload(low_start_hour=10), None, "sensor.sell")
-    sensor = ConsumeWindowSensor(
-        coordinator,
-        _mock_entry(),
-        {CONF_SELL_PRICE_SENSOR: "sensor.sell"},
-    )
-    sensor.hass = MagicMock()
-
-    assert sensor.native_value == "10:00-12:00"
-
-    coordinator.data["price_payloads"]["sensor.sell"] = {"prices_today": _payload(low_start_hour=8)}
-
-    assert sensor.native_value == "08:00-10:00"
+# --- Ranked sell windows -----------------------------------------------------
 
 
 @pytest.mark.unit
-def test_consume_window_sensor_unavailable_when_missing_sell_payload(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    sensor = _consume_sensor([])
-
-    assert sensor.native_value is None
-    assert sensor.extra_state_attributes == {}
-
-
-@pytest.mark.unit
-def test_consume_window_sensor_unavailable_when_fewer_than_two_hours(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    sensor = _consume_sensor([_hourly_entry(8, 0.5)])
-
-    assert sensor.native_value is None
-
-
-@pytest.mark.unit
-def test_consume_window_sensor_has_translation_key_and_prefixed_unique_id() -> None:
-    sensor = _consume_sensor(_payload(low_start_hour=10))
-
-    assert sensor.translation_key == "consume_window"
-    assert sensor.unique_id == "entry-1_consume_window"
-
-
-@pytest.mark.unit
-def test_today_and_tomorrow_sensors_are_isolated_by_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    coordinator = _coordinator_with_prices(
-        _payload(low_start_hour=10),
-        _payload_for_day(9, low_start_hour=11),
-        "sensor.sell",
-    )
-    config = {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
-
-    today_sensor = ConsumeWindowSensor(coordinator, _mock_entry(), config)
-    tomorrow_sensor = ConsumeWindowTomorrowSensor(coordinator, _mock_entry(), config)
-    today_sensor.hass = MagicMock()
-    tomorrow_sensor.hass = MagicMock()
-
-    assert today_sensor.native_value == "10:00-12:00"
-    assert tomorrow_sensor.native_value == "11:00-13:00"
-
-    coordinator.data["price_payloads"]["sensor.sell"]["prices_tomorrow"] = _payload_for_day(
-        9, low_start_hour=8
-    )
-
-    assert today_sensor.native_value == "10:00-12:00"
-    assert tomorrow_sensor.native_value == "08:00-10:00"
-
-
-@pytest.mark.unit
-def test_tomorrow_sensor_unavailable_omits_price_without_affecting_today(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    coordinator = _coordinator_with_prices(_payload(low_start_hour=10), [], "sensor.sell")
-    config = {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
-
-    today_sensor = ConsumeWindowSensor(coordinator, _mock_entry(), config)
-    tomorrow_sensor = ConsumeWindowTomorrowSensor(coordinator, _mock_entry(), config)
-    today_sensor.hass = MagicMock()
-    tomorrow_sensor.hass = MagicMock()
-
-    assert today_sensor.native_value == "10:00-12:00"
-    assert today_sensor.extra_state_attributes == {"price": 0.5, "is_active": "off"}
-    assert tomorrow_sensor.native_value is None
-    assert tomorrow_sensor.extra_state_attributes == {}
-
-
-@pytest.mark.unit
-def test_consume_window_tomorrow_sensor_has_translation_key_and_prefixed_unique_id() -> None:
-    sensor = _consume_tomorrow_sensor(_payload_for_day(9, low_start_hour=10))
-
-    assert sensor.translation_key == "consume_window_tomorrow"
-    assert sensor.unique_id == "entry-1_consume_window_tomorrow"
-
-
-@pytest.mark.unit
-def test_morning_sell_window_sensor_publishes_best_and_second_best_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    sensor = _morning_sensor(
-        _ranked_payload_for_hours(
-            8,
-            {4: 0.40, 5: 0.85, 6: 0.72, 7: 0.91, 8: 0.55, 9: 0.60},
-        )
-    )
+def test_morning_sell_window_sensor_publishes_primary_and_secondary_window() -> None:
+    sensor = _sensor(MorningSellWindowSensor, morning_sell=_ranked((7, 0.91), (5, 0.85)))
 
     assert sensor.native_value == "07:00"
     assert sensor.extra_state_attributes == {
@@ -613,19 +229,8 @@ def test_morning_sell_window_sensor_publishes_best_and_second_best_window(
 
 
 @pytest.mark.unit
-def test_evening_sell_window_sensor_publishes_best_and_second_best_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 18, 0, tzinfo=TZ))
-
-    sensor = _evening_sensor(
-        _ranked_payload_for_hours(
-            8,
-            {16: 0.40, 17: 0.95, 18: 0.82, 19: 0.88, 20: 0.91, 21: 0.60},
-        )
-    )
+def test_evening_sell_window_sensor_publishes_primary_and_secondary_window() -> None:
+    sensor = _sensor(EveningSellWindowSensor, evening_sell=_ranked((17, 0.95), (20, 0.91)))
 
     assert sensor.native_value == "17:00"
     assert sensor.extra_state_attributes == {
@@ -637,84 +242,37 @@ def test_evening_sell_window_sensor_publishes_best_and_second_best_window(
 
 
 @pytest.mark.unit
-def test_morning_sell_window_tomorrow_sensor_isolated_from_today_payload(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
+def test_sell_window_sensor_publishes_the_gap_when_the_primary_price_rounds_to_zero() -> None:
+    ranked = replace(_ranked((17, 0.0), (20, 0.0)), gap_pct=32.2148)
+    sensor = _sensor(EveningSellWindowSensor, evening_sell=ranked)
 
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    coordinator = _coordinator_with_prices(
-        _ranked_payload_for_hours(8, {4: 0.40, 5: 0.85, 6: 0.72, 7: 0.91}),
-        _ranked_payload_for_hours(9, {4: 0.90, 5: 0.70, 6: 0.65, 7: 0.60}),
-        "sensor.sell",
-    )
-    config = {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
-
-    today_sensor = MorningSellWindowSensor(coordinator, _mock_entry(), config)
-    tomorrow_sensor = MorningSellWindowTomorrowSensor(coordinator, _mock_entry(), config)
-    today_sensor.hass = MagicMock()
-    tomorrow_sensor.hass = MagicMock()
-
-    assert today_sensor.native_value == "07:00"
-    assert tomorrow_sensor.native_value == "04:00"
-
-    coordinator.data["price_payloads"]["sensor.sell"]["prices_tomorrow"] = _ranked_payload_for_hours(
-        9, {4: 0.20, 5: 0.95, 6: 0.65, 7: 0.60}
-    )
-
-    assert today_sensor.native_value == "07:00"
-    assert tomorrow_sensor.native_value == "05:00"
+    assert sensor.extra_state_attributes["second_window_gap_pct"] == 32.2
 
 
 @pytest.mark.unit
-def test_evening_sell_window_tomorrow_sensor_publishes_best_and_second_best_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 18, 0, tzinfo=TZ))
-
-    sensor = _evening_tomorrow_sensor(
-        _ranked_payload_for_hours(
-            9,
-            {16: 0.4021, 17: 0.9544, 18: 0.8242, 19: 0.8811, 20: 0.9119, 21: 0.6012},
-        )
+def test_tomorrow_sell_window_sensors_read_their_own_fields() -> None:
+    morning = _sensor(
+        MorningSellWindowTomorrowSensor,
+        morning_sell_tomorrow=_ranked((4, 0.9), (5, 0.7), next_day=True),
+    )
+    evening = _sensor(
+        EveningSellWindowTomorrowSensor,
+        evening_sell_tomorrow=_ranked((17, 0.954), (20, 0.912), next_day=True),
     )
 
-    assert sensor.native_value == "17:00"
-    assert sensor.extra_state_attributes == {
+    assert morning.native_value == "04:00"
+    assert evening.native_value == "17:00"
+    assert evening.extra_state_attributes == {
         "price": 0.954,
         "second_window_start": "20:00",
         "second_window_price": 0.912,
-        "second_window_gap_pct": 4.5,
+        "second_window_gap_pct": 4.4,
     }
 
 
 @pytest.mark.unit
-def test_evening_sell_window_sensor_unavailable_when_fewer_than_two_valid_candidates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 18, 0, tzinfo=TZ))
-
-    sensor = _evening_sensor(_ranked_payload_for_hours(8, {17: 0.95}))
-
-    assert sensor.native_value is None
-    assert sensor.available is False
-    assert sensor.extra_state_attributes == {}
-
-
-@pytest.mark.unit
-def test_morning_sell_window_sensor_omits_gap_when_best_price_is_zero(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    sensor = _morning_sensor(_ranked_payload_for_hours(8, {4: 0.0, 5: -0.1, 6: -0.2}))
+def test_ranked_sell_window_sensor_omits_gap_when_best_price_is_zero() -> None:
+    sensor = _sensor(MorningSellWindowSensor, morning_sell=_ranked((4, 0.0), (5, -0.1)))
 
     assert sensor.native_value == "04:00"
     assert sensor.extra_state_attributes == {
@@ -725,41 +283,18 @@ def test_morning_sell_window_sensor_omits_gap_when_best_price_is_zero(
 
 
 @pytest.mark.unit
-def test_ranked_sell_window_sensor_ignores_buy_price_only_changes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
+def test_ranked_sell_window_sensor_is_unavailable_for_a_default_window() -> None:
+    sensor = _sensor(EveningSellWindowSensor)
 
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    config = {
-        CONF_SELL_PRICE_SENSOR: "sensor.sell",
-        CONF_BUY_PRICE_SENSOR: "sensor.buy",
-    }
-    coordinator = _coordinator_with_prices(
-        _ranked_payload_for_hours(8, {4: 0.40, 5: 0.85, 6: 0.72, 7: 0.91}),
-        None,
-        "sensor.sell",
-    )
-    coordinator.data["states"]["sensor.buy"] = 0.25
-
-    sensor = MorningSellWindowSensor(coordinator, _mock_entry(), config)
-    sensor.hass = MagicMock()
-
-    first_value = sensor.native_value
-    first_attributes = sensor.extra_state_attributes
-    coordinator.data["states"]["sensor.buy"] = 9.99
-
-    assert sensor.native_value == first_value
-    assert sensor.extra_state_attributes == first_attributes
+    assert sensor.native_value is None
+    assert sensor.available is False
+    assert sensor.extra_state_attributes == {}
 
 
 @pytest.mark.unit
 def test_ranked_sell_window_sensors_have_translation_keys_and_prefixed_unique_ids() -> None:
-    morning = _morning_sensor(_ranked_payload_for_hours(8, {4: 0.4, 5: 0.8, 6: 0.7}))
-    evening_tomorrow = _evening_tomorrow_sensor(
-        _ranked_payload_for_hours(9, {16: 0.4, 17: 0.9, 18: 0.8})
-    )
+    morning = _sensor(MorningSellWindowSensor)
+    evening_tomorrow = _sensor(EveningSellWindowTomorrowSensor)
 
     assert morning.translation_key == "morning_sell_window"
     assert morning.unique_id == "entry-1_morning_sell_window"
@@ -767,70 +302,140 @@ def test_ranked_sell_window_sensors_have_translation_keys_and_prefixed_unique_id
     assert evening_tomorrow.unique_id == "entry-1_evening_sell_window_tomorrow"
 
 
+# --- Buy windows -------------------------------------------------------------
+
+
 @pytest.mark.unit
-def test_ranked_sell_window_sensor_rounds_only_published_attributes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
+def test_day_buy_window_sensor_publishes_state_and_attributes() -> None:
+    sensor = _sensor(DayBuyWindowSensor, day_buy=window(11, 13, 0.25))
 
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    sensor = _morning_sensor(
-        _ranked_payload_for_hours(
-            8,
-            {4: 0.9999, 5: 0.6666, 6: 0.5},
-        )
-    )
-
-    assert sensor.native_value == "04:00"
+    assert sensor.native_value == "11:00-13:00"
     assert sensor.extra_state_attributes == {
-        "price": 1.0,
-        "second_window_start": "05:00",
-        "second_window_price": 0.667,
-        "second_window_gap_pct": 33.3,
+        "end": "13:00",
+        "duration_hours": 2,
+        "price": 0.25,
+        "is_negative": False,
+        "start_time": "2026-05-08T11:00:00+02:00",
+        "end_time": "2026-05-08T13:00:00+02:00",
+        "plan_date": "2026-05-08",
+        "is_active": "on",
     }
 
 
 @pytest.mark.unit
-def test_duplicate_hour_only_makes_affected_ranked_sensor_unavailable(
+def test_day_buy_window_sensor_is_inactive_before_the_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from homeassistant.util import dt as dt_util
+    _at(monkeypatch, datetime(2026, 5, 8, 10, 59, tzinfo=LOCAL_TZ))
 
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 18, 0, tzinfo=TZ))
+    sensor = _sensor(DayBuyWindowSensor, day_buy=window(11, 13, 0.25))
 
-    coordinator = _coordinator_with_prices(
-        _ranked_payload_for_hours(
-            8,
-            {
-                4: 0.40,
-                5: 0.80,
-                6: 0.70,
-                16: 0.60,
-                17: 0.95,
-                18: 0.85,
-                19: 0.95,
-            },
-        )
-        + [{"time": datetime(2026, 5, 8, 5, 0, tzinfo=TZ).isoformat(), "price": 0.81}],
-        None,
-        "sensor.sell",
+    assert sensor.extra_state_attributes["is_active"] == "off"
+
+
+@pytest.mark.unit
+def test_day_buy_next_window_sensor_publishes_attributes_without_is_active() -> None:
+    sensor = _sensor(
+        DayBuyWindowTomorrowSensor, day_buy_next=window(11, 13, 0.2, next_day=True)
     )
-    config = {CONF_SELL_PRICE_SENSOR: "sensor.sell"}
 
-    morning_sensor = MorningSellWindowSensor(coordinator, _mock_entry(), config)
-    evening_sensor = EveningSellWindowSensor(coordinator, _mock_entry(), config)
-    morning_sensor.hass = MagicMock()
-    evening_sensor.hass = MagicMock()
+    assert sensor.native_value == "11:00-13:00"
+    assert sensor.extra_state_attributes == {
+        "end": "13:00",
+        "duration_hours": 2,
+        "price": 0.2,
+        "is_negative": False,
+        "start_time": "2026-05-09T11:00:00+02:00",
+        "end_time": "2026-05-09T13:00:00+02:00",
+        "plan_date": "2026-05-09",
+    }
 
-    assert morning_sensor.native_value is None
-    assert morning_sensor.available is False
-    assert evening_sensor.native_value == "17:00"
-    assert evening_sensor.extra_state_attributes == {
-        "price": 0.95,
-        "second_window_start": "19:00",
-        "second_window_price": 0.95,
-        "second_window_gap_pct": 0.0,
+
+@pytest.mark.unit
+def test_buy_window_sensor_sets_is_negative_only_for_a_negative_price() -> None:
+    negative = _sensor(DayBuyWindowSensor, day_buy=window(11, 13, -0.25))
+    zero = _sensor(DayBuyWindowSensor, day_buy=window(10, 12, 0.0))
+
+    assert negative.extra_state_attributes["is_negative"] is True
+    assert negative.extra_state_attributes["price"] == -0.25
+    assert zero.extra_state_attributes["is_negative"] is False
+    assert zero.available is True
+
+
+@pytest.mark.unit
+def test_night_buy_window_sensor_projects_the_completed_night(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _at(monkeypatch, datetime(2026, 5, 9, 2, 30, tzinfo=LOCAL_TZ))
+
+    sensor = _sensor(
+        NightBuyWindowSensor,
+        night_buy_completed=window(22, 4, 0.5),
+        night_buy=window(1, 2, 9.0),
+    )
+
+    assert sensor.native_value == "22:00-04:00"
+    assert sensor.extra_state_attributes["plan_date"] == "2026-05-09"
+    assert sensor.extra_state_attributes["is_active"] == "on"
+
+
+@pytest.mark.unit
+def test_night_buy_window_sensor_is_inactive_at_the_window_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _at(monkeypatch, datetime(2026, 5, 9, 4, 0, tzinfo=LOCAL_TZ))
+
+    sensor = _sensor(NightBuyWindowSensor, night_buy_completed=window(22, 4, 0.5))
+
+    assert sensor.extra_state_attributes["is_active"] == "off"
+
+
+@pytest.mark.unit
+def test_night_buy_next_window_sensor_projects_night_buy_without_is_active() -> None:
+    sensor = _sensor(
+        NightBuyWindowTomorrowSensor, night_buy=window(1, 3, 0.5, next_day=True)
+    )
+
+    assert sensor.native_value == "01:00-03:00"
+    assert sensor.extra_state_attributes["plan_date"] == "2026-05-09"
+    assert "is_active" not in sensor.extra_state_attributes
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("sensor_cls", "unique_id"),
+    [
+        (NightBuyWindowSensor, "night_buy_window"),
+        (NightBuyWindowTomorrowSensor, "night_buy_next_window"),
+        (DayBuyWindowSensor, "day_buy_window"),
+        (DayBuyWindowTomorrowSensor, "day_buy_next_window"),
+        (MorningSellBuyReferenceSensor, "morning_sell_buy_reference"),
+    ],
+)
+def test_buy_window_sensors_are_unavailable_for_a_default_window(
+    sensor_cls, unique_id: str
+) -> None:
+    sensor = _sensor(sensor_cls)
+
+    assert sensor.native_value is None
+    assert sensor.available is False
+    assert sensor.extra_state_attributes == {}
+    assert sensor.translation_key == unique_id
+    assert sensor.unique_id == f"entry-1_{unique_id}"
+
+
+@pytest.mark.unit
+def test_morning_sell_buy_reference_sensor_projects_the_snapshot_reference() -> None:
+    sensor = _sensor(
+        MorningSellBuyReferenceSensor, morning_sell_buy_reference=window(8, 13, 0.3)
+    )
+
+    assert sensor.native_value == "08:00"
+    assert sensor.extra_state_attributes == {
+        "end": "13:00",
+        "duration_hours": 5,
+        "price": 0.3,
+        "is_negative": False,
     }
 
 
@@ -870,431 +475,61 @@ async def test_coordinator_copies_price_payloads_to_avoid_in_place_source_mutati
 
 
 @pytest.mark.unit
-def test_today_buy_window_sensors_publish_state_and_attributes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    prices_today = _buy_payload_for_hours(
-        8,
-        {
-            0: 0.50,
-            1: 0.10,
-            2: 0.20,
-            3: 0.80,
-            4: 0.90,
-            5: 1.00,
-            10: 0.80,
-            11: 0.30,
-            12: 0.20,
-            13: 0.60,
-            14: 0.90,
-            15: 1.00,
-        },
+def test_buy_window_sensor_keeps_the_sign_of_an_average_rounded_to_negative_zero() -> None:
+    """The resolver rounds -0.0004 to -0.0; the sensor still reports it as negative."""
+    tiny_negative = _sensor(DayBuyWindowSensor, day_buy=window(11, 13, round(-0.0004, 3)))
+    reference = _sensor(
+        MorningSellBuyReferenceSensor,
+        morning_sell_buy_reference=window(8, 13, round(-0.0004, 3)),
     )
+    zero = _sensor(DayBuyWindowSensor, day_buy=window(11, 13, 0.0))
 
-    night_sensor = _night_buy_sensor(prices_today)
-    day_sensor = _day_buy_sensor(prices_today)
+    assert tiny_negative.extra_state_attributes["is_negative"] is True
+    assert reference.extra_state_attributes["is_negative"] is True
+    assert zero.extra_state_attributes["is_negative"] is False
 
-    assert night_sensor.native_value is None
-    assert night_sensor.available is False
-    assert day_sensor.native_value == "11:00-13:00"
-    assert day_sensor.extra_state_attributes == {
-        "end": "13:00",
-        "duration_hours": 2,
-        "price": 0.25,
-        "is_negative": False,
-        "start_time": "2026-05-08T11:00:00+02:00",
-        "end_time": "2026-05-08T13:00:00+02:00",
-        "plan_date": "2026-05-08",
-        "is_active": "on",
-    }
+
+# --- Shared snapshot ---------------------------------------------------------
+
+
+def _counting_cache(coordinator):
+    resolver = MagicMock()
+    resolver.windows.side_effect = lambda now=None: market_windows()
+    return resolver, SnapshotCache(coordinator, resolver)
 
 
 @pytest.mark.unit
-def test_tomorrow_buy_window_sensors_publish_state_and_attributes(
+def test_snapshot_cache_resolves_once_per_refresh_and_minute(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from homeassistant.util import dt as dt_util
+    coordinator = MagicMock()
+    coordinator.data = {"states": {}}
+    resolver, cache = _counting_cache(coordinator)
 
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
+    first = cache.windows(MARKET_WINDOWS_NOW)
+    assert cache.windows(MARKET_WINDOWS_NOW + timedelta(seconds=30)) is first
+    assert resolver.windows.call_count == 1
 
-    prices_tomorrow = _buy_payload_for_hours(
-        9,
-        {
-            0: 0.80,
-            1: 0.60,
-            2: 0.10,
-            3: 0.20,
-            4: 1.00,
-            5: 1.10,
-            10: 0.90,
-            11: 0.60,
-            12: -0.20,
-            13: 0.80,
-            14: 0.85,
-            15: 0.90,
-        },
-    )
+    coordinator.data = {"states": {}}
+    assert cache.windows(MARKET_WINDOWS_NOW) is not first
+    assert resolver.windows.call_count == 2
 
-    night_sensor = _night_buy_tomorrow_sensor(prices_tomorrow)
-    day_sensor = _day_buy_tomorrow_sensor(prices_tomorrow)
-
-    assert night_sensor.native_value is None
-    assert night_sensor.available is False
-    assert day_sensor.native_value == "11:00-13:00"
-    assert day_sensor.extra_state_attributes == {
-        "end": "13:00",
-        "duration_hours": 2,
-        "price": 0.2,
-        "is_negative": False,
-        "start_time": "2026-05-09T11:00:00+02:00",
-        "end_time": "2026-05-09T13:00:00+02:00",
-        "plan_date": "2026-05-09",
-    }
+    cache.windows(MARKET_WINDOWS_NOW + timedelta(minutes=1))
+    assert resolver.windows.call_count == 3
 
 
 @pytest.mark.unit
-def test_tomorrow_buy_window_sensors_are_unavailable_for_empty_payload_without_affecting_today(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
+def test_window_sensors_of_one_platform_share_one_snapshot() -> None:
+    coordinator = MagicMock()
+    coordinator.data = {"states": {}}
+    resolver, cache = _counting_cache(coordinator)
+    sensors = [
+        cls(coordinator, _mock_entry(), {}, cache)
+        for cls in (ConsumeWindowSensor, DayBuyWindowSensor, MorningSellWindowSensor)
+    ]
 
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
+    for sensor in sensors:
+        sensor.native_value
+        sensor.extra_state_attributes
 
-    coordinator = _coordinator_with_prices(
-        _buy_payload_for_hours(8, {0: 0.50, 1: 0.10, 2: 0.20, 3: 0.80, 10: 0.80, 11: 0.30, 12: 0.20, 13: 0.60}),
-        [],
-        "sensor.buy",
-    )
-    config = {CONF_BUY_PRICE_SENSOR: "sensor.buy"}
-    today_sensor = NightBuyWindowSensor(coordinator, _mock_entry(), config)
-    tomorrow_sensor = NightBuyWindowTomorrowSensor(coordinator, _mock_entry(), config)
-    today_sensor.hass = MagicMock()
-    tomorrow_sensor.hass = MagicMock()
-
-    assert today_sensor.native_value is None
-    assert today_sensor.available is False
-    assert tomorrow_sensor.native_value is None
-    assert tomorrow_sensor.available is False
-    assert tomorrow_sensor.extra_state_attributes == {}
-
-
-@pytest.mark.unit
-def test_buy_window_sensor_sets_is_negative_true_only_for_negative_average(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    sensor = _day_buy_sensor(
-        _buy_payload_for_hours(8, {10: 0.40, 11: -0.20, 12: -0.30, 13: 0.50})
-    )
-
-    assert sensor.native_value == "11:00-13:00"
-    assert sensor.extra_state_attributes == {
-        "end": "13:00",
-        "duration_hours": 2,
-        "price": -0.25,
-        "is_negative": True,
-        "start_time": "2026-05-08T11:00:00+02:00",
-        "end_time": "2026-05-08T13:00:00+02:00",
-        "plan_date": "2026-05-08",
-        "is_active": "on",
-    }
-
-
-@pytest.mark.unit
-def test_buy_window_sensor_keeps_zero_average_available_with_false_is_negative(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    sensor = _day_buy_sensor(
-        _buy_payload_for_hours(8, {10: 0.20, 11: -0.20, 12: 0.30, 13: 0.40})
-    )
-
-    assert sensor.native_value == "10:00-12:00"
-    assert sensor.extra_state_attributes == {
-        "end": "12:00",
-        "duration_hours": 2,
-        "price": 0.0,
-        "is_negative": False,
-        "start_time": "2026-05-08T10:00:00+02:00",
-        "end_time": "2026-05-08T12:00:00+02:00",
-        "plan_date": "2026-05-08",
-        "is_active": "off",
-    }
-
-
-@pytest.mark.unit
-def test_buy_window_sensors_have_translation_keys_and_prefixed_unique_ids() -> None:
-    today_night = _night_buy_sensor(_buy_payload_for_hours(8, {0: 0.50, 1: 0.10, 2: 0.20}))
-    tomorrow_day = _day_buy_tomorrow_sensor(
-        _buy_payload_for_hours(9, {10: 0.90, 11: 0.60, 12: -0.20, 13: 0.80})
-    )
-    morning_reference = _morning_sell_buy_reference_sensor(
-        _buy_payload_for_hours(8, {8: 0.5, 9: 0.4, 10: 0.3, 11: 0.2, 12: 0.1})
-    )
-
-    assert today_night.translation_key == "night_buy_window"
-    assert today_night.unique_id == "entry-1_night_buy_window"
-    assert tomorrow_day.translation_key == "day_buy_next_window"
-    assert tomorrow_day.unique_id == "entry-1_day_buy_next_window"
-    assert morning_reference.translation_key == "morning_sell_buy_reference"
-    assert morning_reference.unique_id == "entry-1_morning_sell_buy_reference"
-
-
-@pytest.mark.unit
-def test_night_buy_window_sensor_shows_the_executing_plan_from_the_next_slot(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Before the 06:01 rotation tonight's plan is still in `next`; it is the active one."""
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 9, 2, 30, tzinfo=TZ))
-
-    sensor = _night_buy_sensor_from_manager(_COMPLETED_NIGHT, _TONIGHT)
-
-    assert sensor.native_value == "22:00-04:00"
-    assert sensor.extra_state_attributes["plan_date"] == "2026-05-09"
-    assert sensor.extra_state_attributes["is_active"] == "on"
-
-
-@pytest.mark.unit
-def test_night_buy_window_sensor_shows_the_completed_plan_outside_the_night(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    sensor = _night_buy_sensor_from_manager(_COMPLETED_NIGHT, _TONIGHT)
-
-    assert sensor.native_value == "23:00-05:00"
-    assert sensor.extra_state_attributes["plan_date"] == "2026-05-08"
-    assert sensor.extra_state_attributes["is_active"] == "off"
-
-
-@pytest.mark.unit
-def test_night_buy_window_sensor_sets_is_active_off_at_plan_end(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """At the end instant the window is over, even though rotation is still ahead."""
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 9, 4, 0, tzinfo=TZ))
-
-    sensor = _night_buy_sensor_from_manager(_COMPLETED_NIGHT, _TONIGHT)
-
-    assert sensor.native_value == "23:00-05:00"
-    assert sensor.extra_state_attributes["is_active"] == "off"
-
-
-@pytest.mark.unit
-def test_day_buy_window_sensor_sets_is_active_off_before_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 10, 59, tzinfo=TZ))
-
-    sensor = _day_buy_sensor(
-        _buy_payload_for_hours(8, {10: 0.80, 11: 0.30, 12: 0.20, 13: 0.60})
-    )
-
-    assert sensor.native_value == "11:00-13:00"
-    assert sensor.extra_state_attributes["is_active"] == "off"
-
-
-@pytest.mark.unit
-def test_next_buy_window_sensors_do_not_publish_is_active(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    tomorrow_day = _day_buy_tomorrow_sensor(
-        _buy_payload_for_hours(9, {10: 0.90, 11: 0.60, 12: -0.20, 13: 0.80})
-    )
-    coordinator = _coordinator_with_prices([], None, "sensor.buy")
-    coordinator.data["buy_window_plans"] = {
-        "night": {
-            "window": None,
-            "next": NightBuyWindowPlan(
-                datetime(2026, 5, 9, 1, 0, tzinfo=TZ), datetime(2026, 5, 9, 3, 0, tzinfo=TZ), 0.5
-            ).as_dict(),
-        },
-        "day": {},
-    }
-    tomorrow_night = NightBuyWindowTomorrowSensor(
-        coordinator, _mock_entry(), {CONF_BUY_PRICE_SENSOR: "sensor.buy"}
-    )
-    tomorrow_night.hass = MagicMock()
-
-    assert tomorrow_day.native_value == "11:00-13:00"
-    assert "is_active" not in tomorrow_day.extra_state_attributes
-    assert tomorrow_night.native_value == "01:00-03:00"
-    assert "is_active" not in tomorrow_night.extra_state_attributes
-
-
-@pytest.mark.unit
-def test_morning_sell_buy_reference_sensor_averages_restore_to_tariff_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.entities.sensors.pricing.resolve_morning_max_price_hour",
-        lambda hass, config, entry_id, default_hour=7: 7,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.entities.sensors.pricing.resolve_tariff_end_hour",
-        lambda hass, config, default_hour=13: 13,
-    )
-
-    sensor = _morning_sell_buy_reference_sensor(
-        _buy_payload_for_hours(
-            8,
-            {8: 0.30, 9: 0.40, 10: 0.50, 11: 0.20, 12: 0.10},
-        )
-    )
-
-    assert sensor.native_value == "08:00"
-    assert sensor.extra_state_attributes == {
-        "end": "13:00",
-        "duration_hours": 5,
-        "price": 0.3,
-        "is_negative": False,
-    }
-
-
-@pytest.mark.unit
-def test_morning_sell_buy_reference_sensor_is_unavailable_without_matching_hours(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.entities.sensors.pricing.resolve_morning_max_price_hour",
-        lambda hass, config, entry_id, default_hour=7: 7,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.entities.sensors.pricing.resolve_tariff_end_hour",
-        lambda hass, config, default_hour=13: 13,
-    )
-
-    sensor = _morning_sell_buy_reference_sensor(
-        _buy_payload_for_hours(8, {13: 0.30, 14: 0.40})
-    )
-
-    assert sensor.native_value is None
-    assert sensor.available is False
-    assert sensor.extra_state_attributes == {}
-
-
-@pytest.mark.unit
-def test_day_buy_window_sensor_publishes_expected_result_for_real_may_13_prices(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 13, 12, 0, tzinfo=TZ))
-
-    sensor = _day_buy_sensor(
-        [
-            {"time": "2026-05-13T00:00:00+02:00", "price": 0.833},
-            {"time": "2026-05-13T01:00:00+02:00", "price": 0.805},
-            {"time": "2026-05-13T02:00:00+02:00", "price": 0.787},
-            {"time": "2026-05-13T03:00:00+02:00", "price": 0.792},
-            {"time": "2026-05-13T04:00:00+02:00", "price": 0.805},
-            {"time": "2026-05-13T05:00:00+02:00", "price": 0.855},
-            {"time": "2026-05-13T06:00:00+02:00", "price": 1.327},
-            {"time": "2026-05-13T07:00:00+02:00", "price": 1.348},
-            {"time": "2026-05-13T08:00:00+02:00", "price": 1.279},
-            {"time": "2026-05-13T09:00:00+02:00", "price": 1.177},
-            {"time": "2026-05-13T10:00:00+02:00", "price": 1.095},
-            {"time": "2026-05-13T11:00:00+02:00", "price": 1.065},
-            {"time": "2026-05-13T12:00:00+02:00", "price": 1.057},
-            {"time": "2026-05-13T13:00:00+02:00", "price": 1.031},
-            {"time": "2026-05-13T14:00:00+02:00", "price": 1.02},
-            {"time": "2026-05-13T15:00:00+02:00", "price": 0.67},
-            {"time": "2026-05-13T16:00:00+02:00", "price": 0.758},
-            {"time": "2026-05-13T17:00:00+02:00", "price": 1.238},
-            {"time": "2026-05-13T18:00:00+02:00", "price": 1.344},
-            {"time": "2026-05-13T19:00:00+02:00", "price": 1.426},
-            {"time": "2026-05-13T20:00:00+02:00", "price": 1.475},
-            {"time": "2026-05-13T21:00:00+02:00", "price": 1.428},
-            {"time": "2026-05-13T22:00:00+02:00", "price": 0.938},
-            {"time": "2026-05-13T23:00:00+02:00", "price": 0.884},
-        ]
-    )
-
-    assert sensor.native_value == "15:00-17:00"
-    assert sensor.extra_state_attributes == {
-        "end": "17:00",
-        "duration_hours": 2,
-        "price": 0.714,
-        "is_negative": False,
-        "start_time": "2026-05-13T15:00:00+02:00",
-        "end_time": "2026-05-13T17:00:00+02:00",
-        "plan_date": "2026-05-13",
-        "is_active": "off",
-    }
-
-
-@pytest.mark.unit
-def test_existing_sell_window_sensor_behavior_is_unchanged_when_buy_payload_changes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from homeassistant.util import dt as dt_util
-
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2026, 5, 8, 12, 0, tzinfo=TZ))
-
-    coordinator = _coordinator_with_price_payloads(
-        {
-            "sensor.sell": {
-                "prices_today": _ranked_payload_for_hours(8, {4: 0.40, 5: 0.85, 6: 0.72, 7: 0.91})
-            },
-            "sensor.buy": {
-                "prices_today": _buy_payload_for_hours(8, {0: 0.50, 1: 0.10, 2: 0.20, 3: 0.80})
-            },
-        }
-    )
-    sell_sensor = MorningSellWindowSensor(
-        coordinator,
-        _mock_entry(),
-        {CONF_SELL_PRICE_SENSOR: "sensor.sell", CONF_BUY_PRICE_SENSOR: "sensor.buy"},
-    )
-    buy_sensor = NightBuyWindowSensor(
-        coordinator,
-        _mock_entry(),
-        {CONF_SELL_PRICE_SENSOR: "sensor.sell", CONF_BUY_PRICE_SENSOR: "sensor.buy"},
-    )
-    sell_sensor.hass = MagicMock()
-    buy_sensor.hass = MagicMock()
-
-    assert sell_sensor.native_value == "07:00"
-    assert buy_sensor.native_value is None
-
-    coordinator.data["price_payloads"]["sensor.buy"]["prices_today"] = _buy_payload_for_hours(
-        8,
-        {0: 0.90, 1: 0.80, 2: 0.10, 3: 0.20},
-    )
-
-    assert sell_sensor.native_value == "07:00"
-    assert sell_sensor.extra_state_attributes == {
-        "price": 0.91,
-        "second_window_start": "05:00",
-        "second_window_price": 0.85,
-        "second_window_gap_pct": 6.6,
-    }
-    assert buy_sensor.native_value is None
+    assert resolver.windows.call_count == 1
