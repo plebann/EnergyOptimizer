@@ -155,6 +155,7 @@ class EveningSellStrategy(BaseSellStrategy):
         details = {
             "window": self._current_window_label,
             "window_hour": self._current_window_hour,
+            "window_source": str(self._current_window.source),
             "evening_price": round(self.price, 2),
         }
         if self._tomorrow_morning_price is not None:
@@ -348,6 +349,7 @@ class EveningSellStrategy(BaseSellStrategy):
                 "evening_price": round(self.price, 2),
                 "tomorrow_morning_price": round(self._tomorrow_morning_price, 2),
                 "window": self._current_window_label,
+                "window_source": str(self._current_window.source),
             },
         )
 

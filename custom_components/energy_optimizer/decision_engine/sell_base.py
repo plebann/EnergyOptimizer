@@ -32,17 +32,17 @@ from ..controllers.inverter import (
     set_work_mode,
 )
 from ..helpers import get_float_state_info
-from ..market_windows import MarketWindowResolver, MarketWindows, ResolvedMarketWindow
+from ..market_windows import MarketWindowResolver, ResolvedMarketWindow
 from ..utils.decision_dump import record_input, record_step
 from ..utils.logging import DecisionOutcome, log_decision_unified
 from ..utils.time_window import build_hour_window
 from .common import (
     BatteryConfig,
+    MarketWindowReader,
     get_battery_config,
     get_required_current_soc_state,
     resolve_arbitrage_margin_gate,
     resolve_entry,
-    strategy_market_window_resolver,
 )
 
 if TYPE_CHECKING:
@@ -75,7 +75,7 @@ class SellRegulator:
     previous_value: float | None
 
 
-class BaseSellStrategy(ABC):
+class BaseSellStrategy(MarketWindowReader, ABC):
     """Template-method base for sell decision strategies."""
 
     def __init__(
@@ -92,7 +92,6 @@ class BaseSellStrategy(ABC):
         self._raw_margin = margin
         self._injected_resolver = resolver
 
-        self.windows: MarketWindows
         self.entry: ConfigEntry
         self.config: dict[str, Any]
         self.battery_config: BatteryConfig
@@ -122,13 +121,6 @@ class BaseSellStrategy(ABC):
     def clamp_surplus_to_pv(self) -> bool:
         """Whether to clamp surplus by today's PV production."""
         return False
-
-    @property
-    def _resolver(self) -> MarketWindowResolver:
-        """Return the injected resolver, else the entry's own."""
-        if self._injected_resolver is not None:
-            return self._injected_resolver
-        return strategy_market_window_resolver(self.hass, self._entry_id)
 
     @property
     @abstractmethod

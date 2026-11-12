@@ -18,7 +18,7 @@ from ..controllers.inverter import (
     set_program_soc,
 )
 from ..helpers import get_float_state_info
-from ..market_windows import MarketWindowResolver, MarketWindows
+from ..market_windows import MarketWindowResolver
 from ..utils.logging import log_decision_unified
 from ..utils.pv_forecast import get_pv_compensation_factor
 from .common import (
@@ -28,10 +28,10 @@ from .common import (
     ForecastData,
     calculate_charge_action,
     gather_forecasts,
+    MarketWindowReader,
     get_battery_config,
     get_required_current_soc_state,
     resolve_entry,
-    strategy_market_window_resolver,
 )
 
 if TYPE_CHECKING:
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
-class BaseChargeStrategy(ABC):
+class BaseChargeStrategy(MarketWindowReader, ABC):
     """Template-method base for charge decision strategies."""
 
     def __init__(
@@ -60,7 +60,6 @@ class BaseChargeStrategy(ABC):
         self._raw_margin = margin
         self._injected_resolver = resolver
 
-        self.windows: MarketWindows
         self.entry: ConfigEntry
         self.config: dict[str, Any]
         self.bc: BatteryConfig
@@ -73,13 +72,6 @@ class BaseChargeStrategy(ABC):
         self.pv_compensation_factor: float | None
         self._last_charge_write_error: str | None = None
         self._charge_failure_reported = False
-
-    @property
-    def _resolver(self) -> MarketWindowResolver:
-        """Return the injected resolver, else the entry's own."""
-        if self._injected_resolver is not None:
-            return self._injected_resolver
-        return strategy_market_window_resolver(self.hass, self._entry_id)
 
     @property
     @abstractmethod

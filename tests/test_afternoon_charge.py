@@ -6,9 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
-from tests.conftest import market_windows
-
 from custom_components.energy_optimizer.const import (
     CONF_BATTERY_CAPACITY_AH,
     CONF_BATTERY_EFFICIENCY,
@@ -28,6 +25,8 @@ from custom_components.energy_optimizer.decision_engine.afternoon_charge import 
     async_run_afternoon_charge,
 )
 from custom_components.energy_optimizer.decision_engine.common import ForecastData
+from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
+from tests.conftest import market_windows
 
 pytestmark = pytest.mark.enable_socket
 

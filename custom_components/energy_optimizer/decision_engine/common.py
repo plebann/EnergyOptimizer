@@ -49,6 +49,7 @@ from ..const import (
 from ..helpers import get_internal_window_price, get_required_float_state
 from ..market_windows import (
     MarketWindowResolver,
+    MarketWindows,
     MarketWindowSource,
     ResolvedMarketWindow,
     market_window_resolver,
@@ -612,17 +613,27 @@ def resolve_entry(hass: HomeAssistant, entry_id: str | None) -> ConfigEntry | No
     return entries[0]
 
 
-def strategy_market_window_resolver(
-    hass: HomeAssistant, entry_id: str | None
-) -> MarketWindowResolver:
-    """Return the Market Window Resolver of the entry a strategy runs for.
+class MarketWindowReader:
+    """Mixin for strategies that read one Market Window snapshot per run.
 
-    The strategy entry points validate the entry before building a strategy,
-    so the entry resolves here.
+    The injected resolver wins; otherwise the entry's own is used. The strategy
+    entry points validate the entry before building a strategy, so it resolves.
     """
-    entry = resolve_entry(hass, entry_id)
-    assert entry is not None
-    return market_window_resolver(hass, entry.entry_id)
+
+    hass: HomeAssistant
+    _entry_id: str | None
+    _injected_resolver: MarketWindowResolver | None
+    windows: MarketWindows
+
+    @property
+    def _resolver(self) -> MarketWindowResolver:
+        """Return the injected resolver, else the entry's own."""
+        if self._injected_resolver is not None:
+            return self._injected_resolver
+        entry = resolve_entry(self.hass, self._entry_id)
+        if entry is None:
+            raise ValueError("Market Window Resolver needs a valid config entry")
+        return market_window_resolver(self.hass, entry.entry_id)
 
 
 def get_entry_data(hass: HomeAssistant, entry_id: str) -> dict[str, Any] | None:

@@ -6,9 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
-from tests.conftest import market_windows
-
 from custom_components.energy_optimizer.const import (
     CONF_BATTERY_CAPACITY_AH,
     CONF_BATTERY_EFFICIENCY,
@@ -37,6 +34,11 @@ from custom_components.energy_optimizer.decision_engine.morning_charge import (
     _calculate_morning_arbitrage_kwh,
     async_run_morning_charge,
 )
+from custom_components.energy_optimizer.market_windows import (
+    MarketWindowSource,
+    StaticMarketWindowResolver,
+)
+from tests.conftest import market_windows
 
 pytestmark = pytest.mark.enable_socket
 
@@ -515,3 +517,32 @@ def test_resolve_arbitrage_margin_gate_rounds_price_details(_mock_internal):
     assert details["sell_price"] == 1.2
     assert details["buy_reference_price"] == 0.47
     assert details["arbitrage_margin"] == 0.73
+
+
+@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
+def test_legacy_buy_reference_wraps_the_helper_price(_mock_internal):
+    """The bridge carries the old helper's price with the legacy source."""
+    reference = legacy_buy_reference(
+        _arb_hass(day_buy_price=0.3),
+        entry_id="entry-1",
+        unique_id_suffix="day_buy_window",
+        entity_name="Day buy window",
+    )
+
+    assert reference.price == pytest.approx(0.3)
+    assert reference.source is MarketWindowSource.LEGACY_ENTITY
+
+
+@patch(_INTERNAL_SENSOR_PATCH, side_effect=_internal_sensor_id)
+def test_legacy_buy_reference_without_price_is_a_default_window(_mock_internal):
+    """A missing helper price becomes an unavailable Default Market Window."""
+    reference = legacy_buy_reference(
+        _arb_hass(day_buy_price=None),
+        entry_id="entry-1",
+        unique_id_suffix="day_buy_window",
+        entity_name="Day buy window",
+    )
+
+    assert reference.price is None
+    assert reference.source is MarketWindowSource.DEFAULT
+    assert reference.reason == "unavailable"

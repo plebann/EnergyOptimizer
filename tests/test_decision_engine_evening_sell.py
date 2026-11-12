@@ -102,7 +102,7 @@ def _windows(
             start=start,
             end=start + timedelta(hours=5),
             price=200.0,
-            source=MarketWindowSource.PRICES,
+            source=MarketWindowSource.PLAN,
         )
     secondary = (
         _hour_window(0, secondary_hour, secondary_price)
@@ -305,7 +305,7 @@ async def test_evening_sell_high_sell_action_type(monkeypatch: pytest.MonkeyPatc
 
     assert outcomes
     assert outcomes[-1].action_type == "high_sell"
-    assert outcomes[-1].details["buy_reference_source"] == "prices"
+    assert outcomes[-1].details["buy_reference_source"] == "plan"
 
 
 @pytest.mark.asyncio
@@ -358,7 +358,7 @@ async def test_evening_sell_uses_next_day_qualifying_buy_hour(
     assert outcomes[-1].details["sell_horizon_mode"] == "arbitrage"
     assert outcomes[-1].details["arbitrage_hour"] == 1
     assert outcomes[-1].details["buy_window_reference_price"] == 200.0
-    assert outcomes[-1].details["buy_window_reference_source"] == "prices"
+    assert outcomes[-1].details["buy_window_reference_source"] == "plan"
     assert outcomes[-1].details["buy_window_price_limit"] == 240.0
     assert outcomes[-1].history_windows == [["sr", 18, "next_h", 1, "arb_b", True]]
 
@@ -557,6 +557,7 @@ async def test_evening_sell_skips_when_tomorrow_morning_price_is_higher(
     assert outcomes
     assert outcomes[-1].action_type == "no_action"
     assert "not higher than tomorrow morning" in (outcomes[-1].reason or "").lower()
+    assert outcomes[-1].details["window_source"] == "prices"
     set_work_mode_mock.assert_not_awaited()
     set_program_soc_mock.assert_not_awaited()
     set_export_power_mock.assert_not_awaited()
@@ -937,6 +938,7 @@ async def test_evening_sell_second_window_early_exit_restores_active_sell(
 
     assert restore_mock.await_count == 1
     assert outcomes[-1].action_type == "sell_restore"
+    assert outcomes[-1].details["window_source"] == "prices"
 
 
 @pytest.mark.asyncio
@@ -983,6 +985,8 @@ async def test_evening_sell_second_window_zero_surplus_restores_active_sell(
 
     assert restore_mock.await_count == 1
     assert outcomes[-1].action_type == "sell_restore"
+    assert outcomes[-1].details["window_source"] == "prices"
+
 
 @pytest.mark.asyncio
 async def test_evening_sell_reads_one_snapshot_per_run(
