@@ -38,6 +38,7 @@ from custom_components.energy_optimizer.night_buy_window_manager import (
 )
 from custom_components.energy_optimizer.scheduler.action_scheduler import ActionScheduler
 from custom_components.energy_optimizer.sensor import async_setup_entry
+from tests.conftest import market_windows
 
 
 class _FakeScheduledActionsSink:
@@ -143,7 +144,14 @@ async def test_sensor_setup_registers_scheduled_actions_sensor() -> None:
     hass = MagicMock()
     coordinator = MagicMock()
     coordinator.data = {"states": {}}
-    hass.data = {DOMAIN: {"entry-1": {"coordinator": coordinator}}}
+    hass.data = {
+        DOMAIN: {
+            "entry-1": {
+                "coordinator": coordinator,
+                "market_windows": StaticMarketWindowResolver(market_windows()),
+            }
+        }
+    }
     entry = _mock_entry(data={})
     added_entities: list[object] = []
 
