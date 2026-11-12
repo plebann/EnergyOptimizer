@@ -854,17 +854,17 @@ class CoordinatorMarketWindowResolver:
 
     # --- entity reads -------------------------------------------------------
 
-    def _entity_state(self, config_key: str) -> object | None:
-        """Return the state of the entity configured under `config_key`, if it has one."""
+    def _entity_state(self, config_key: str) -> tuple[str | None, object | None]:
+        """Return the entity configured under `config_key` and its state, if it has one."""
         entity_id = self._entry.data.get(config_key)
         state = self._hass.states.get(str(entity_id)) if entity_id else None
         if state is None or state.state in _UNAVAILABLE_STATES:
-            return None
-        return state.state
+            return entity_id, None
+        return entity_id, state.state
 
     def _config_hour(self, config_key: str, *, lowest: int, highest: int) -> int | None:
         """Read an hour inside [lowest, highest] from the configured entity."""
-        raw_hour = self._entity_state(config_key)
+        _entity_id, raw_hour = self._entity_state(config_key)
         if raw_hour is None:
             return None
         hour = _parse_hour(raw_hour)
@@ -887,7 +887,7 @@ class CoordinatorMarketWindowResolver:
         keeps the entity's minutes and, for an `HH:MM-HH:MM` state, its end;
         otherwise a window lasts one hour.
         """
-        raw_time = self._entity_state(time_key)
+        entity_id, raw_time = self._entity_state(time_key)
         if raw_time is None:
             return None
         first, second = (raw_time, None) if whole_hour else _split_range(raw_time)
@@ -903,7 +903,7 @@ class CoordinatorMarketWindowResolver:
             if range_end is None:
                 _LOGGER.warning(
                     "Legacy time entity %s range %s has no readable end, window lasts one hour",
-                    self._entry.data.get(time_key),
+                    entity_id,
                     raw_time,
                 )
             elif datetime.combine(day, range_end, tzinfo=tz) > start:
@@ -912,14 +912,14 @@ class CoordinatorMarketWindowResolver:
                 _LOGGER.warning(
                     "Legacy time entity %s range %s ends at or before its start on the same "
                     "day, window lasts one hour",
-                    self._entry.data.get(time_key),
+                    entity_id,
                     raw_time,
                 )
         return start, end, self._legacy_price(price_key)
 
     def _legacy_price(self, price_key: str) -> float | None:
         """The legacy price entity's finite price, or None when it has none."""
-        raw_price = self._entity_state(price_key)
+        entity_id, raw_price = self._entity_state(price_key)
         try:
             price = float(raw_price) if raw_price is not None else None
         except (TypeError, ValueError):
@@ -928,7 +928,7 @@ class CoordinatorMarketWindowResolver:
             if raw_price is not None:
                 _LOGGER.warning(
                     "Legacy price entity %s has invalid value %s, window keeps no price",
-                    self._entry.data.get(price_key),
+                    entity_id,
                     raw_price,
                 )
             return None
