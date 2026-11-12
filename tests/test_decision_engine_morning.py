@@ -1,6 +1,7 @@
 """Tests for morning decision engine logic."""
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
@@ -44,8 +45,11 @@ from custom_components.energy_optimizer.decision_engine.common import (
     build_forecast_hour_window,
 )
 from custom_components.energy_optimizer.utils.pv_forecast import MorningPVForecast
-from custom_components.energy_optimizer.market_windows import StaticMarketWindowResolver
-from tests.conftest import market_windows
+from custom_components.energy_optimizer.market_windows import (
+    MarketWindows,
+    StaticMarketWindowResolver,
+)
+from tests.conftest import MARKET_WINDOWS_NOW, market_windows, window
 
 pytestmark = pytest.mark.enable_socket
 
@@ -72,7 +76,11 @@ def _state(value: str | tuple[str, dict[str, object]]) -> MagicMock:
     return state
 
 
-def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
+def _setup_hass(
+    config: dict[str, object],
+    states: dict[str, str],
+    windows: MarketWindows | None = None,
+) -> MagicMock:
     hass = MagicMock()
     entry = MagicMock()
     entry.entry_id = "entry-1"
@@ -101,70 +109,84 @@ def _setup_hass(config: dict[str, object], states: dict[str, str]) -> MagicMock:
             entry.entry_id: {
                 "last_optimization_sensor": mock_opt_sensor,
                 "optimization_history_sensor": mock_hist_sensor,
-                "market_windows": StaticMarketWindowResolver(market_windows()),
+                "market_windows": StaticMarketWindowResolver(windows or market_windows()),
             }
         }
     }
     return hass
 
 
-def test_morning_charge_uses_uncompensated_pv_forecast(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keep morning PV sufficiency aligned with morning sell."""
-    strategy = MorningChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
+def _strategy(windows: MarketWindows) -> MorningChargeStrategy:
+    strategy = MorningChargeStrategy(
+        MagicMock(),
+        entry_id="entry-1",
+        margin=None,
+        resolver=StaticMarketWindowResolver(windows),
+    )
     strategy.entry = MagicMock(entry_id="entry-1")
     strategy.config = {}
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_tariff_end_hour",
-        lambda *args, **kwargs: 13,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_night_buy_window_tomorrow_end_hour",
-        lambda *args, **kwargs: 5,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_day_buy_window_start_hour",
-        lambda *args, **kwargs: 12,
+    strategy.windows = windows
+    return strategy
+
+
+def test_morning_charge_uses_uncompensated_pv_forecast() -> None:
+    """Keep morning PV sufficiency aligned with morning sell."""
+    night = window(22, 5, 0.4)
+    strategy = _strategy(
+        market_windows(
+            night_buy=night,
+            day_buy_next=window(12, 14, 0.4, next_day=True),
+        )
     )
 
     assert strategy._resolve_forecast_params() == (
         5,
         12,
+        {
+            "compensate": False,
+            "use_morning_pv_fallback": True,
+            "start_at": night.end,
+        },
+    )
+
+
+def test_morning_charge_default_night_buy_window_has_no_horizon_start() -> None:
+    """A Default Night Buy Window gives the end hour but no `start_at`."""
+    windows = market_windows()
+    assert windows.night_buy.is_fallback
+    strategy = _strategy(windows)
+
+    assert strategy._resolve_forecast_params() == (
+        6,
+        13,
         {"compensate": False, "use_morning_pv_fallback": True},
     )
+    assert strategy._price_comparison["relation"] == "unavailable"
 
 
-def test_morning_charge_extends_horizon_when_night_buy_is_cheaper(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_morning_charge_day_buy_start_defaults_to_high_tariff_end_for_default_day_buy() -> None:
+    """A Default Day Buy Window starts the horizon at the High-Tariff end hour."""
+    strategy = _strategy(
+        market_windows(
+            night_buy=window(22, 6, 0.4),
+            high_tariff_end=replace(market_windows().high_tariff_end, hour=11),
+        )
+    )
+
+    assert strategy.windows.day_buy_for(strategy.windows.night_buy.plan_date).is_fallback
+    assert strategy._resolve_forecast_params()[1] == 11
+
+
+def test_morning_charge_extends_horizon_when_night_buy_is_cheaper() -> None:
     """A cheaper night plans the continuous horizon through the next night."""
-    strategy = MorningChargeStrategy(MagicMock(), entry_id="entry-1", margin=None)
-    strategy.entry = MagicMock(entry_id="entry-1")
-    strategy.config = {}
-    night_end = datetime(2026, 2, 7, 6, tzinfo=ZoneInfo("Europe/Warsaw"))
-    next_night_start = datetime(2026, 2, 7, 22, tzinfo=ZoneInfo("Europe/Warsaw"))
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_tariff_end_hour",
-        lambda *args, **kwargs: 13,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_night_buy_window_tomorrow_end_datetime",
-        lambda *args, **kwargs: night_end,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_night_buy_window_tomorrow_end_hour",
-        lambda *args, **kwargs: 6,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.get_internal_window_price",
-        lambda _hass, **kwargs: (
-            0.2 if kwargs["unique_id_suffix"] == "night_buy_next_window" else 0.5
-        ),
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge._resolve_next_night_start",
-        lambda *args, **kwargs: next_night_start,
+    night = window(22, 6, 0.2)
+    next_night = window(22, 6, 0.2, next_day=True)
+    strategy = _strategy(
+        market_windows(
+            night_buy=night,
+            night_buy_after=next_night,
+            day_buy_next=window(12, 14, 0.5, next_day=True),
+        )
     )
 
     assert strategy._resolve_forecast_params() == (
@@ -173,12 +195,28 @@ def test_morning_charge_extends_horizon_when_night_buy_is_cheaper(
         {
             "compensate": False,
             "use_morning_pv_fallback": True,
-            "start_at": night_end,
-            "end_at": next_night_start,
+            "start_at": night.end,
+            "end_at": next_night.start,
         },
     )
     assert strategy._extended_horizon is True
     assert strategy._extended_horizon_fallback is False
+
+
+def test_next_night_falls_back_to_following_midnight() -> None:
+    """Before the next price rotation, the forecast boundary is next midnight."""
+    night = window(22, 6, 0.2)
+    windows = market_windows(
+        night_buy=night,
+        day_buy_next=window(12, 14, 0.5, next_day=True),
+    )
+    assert windows.night_buy_after.is_fallback
+    strategy = _strategy(windows)
+
+    _, end_hour, kwargs = strategy._resolve_forecast_params()
+
+    assert kwargs["end_at"] == datetime(2026, 5, 10, 0, tzinfo=ZoneInfo("Europe/Warsaw"))
+    assert end_hour == 0
 
 
 @pytest.mark.parametrize(
@@ -190,7 +228,6 @@ def test_morning_charge_extends_horizon_when_night_buy_is_cheaper(
     ],
 )
 def test_morning_price_comparison_uses_strict_tolerance(
-    monkeypatch: pytest.MonkeyPatch,
     night_price: float,
     day_price: float,
     expected_relation: str,
@@ -200,18 +237,11 @@ def test_morning_price_comparison_uses_strict_tolerance(
         _resolve_morning_price_comparison,
     )
 
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.get_internal_window_price",
-        lambda _hass, **kwargs: (
-            night_price
-            if kwargs["unique_id_suffix"] == "night_buy_next_window"
-            else day_price
-        ),
-    )
     result = _resolve_morning_price_comparison(
-        MagicMock(),
-        entry_id="entry-1",
-        night_end=datetime(2026, 2, 7, 6, tzinfo=ZoneInfo("Europe/Warsaw")),
+        market_windows(
+            night_buy=window(22, 6, night_price),
+            day_buy_next=window(12, 14, day_price, next_day=True),
+        )
     )
 
     assert result["relation"] == expected_relation
@@ -227,58 +257,6 @@ def test_forecast_window_preserves_a_26_hour_absolute_span() -> None:
     assert len(window) == 26
     assert window[:2] == [0, 1]
     assert window[-2:] == [0, 1]
-
-
-def test_next_night_falls_back_to_following_midnight(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Before the next price rotation, the forecast boundary is next midnight."""
-    from custom_components.energy_optimizer.decision_engine.morning_charge import (
-        _resolve_next_night_start,
-    )
-
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.get_buy_price_payload",
-        lambda *args, **kwargs: None,
-    )
-    after = datetime(2026, 2, 7, 22, tzinfo=ZoneInfo("Europe/Warsaw"))
-
-    assert _resolve_next_night_start(
-        MagicMock(), {}, entry_id="entry-1", after=after
-    ) == datetime(2026, 2, 8, 0, tzinfo=ZoneInfo("Europe/Warsaw"))
-
-
-def test_next_night_prefers_combined_price_snapshot(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The combined coordinator snapshot is used before split price payloads."""
-    from custom_components.energy_optimizer.decision_engine.morning_charge import (
-        _resolve_next_night_start,
-    )
-    captured: dict[str, object] = {}
-    planned_start = datetime(2026, 2, 8, 1, tzinfo=ZoneInfo("Europe/Warsaw"))
-
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.get_buy_price_payload",
-        lambda *args, **kwargs: [{"time": "combined", "price": 1.0}],
-    )
-
-    def _build(prices, *args, **kwargs):
-        captured["prices"] = prices
-        return MagicMock(start=planned_start)
-
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.build_night_buy_window_plan",
-        _build,
-    )
-
-    result = _resolve_next_night_start(
-        MagicMock(), {}, entry_id="entry-1",
-        after=datetime(2026, 2, 7, 6, tzinfo=ZoneInfo("Europe/Warsaw")),
-    )
-
-    assert result == planned_start
-    assert captured["prices"] == [{"time": "combined", "price": 1.0}]
 
 
 @pytest.mark.asyncio
@@ -909,12 +887,8 @@ async def test_morning_below_min_with_sufficiency_uses_dynamic_floor(
     ), f"expected the dynamic floor min_soc_pv (15), got {observed_floor.get('value')}"
 
 
-@pytest.mark.asyncio
-async def test_morning_charge_uses_night_buy_window_duration_for_current_sizing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def _duration_states_and_config() -> tuple[dict[str, object], dict[str, str]]:
     from custom_components.energy_optimizer.const import CONF_TEST_MODE
-    from custom_components.energy_optimizer.decision_engine.common import ChargeAction
 
     config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
@@ -938,13 +912,29 @@ async def test_morning_charge_uses_night_buy_window_duration_for_current_sizing(
         "sensor.daily_load": "48",
         "sensor.tariff_end_hour": "13",
     }
-    hass = _setup_hass(config, states)
+    return config, states
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("night_buy", "expected_hours"),
+    [
+        (window(22, 2, 0.3), 4.0),
+        (market_windows().night_buy, 2.0),
+    ],
+    ids=["resolved-duration", "default-window-falls-back-to-2h"],
+)
+async def test_morning_charge_uses_night_buy_window_duration_for_current_sizing(
+    monkeypatch: pytest.MonkeyPatch,
+    night_buy,
+    expected_hours: float,
+) -> None:
+    from custom_components.energy_optimizer.decision_engine.common import ChargeAction
+
+    config, states = _duration_states_and_config()
+    hass = _setup_hass(config, states, market_windows(night_buy=night_buy))
     captured: dict[str, float] = {}
 
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.resolve_night_buy_window_tomorrow_duration_hours",
-        lambda *args, **kwargs: 4.0,
-    )
     monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.charge_base.calculate_charge_action",
         lambda bc, **kwargs: (
@@ -960,7 +950,52 @@ async def test_morning_charge_uses_night_buy_window_duration_for_current_sizing(
 
     await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
 
-    assert captured["target_charge_time_hours"] == pytest.approx(4.0)
+    assert captured["target_charge_time_hours"] == pytest.approx(expected_hours)
+
+
+@pytest.mark.parametrize(
+    ("night_buy", "expected_hours"),
+    [
+        # Run starts at 12:00 inside a window that ends at 14:00: remaining time.
+        (window(10, 14, 0.3), 2.0),
+        (window(11, 17, 0.3), 5.0),
+    ],
+)
+def test_morning_charge_sizes_current_by_remaining_time_inside_the_window(
+    night_buy, expected_hours: float
+) -> None:
+    strategy = _strategy(market_windows(night_buy=night_buy))
+    assert strategy.windows.now == MARKET_WINDOWS_NOW
+
+    assert strategy._resolve_charge_time_hours() == pytest.approx(expected_hours)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("night_buy", "expected_source"),
+    [(window(22, 6, 0.3), "prices"), (market_windows().night_buy, "default")],
+)
+async def test_morning_charge_schedules_completion_at_the_snapshot_night_buy_window(
+    _mock_charge_completion: AsyncMock,
+    night_buy,
+    expected_source: str,
+) -> None:
+    config, states = _duration_states_and_config()
+    hass = _setup_hass(config, states, market_windows(night_buy=night_buy))
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    _mock_charge_completion.assert_awaited_once()
+    kwargs = _mock_charge_completion.await_args.kwargs
+    assert kwargs["charge_type"] == "morning"
+    assert kwargs["complete_at"] == night_buy.end
+    assert kwargs["window_start"] == night_buy.start
+    assert kwargs["window_end"] == night_buy.end
+    opt_sensor = hass.data[DOMAIN]["entry-1"]["last_optimization_sensor"]
+    _, details = opt_sensor.log_optimization.call_args.args
+    assert details["window_start"] == night_buy.start.isoformat()
+    assert details["window_end"] == night_buy.end.isoformat()
+    assert details["window_source"] == expected_source
 
 
 @pytest.mark.asyncio
