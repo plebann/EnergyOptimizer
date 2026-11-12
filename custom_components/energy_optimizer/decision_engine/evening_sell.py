@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import logging
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import TYPE_CHECKING
 
 from homeassistant.util import dt as dt_util
@@ -219,11 +219,16 @@ class EveningSellStrategy(BaseSellStrategy):
             time((self._current_window_hour + 1) % 24),
             tzinfo=local_now.tzinfo,
         )
+        search_end = buy_window_reference.start
+        if buy_window_reference.is_fallback:
+            # A Default Night Buy Window is only a guess at tonight's start;
+            # the search has always run to the start hour of tomorrow instead.
+            search_end += timedelta(days=1)
         arbitrage = find_first_arbitrage_buy_hour(
             prices,
             str(self.config[CONF_BUY_PRICE_SENSOR]),
             start_local=search_start,
-            end_local=buy_window_reference.start,
+            end_local=search_end,
             sell_price=self.price,
             min_arbitrage_margin=self.threshold_price,
             max_buy_price=buy_window_price_limit,

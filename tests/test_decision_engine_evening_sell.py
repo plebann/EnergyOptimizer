@@ -1010,3 +1010,38 @@ async def test_evening_sell_reads_one_snapshot_per_run(
 
     assert resolver.windows.call_count == 1
     assert strategy.windows == _windows()
+
+
+@pytest.mark.asyncio
+async def test_evening_sell_default_night_buy_searches_to_tomorrows_start_hour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a resolved Night Buy Window the search runs to tomorrow's start hour."""
+    config = _base_config()
+    config[CONF_BUY_PRICE_SENSOR] = "sensor.buy_price"
+    hass = _setup_hass(
+        config, _base_states(), windows=_windows(night_buy=_default_night_buy())
+    )
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+    monkeypatch.setattr(f"{EVENING}.dt_util.as_local", lambda _dt: _NOW)
+    monkeypatch.setattr(f"{EVENING}.get_buy_price_payload", lambda *args, **kwargs: [{}])
+    bounds: dict[str, object] = {}
+
+    def _find(_prices, _entity_id, **kwargs):
+        bounds["end"] = kwargs["end_local"]
+        return ArbitrageBuyHourResult(None, None, None, "margin_not_reached")
+
+    monkeypatch.setattr(f"{EVENING}.find_first_arbitrage_buy_hour", _find)
+    monkeypatch.setattr(f"{EVENING}.get_heat_pump_forecast_window", AsyncMock(return_value=(1.0, {})))
+    monkeypatch.setattr(f"{EVENING}.get_pv_forecast_window", lambda *args, **kwargs: (2.0, {}))
+    monkeypatch.setattr(f"{EVENING}.calculate_losses", lambda *args, **kwargs: (0.0, 0.0))
+    monkeypatch.setattr(f"{EVENING}.calculate_battery_reserve", lambda *args, **kwargs: 10.0)
+    monkeypatch.setattr(
+        f"{EVENING}.calculate_sufficiency_window",
+        lambda **kwargs: (9.0, 8.0, 1.0, 13, False),
+    )
+
+    await async_run_evening_sell(hass, entry_id="entry-1", margin=1.0)
+
+    assert bounds["end"] == datetime(2026, 2, 25, 22, tzinfo=_NOW.tzinfo)
