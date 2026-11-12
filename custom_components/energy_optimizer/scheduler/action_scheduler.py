@@ -483,13 +483,19 @@ class ActionScheduler:
         self._schedule_morning_charge()
 
     def _handle_coordinator_update(self) -> None:
-        """Reschedule Morning Charge when a persisted plan is created or changed."""
+        """Reschedule the charges when a persisted plan is created or changed.
+
+        Afternoon Charge is rescheduled here as well as on `day_buy_window`
+        state changes: a plan created after startup must restore the listener
+        even when that sensor entity is disabled and emits no event.
+        """
         if (
             self._charge_completion_restore_task is not None
             and not self._charge_completion_restore_task.done()
         ):
             return
         self._schedule_morning_charge()
+        self._schedule_afternoon_charge()
 
     async def _handle_night_buy_window_rotation(self, now: datetime) -> None:
         """Rotate persisted night plans at 06:01 even without a source update."""

@@ -578,6 +578,42 @@ def test_schedule_afternoon_charge_is_skipped_without_a_day_buy_window(
     scheduler._publish_schedule_snapshot.assert_called_once()
 
 
+def test_coordinator_update_restores_afternoon_charge_once_a_day_plan_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A plan created after startup restores the listener without a sensor event."""
+    hass = MagicMock()
+    entry = _mock_entry(data={})
+    manager = _manager_with_day_plan(hass, entry, None)
+    hass.data = {DOMAIN: {"entry-1": {"buy_window_manager": manager}}}
+    coordinator = MagicMock()
+    coordinator.get_morning_charge_start.return_value = None
+
+    captured_hours: list[int] = []
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.resolve_tariff_start_hour",
+        lambda hass, config: 15,
+    )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_time_change",
+        lambda _hass, _callback, *, hour, minute, second: captured_hours.append(hour)
+        or (lambda: None),
+    )
+
+    scheduler = ActionScheduler(hass, entry, coordinator)
+    scheduler._publish_schedule_snapshot = MagicMock()
+    scheduler._schedule_afternoon_charge()
+    assert captured_hours == []
+
+    start = dt_util.now().replace(hour=13, minute=0, second=0, microsecond=0)
+    manager._day_current = NightBuyWindowPlan(start, start + timedelta(hours=2), 0.5)
+
+    scheduler._handle_coordinator_update()
+
+    assert captured_hours == [13]
+    assert scheduler._afternoon_listener is not None
+
+
 def test_schedule_snapshot_lists_afternoon_charge_only_with_a_day_buy_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
