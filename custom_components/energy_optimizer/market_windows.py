@@ -421,19 +421,18 @@ def _ranked(spans: _RankedSpans, source: MarketWindowSource) -> RankedMarketWind
     )
 
 
-def _parse_range_end(state_value: object) -> time | None:
-    """Return the end time of an `HH:MM-HH:MM` entity state, if it is one."""
+def _split_range(state_value: object) -> tuple[str, str | None]:
+    """Split an `HH:MM-HH:MM` entity state into its two times; else (state, None)."""
     raw_value = str(state_value)
     if not _TIME_RANGE.match(raw_value):
-        return None
-    return dt_util.parse_time(raw_value.split("-", 1)[1].strip())
+        return raw_value, None
+    first, second = raw_value.split("-", 1)
+    return first.strip(), second.strip()
 
 
 def _parse_clock(state_value: object) -> time | None:
-    """Parse a wall time from a datetime, time or `HH:MM-HH:MM` range entity state."""
+    """Parse a wall time from a datetime or time entity state."""
     raw_value = str(state_value)
-    if _TIME_RANGE.match(raw_value):
-        raw_value = raw_value.split("-", 1)[0].strip()
     dt_value = dt_util.parse_datetime(raw_value)
     if dt_value is not None:
         return dt_util.as_local(dt_value).time()
@@ -441,10 +440,10 @@ def _parse_clock(state_value: object) -> time | None:
 
 
 def _parse_hour_number(state_value: object) -> int:
-    """Parse a whole hour from a numeric entity state."""
+    """Parse a whole hour (0-24) from a numeric entity state."""
     value = float(str(state_value))
-    if not isfinite(value):
-        raise ValueError(f"hour {state_value!r} is not finite")
+    if not isfinite(value) or not 0 <= value < 25:
+        raise ValueError(f"hour {state_value!r} is not a clock hour")
     return int(value)
 
 
@@ -891,16 +890,25 @@ class CoordinatorMarketWindowResolver:
         raw_time = self._entity_state(time_key)
         if raw_time is None:
             return None
-        clock = _parse_clock(raw_time)
+        first, second = _split_range(raw_time)
+        clock = _parse_clock(first)
         if clock is None:
-            clock = time(_parse_hour_number(raw_time))
+            clock = time(_parse_hour_number(first))
         if whole_hour:
             clock = time(clock.hour)
         start = datetime.combine(day, clock, tzinfo=tz)
         end = start + timedelta(hours=1)
-        range_end = None if whole_hour else _parse_range_end(raw_time)
-        if range_end is not None and datetime.combine(day, range_end, tzinfo=tz) > start:
-            end = datetime.combine(day, range_end, tzinfo=tz)
+        if second is not None and not whole_hour:
+            range_end = dt_util.parse_time(second)
+            if range_end is not None and datetime.combine(day, range_end, tzinfo=tz) > start:
+                end = datetime.combine(day, range_end, tzinfo=tz)
+            else:
+                _LOGGER.warning(
+                    "Legacy time entity %s range %s does not end after its start, "
+                    "window lasts one hour",
+                    self._entry.data.get(time_key),
+                    raw_time,
+                )
         return start, end, self._legacy_price(price_key)
 
     def _legacy_price(self, price_key: str) -> float | None:
