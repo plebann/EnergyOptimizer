@@ -59,6 +59,11 @@ class EnergyOptimizerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "buy_window_manager"
         ] = self._night_buy_window_manager
 
+    @property
+    def buy_window_manager(self) -> NightBuyWindowPlanManager:
+        """Return the plan manager the Market Window Resolver reads plans from."""
+        return self._night_buy_window_manager
+
     async def async_restore_night_buy_window_plans(self) -> None:
         """Restore only validated persisted night-window plans."""
         await self._night_buy_window_manager.async_restore()
