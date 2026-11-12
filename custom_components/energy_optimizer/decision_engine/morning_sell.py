@@ -278,6 +278,10 @@ class MorningSellStrategy(BaseSellStrategy):
         start_hour = (self._now_hour + 1) % 24
         day_buy = self.windows.day_buy
         base_end_hour = day_buy.start_hour_or(self.windows.high_tariff_end.hour)
+        # A Default Day Buy Window falls back to the High-Tariff end hour.
+        demand_end_source = str(
+            self.windows.high_tariff_end.source if day_buy.is_fallback else day_buy.source
+        )
         sell_hour = self._resolve_sell_hour()
         sell_window_end_hour = (sell_hour + 1) % 24
         horizon_details: dict[str, object] = {
@@ -287,6 +291,9 @@ class MorningSellStrategy(BaseSellStrategy):
             "arbitrage_hour": None,
             "buy_window_reference_price": None,
             "buy_window_price_limit": None,
+            "morning_price_source": str(self.windows.morning_sell.primary.source),
+            "evening_price_source": str(self.windows.evening_sell.primary.source),
+            "demand_end_source": demand_end_source,
         }
 
         hourly_usage = build_hourly_usage_array(
@@ -431,6 +438,7 @@ class MorningSellStrategy(BaseSellStrategy):
                 )
         self._regulator_diagnostics = {
             "sell_hour": sell_hour,
+            "sell_hour_source": str(self.windows.morning_sell.primary.source),
             "hourly_pv_kwh": round(hourly_pv_kwh, 3),
             "hourly_demand_kwh": round(hourly_demand_kwh, 3),
             "pv_coverage_margin": coverage_margin,
@@ -460,10 +468,11 @@ class MorningSellStrategy(BaseSellStrategy):
                 for hour in base_window
             }
             _LOGGER.debug(
-                "Morning sell base input window %02d:00-%02d:00 | hours=%d | "
+                "Morning sell base input window %02d:00-%02d:00 (end source %s) | hours=%d | "
                 "usage_kwh=%.3f heat_pump_kwh=%.3f pv_forecast_kwh=%.3f losses_hourly_kwh=%.3f losses_kwh=%.3f margin=%.3f",
                 start_hour,
                 base_end_hour,
+                demand_end_source,
                 base_hours,
                 base_usage_kwh,
                 base_heat_pump_kwh,

@@ -1,6 +1,7 @@
 """Tests for morning sell decision engine logic."""
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -1296,3 +1297,49 @@ async def test_morning_sell_arbitrage_margin_fails_closed_without_reference_pric
     assert details["arbitrage_reason"] == "missing_buy_reference_price"
     assert details["buy_reference_source"] == "default"
     assert details["sell_horizon_mode"] == "sunset_overflow"
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_records_the_source_of_each_window_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    defaults = default_market_windows(MARKET_WINDOWS_NOW)
+    hass = _setup_hass(
+        _base_config(),
+        _base_states(),
+        morning_sell=RankedMarketWindow(
+            replace(window(7, 8, price=250.0), source=MarketWindowSource.LEGACY_ENTITY),
+            None,
+        ),
+        evening_sell=defaults.evening_sell,
+        day_buy=defaults.day_buy,
+        high_tariff_end=ResolvedHour(13, MarketWindowSource.CONFIG_ENTITY),
+    )
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+    _patch_forecasts(monkeypatch, sufficiency=(3.0, 2.0, 1.0, 13, False))
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    details = outcomes[-1].details
+    assert details["morning_price_source"] == "legacy_entity"
+    assert details["evening_price_source"] == "default"
+    # A Default Day Buy Window falls back to the High-Tariff end for the demand end.
+    assert details["demand_end_source"] == "config_entity"
+
+
+@pytest.mark.asyncio
+async def test_morning_sell_demand_end_source_is_the_day_buy_window_when_resolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = _setup_hass(_base_config(), _base_states())
+    outcomes: list = []
+    _patch_common(monkeypatch, outcomes)
+    _patch_forecasts(monkeypatch, sufficiency=(3.0, 2.0, 1.0, 13, False))
+
+    await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
+
+    details = outcomes[-1].details
+    assert details["morning_price_source"] == "prices"
+    assert details["evening_price_source"] == "prices"
+    assert details["demand_end_source"] == "prices"
