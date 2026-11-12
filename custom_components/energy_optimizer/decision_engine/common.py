@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -46,11 +46,10 @@ from ..const import (
     DEFAULT_MIN_SOC_PV,
     DOMAIN,
 )
-from ..helpers import get_internal_window_price, get_required_float_state
+from ..helpers import get_required_float_state
 from ..market_windows import (
     MarketWindowResolver,
     MarketWindows,
-    MarketWindowSource,
     ResolvedMarketWindow,
     market_window_resolver,
 )
@@ -307,46 +306,6 @@ def compute_sufficiency(
             sufficiency_reached=False,
         )
     return result
-
-
-def legacy_buy_reference(
-    hass: HomeAssistant,
-    *,
-    entry_id: str,
-    unique_id_suffix: str,
-    entity_name: str,
-    fallback_entity_id: str | None = None,
-) -> ResolvedMarketWindow:
-    """Wrap a price read through the old helpers as an Arbitrage Buy Reference.
-
-    Bridge for the charge flows that have not moved to the Market Window
-    snapshot yet: only the price is real, the endpoints are a placeholder hour
-    at now and the source is LEGACY_ENTITY (DEFAULT when the price is missing).
-    """
-    price = get_internal_window_price(
-        hass,
-        entry_id=entry_id,
-        unique_id_suffix=unique_id_suffix,
-        entity_name=entity_name,
-        attribute_name="price",
-        fallback_entity_id=fallback_entity_id,
-    )
-    start = dt_util.now()
-    end = start + timedelta(hours=1)
-    if price is None:
-        return ResolvedMarketWindow(
-            start=start,
-            end=end,
-            price=None,
-            source=MarketWindowSource.DEFAULT,
-            reason="unavailable",
-        )
-    return ResolvedMarketWindow(
-        start=start,
-        end=end,
-        price=price,
-        source=MarketWindowSource.LEGACY_ENTITY,
-    )
 
 
 def resolve_arbitrage_margin_gate(
