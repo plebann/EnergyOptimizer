@@ -906,16 +906,18 @@ def test_build_best_buy_window_result_night_stops_on_missing_boundary_hour() -> 
 
 
 @pytest.mark.unit
-def test_build_best_buy_window_result_breaks_day_ties_by_closest_to_thirteen_then_earlier() -> None:
+def test_build_best_buy_window_result_breaks_day_ties_by_earlier_start() -> None:
+    # 10:00-12:00 and 13:00-15:00 both average 0.50; the former closest-to-13:00
+    # rule picked 13:00, the earlier-start rule picks 10:00.
     result = build_best_buy_window_result(
         _buy_payload_for_hours(
             {
-                10: 0.90,
-                11: 0.80,
-                12: 0.40,
+                10: 0.40,
+                11: 0.60,
+                12: 0.90,
                 13: 0.60,
-                14: 0.60,
-                15: 0.40,
+                14: 0.40,
+                15: 0.90,
             }
         ),
         ENTITY_ID,
@@ -926,7 +928,8 @@ def test_build_best_buy_window_result_breaks_day_ties_by_closest_to_thirteen_the
     )
 
     assert result is not None
-    assert result.start_local == datetime(2026, 5, 8, 12, 0, tzinfo=TZ)
+    assert result.start_local == datetime(2026, 5, 8, 10, 0, tzinfo=TZ)
+    assert result.end_local == datetime(2026, 5, 8, 12, 0, tzinfo=TZ)
     assert result.average_price == pytest.approx(0.5)
 
 

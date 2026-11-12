@@ -25,6 +25,7 @@ from .night_buy_window import (
     night_buy_window_store,
 )
 from .calculations.price_windows import build_best_buy_window_result
+from .helpers import resolve_tariff_end_hour, resolve_tariff_start_hour
 from homeassistant.helpers.storage import Store
 
 if TYPE_CHECKING:
@@ -122,17 +123,30 @@ class NightBuyWindowPlanManager:
             "executed_start_time": self._executed_start,
         }
 
-    @staticmethod
     def _day_plan(
+        self,
         prices: list[dict[str, Any]],
         entity_id: str,
         *,
         plan_date: date,
         local_tz: Any,
     ) -> NightBuyWindowPlan | None:
-        start = datetime.combine(plan_date, time(9), tzinfo=local_tz)
-        end = datetime.combine(plan_date, time(17), tzinfo=local_tz)
-        expected_hours = set(range(9, 17))
+        """Plan the Day Buy Window inside the low-tariff range.
+
+        The range runs from the high-tariff end hour to the high-tariff start
+        hour as the configured sensors report them now; a plan for tomorrow
+        therefore uses today's hours.
+        """
+        range_start_hour = resolve_tariff_end_hour(self.hass, self.entry.data)
+        range_end_hour = resolve_tariff_start_hour(self.hass, self.entry.data)
+        if range_end_hour - range_start_hour < 2:
+            _LOGGER.warning(
+                "Day buy window range %02d:00-%02d:00 is shorter than two hours, no day plan",
+                range_start_hour,
+                range_end_hour,
+            )
+            return None
+        expected_hours = set(range(range_start_hour, range_end_hour))
         entries_by_hour: dict[int, dict[str, Any]] = {}
         for raw in prices:
             if not isinstance(raw, dict):
@@ -164,8 +178,8 @@ class NightBuyWindowPlanManager:
             prices,
             entity_id,
             range_key="day",
-            range_start_hour=9,
-            range_end_hour=17,
+            range_start_hour=range_start_hour,
+            range_end_hour=range_end_hour,
             now_local=datetime.combine(plan_date, time(12), tzinfo=local_tz),
         )
         if result is None:

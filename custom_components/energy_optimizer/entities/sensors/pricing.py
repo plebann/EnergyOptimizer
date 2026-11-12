@@ -87,6 +87,14 @@ class MinArbitrageMarginSensor(_PriceValueSensor):
         return round(float(configured or 0.0), 3)
 
 
+def _local_now() -> datetime:
+    """Return the tz-aware local time used to judge whether a window is active."""
+    now_local = dt_util.now()
+    if now_local.tzinfo is None:
+        now_local = now_local.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+    return now_local
+
+
 class _BuyWindowBaseSensor(EnergyOptimizerSensor):
     """Base sensor for derived buy-price windows."""
 
@@ -99,6 +107,7 @@ class _BuyWindowBaseSensor(EnergyOptimizerSensor):
     _display_window_range: bool = True
     _include_timestamps: bool = True
     _include_plan_date: bool = False
+    _include_is_active: bool = False
 
     def __init__(self, coordinator, config_entry, config) -> None:
         """Initialize the sensor with the current coordinator snapshot."""
@@ -163,6 +172,11 @@ class _BuyWindowBaseSensor(EnergyOptimizerSensor):
         if self._include_timestamps:
             self._attr_extra_state_attributes["start_time"] = result.start_local.isoformat()
             self._attr_extra_state_attributes["end_time"] = result.end_local.isoformat()
+        if self._include_is_active:
+            now_local = _local_now()
+            self._attr_extra_state_attributes["is_active"] = (
+                "on" if result.start_local <= now_local < result.end_local else "off"
+            )
 
     @property
     def available(self) -> bool:
@@ -191,13 +205,18 @@ class NightBuyWindowSensor(_BuyWindowBaseSensor):
     """Sensor publishing the current or most recently completed night plan."""
 
     _include_plan_date = True
+    _include_is_active = True
     _attr_translation_key = "night_buy_window"
     _attr_unique_id = "night_buy_window"
     _payload_key = "prices_today"
     _range_key = "night"
 
     def _get_result(self) -> BuyWindowResult | None:
-        """Return the active plan before rotation, otherwise the completed plan."""
+        """Return the executing plan from either slot, otherwise the completed plan.
+
+        Tonight's plan stays in the ``next`` slot until the 06:01 rotation, so
+        while it executes the ``window`` slot still holds the previous night.
+        """
         plans = (
             self.coordinator.data.get("buy_window_plans")
             or self.coordinator.data.get("night_buy_window_plans")
@@ -206,8 +225,13 @@ class NightBuyWindowSensor(_BuyWindowBaseSensor):
         )
         if not isinstance(plans, dict):
             return None
-        raw_plan = plans.get("night", {}).get("window")
-        return _night_plan_to_result(raw_plan)
+        night = plans.get("night", {})
+        now_local = _local_now()
+        for slot in ("window", "next"):
+            result = _night_plan_to_result(night.get(slot))
+            if result is not None and result.start_local <= now_local < result.end_local:
+                return result
+        return _night_plan_to_result(night.get("window"))
 
 
 class NightBuyWindowTomorrowSensor(_BuyWindowBaseSensor):
@@ -275,6 +299,7 @@ class DayBuyWindowSensor(_BuyWindowBaseSensor):
     """Sensor publishing the persisted current day buy plan."""
 
     _include_plan_date = True
+    _include_is_active = True
     _attr_translation_key = "day_buy_window"
     _attr_unique_id = "day_buy_window"
     _payload_key = "prices_today"

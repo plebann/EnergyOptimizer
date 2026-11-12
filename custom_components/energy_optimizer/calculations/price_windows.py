@@ -526,16 +526,10 @@ def build_best_buy_window_result(
             ),
         )
     elif range_key == "day":
-        range_anchor = datetime.combine(
-            reference_now.date(),
-            time(13, 0),
-            tzinfo=reference_now.tzinfo,
-        )
         seed = min(
             candidates,
             key=lambda candidate: (
                 candidate.average_price,
-                abs((candidate.start_local - range_anchor).total_seconds()),
                 candidate.start_local,
             ),
         )

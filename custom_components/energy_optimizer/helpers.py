@@ -98,6 +98,17 @@ def get_plan_for_today(hass: HomeAssistant, *, entry_id: str, kind: Literal["nig
     return _buy_plan_for_relative_day(hass, entry_id=entry_id, kind=kind)
 
 
+def day_buy_window_missing_for_today(hass: HomeAssistant, *, entry_id: str) -> bool:
+    """Return True when the plan manager is active but today has no Day Buy Window.
+
+    Without a plan Afternoon Charge has no window inside the low-tariff range,
+    so callers skip it instead of charging at fallback hours.
+    """
+    if _buy_window_manager(hass, entry_id) is None:
+        return False
+    return get_plan_for_today(hass, entry_id=entry_id, kind="day") is None
+
+
 def get_active_night_plan(hass: HomeAssistant, *, entry_id: str):
     """Return the night plan that has not ended yet, whichever slot holds it.
 
