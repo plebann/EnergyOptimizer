@@ -408,10 +408,6 @@ def _resolve(
     return default(reason)
 
 
-def _hour(hour: int, source: MarketWindowSource) -> ResolvedHour:
-    return ResolvedHour(hour, source)
-
-
 def _window(span: _Span, source: MarketWindowSource) -> ResolvedMarketWindow:
     start, end, price = span
     return ResolvedMarketWindow(start=start, end=end, price=price, source=source)
@@ -436,10 +432,15 @@ def _parse_clock(state_value: object) -> time | None:
     return dt_util.parse_time(raw_value)
 
 
+def _parse_hour_number(state_value: object) -> int:
+    """Parse a whole hour from a numeric entity state."""
+    return int(float(str(state_value)))
+
+
 def _parse_hour(state_value: object) -> int:
     """Parse an hour from a datetime, time or numeric entity state."""
     clock = _parse_clock(state_value)
-    return clock.hour if clock is not None else int(float(str(state_value)))
+    return clock.hour if clock is not None else _parse_hour_number(state_value)
 
 
 def _plan_span(plan: NightBuyWindowPlan | None) -> _Span | None:
@@ -582,6 +583,7 @@ class CoordinatorMarketWindowResolver:
             current = current.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
         tz = current.tzinfo
         today = current.date()
+        tomorrow = today + timedelta(days=1)
         tomorrow_local = current + timedelta(days=1)
         buy_entity = str(self._entry.data.get(CONF_BUY_PRICE_SENSOR))
         sell_entity = str(self._entry.data.get(CONF_SELL_PRICE_SENSOR))
@@ -665,7 +667,9 @@ class CoordinatorMarketWindowResolver:
             sell_entity,
             MORNING_SELL_RANGE_HOURS,
             current,
-            default_hour=DEFAULT_MORNING_SELL_HOUR,
+            default=lambda reason: _default_ranked(
+                today, DEFAULT_MORNING_SELL_HOUR, tz, reason=reason
+            ),
             legacy=lambda: self._legacy_ranked(
                 today, tz, CONF_MORNING_MAX_PRICE_HOUR_SENSOR, CONF_MORNING_MAX_PRICE_SENSOR
             ),
@@ -705,14 +709,18 @@ class CoordinatorMarketWindowResolver:
                 sell_entity,
                 MORNING_SELL_RANGE_HOURS,
                 tomorrow_local,
-                default_hour=DEFAULT_MORNING_SELL_HOUR,
+                default=lambda reason: _default_ranked(
+                    tomorrow, DEFAULT_MORNING_SELL_HOUR, tz, reason=reason
+                ),
             ),
             evening_sell=self._ranked_sell(
                 sell_today,
                 sell_entity,
                 EVENING_SELL_RANGE_HOURS,
                 current,
-                default_hour=DEFAULT_EVENING_SELL_HOUR,
+                default=lambda reason: _default_ranked(
+                    today, DEFAULT_EVENING_SELL_HOUR, tz, reason=reason
+                ),
                 legacy=lambda: self._legacy_ranked(
                     today,
                     tz,
@@ -727,7 +735,9 @@ class CoordinatorMarketWindowResolver:
                 sell_entity,
                 EVENING_SELL_RANGE_HOURS,
                 tomorrow_local,
-                default_hour=DEFAULT_EVENING_SELL_HOUR,
+                default=lambda reason: _default_ranked(
+                    tomorrow, DEFAULT_EVENING_SELL_HOUR, tz, reason=reason
+                ),
             ),
             consume=self._consume(
                 sell_today,
@@ -756,7 +766,7 @@ class CoordinatorMarketWindowResolver:
                     lambda: self._config_hour(config_key, lowest=lowest, highest=highest),
                 )
             ],
-            build=_hour,
+            build=ResolvedHour,
             default=lambda _reason: ResolvedHour(default, MarketWindowSource.DEFAULT),
             name=name,
         )
@@ -783,10 +793,10 @@ class CoordinatorMarketWindowResolver:
         hours: tuple[int, int],
         now_local: datetime,
         *,
-        default_hour: int,
+        default: Callable[[DefaultReason], RankedMarketWindow],
         legacy: Callable[[], _RankedSpans | None] | None = None,
     ) -> RankedMarketWindow:
-        """Ranked sell window: the price payload, the legacy entities, else the default."""
+        """Sell Window Ranking: the price payload, the legacy entities, else the default."""
         chain: list[tuple[MarketWindowSource, Callable[[], _RankedSpans | None]]] = [
             (
                 MarketWindowSource.PRICES,
@@ -795,14 +805,7 @@ class CoordinatorMarketWindowResolver:
         ]
         if legacy is not None:
             chain.append((MarketWindowSource.LEGACY_ENTITY, legacy))
-        return _resolve(
-            chain,
-            build=_ranked,
-            default=lambda reason: _default_ranked(
-                now_local.date(), default_hour, now_local.tzinfo, reason=reason
-            ),
-            name="ranked sell window",
-        )
+        return _resolve(chain, build=_ranked, default=default, name="Sell Window Ranking")
 
     def _consume(
         self,
@@ -858,9 +861,9 @@ class CoordinatorMarketWindowResolver:
         if raw_time is None:
             return None
         clock = _parse_clock(raw_time)
-        start = datetime.combine(
-            day, clock if clock is not None else time(_parse_hour(raw_time)), tzinfo=tz
-        )
+        if clock is None:
+            clock = time(_parse_hour_number(raw_time))
+        start = datetime.combine(day, clock, tzinfo=tz)
         return start, start + timedelta(hours=1), self._legacy_price(price_key)
 
     def _legacy_price(self, price_key: str) -> float | None:
