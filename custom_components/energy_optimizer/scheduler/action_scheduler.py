@@ -438,7 +438,16 @@ class ActionScheduler:
 
     async def _handle_tariff_start_change(self, event) -> None:
         """Reschedule the actions of the windows a tariff start change moved."""
+        if self._completion_restore_pending():
+            return
         self._reschedule_changed_windows()
+
+    def _completion_restore_pending(self) -> bool:
+        """Return True while completions are restoring; the restore applies deferred changes."""
+        return (
+            self._charge_completion_restore_task is not None
+            and not self._charge_completion_restore_task.done()
+        )
 
     def _handle_coordinator_update(self) -> None:
         """Reschedule Morning Charge, and the actions whose window changed.
@@ -446,10 +455,7 @@ class ActionScheduler:
         Morning Charge follows the coordinator's claim-aware start, which can
         change without any window changing.
         """
-        if (
-            self._charge_completion_restore_task is not None
-            and not self._charge_completion_restore_task.done()
-        ):
+        if self._completion_restore_pending():
             return
         self._reschedule_changed_windows("_schedule_morning_charge")
 

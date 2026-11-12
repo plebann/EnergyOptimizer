@@ -973,3 +973,26 @@ def test_pending_completion_keeps_its_own_source_label() -> None:
         a for a in sink.snapshot["actions"] if a["key"] == "morning_charge_completion"
     )
     assert completion["source"] == "morning_buy_window_end"
+
+
+@pytest.mark.asyncio
+async def test_tariff_change_during_completion_restore_does_not_plan_morning_charge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tariff event waits for the pending restore like a coordinator update does."""
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.scheduler.action_scheduler.async_restore_charge_completions",
+        AsyncMock(),
+    )
+    resolver = _resolver()
+    scheduler = _scheduler_with_mocked_reschedules(resolver)
+    scheduler._charge_completion_restore_task = MagicMock(done=MagicMock(return_value=False))
+
+    resolver.swap(night_buy=_hour_window(23, length=6))
+    await scheduler._handle_tariff_start_change(MagicMock())
+
+    assert _called(scheduler) == set()
+
+    await scheduler._restore_completions_then_schedule_morning_charge()
+
+    assert "_schedule_morning_charge" in _called(scheduler)
