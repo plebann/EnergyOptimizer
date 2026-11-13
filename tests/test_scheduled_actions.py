@@ -32,10 +32,6 @@ from custom_components.energy_optimizer.market_windows import (
     StaticMarketWindowResolver,
     default_market_windows,
 )
-from custom_components.energy_optimizer.night_buy_window import NightBuyWindowPlan
-from custom_components.energy_optimizer.night_buy_window_manager import (
-    NightBuyWindowPlanManager,
-)
 from custom_components.energy_optimizer.scheduler.action_scheduler import ActionScheduler
 from custom_components.energy_optimizer.sensor import async_setup_entry
 from tests.conftest import market_windows
@@ -227,12 +223,6 @@ def test_scheduler_publishes_structured_daily_snapshot(
     monkeypatch.setattr(
         "custom_components.energy_optimizer.scheduler.action_scheduler.async_track_sunset",
         lambda *args, **kwargs: (lambda: None),
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.helpers.get_internal_sensor_entity_id",
-        lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": {
-                "night_buy_next_window": "sensor.night_buy_window_tomorrow",
-        }.get(unique_id_suffix),
     )
     monkeypatch.setattr(
         "custom_components.energy_optimizer.scheduler.action_scheduler.dt_util.now",
@@ -561,23 +551,13 @@ def test_schedule_afternoon_charge_uses_day_buy_window_hour(
     assert captured_hours == [11]
 
 
-def _manager_with_day_plan(
-    hass: MagicMock, entry: MagicMock, plan: NightBuyWindowPlan | None
-) -> NightBuyWindowPlanManager:
-    manager = NightBuyWindowPlanManager(hass, entry)
-    manager._day_current = plan
-    return manager
-
-
 def test_schedule_afternoon_charge_is_skipped_without_a_day_buy_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No Day Buy Window for today means no afternoon listener at fallback hours."""
     hass = MagicMock()
     entry = _mock_entry(data={})
-    hass.data = {
-        DOMAIN: {"entry-1": {"buy_window_manager": _manager_with_day_plan(hass, entry, None)}}
-    }
+    hass.data = {DOMAIN: {"entry-1": {}}}
 
     captured_hours: list[int] = []
     monkeypatch.setattr(
@@ -611,18 +591,11 @@ def test_schedule_snapshot_lists_afternoon_charge_only_with_a_day_buy_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The snapshot advertises no afternoon charge while today has no Day Buy Window."""
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.helpers.get_internal_sensor_entity_id",
-        lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": None,
-    )
     hass = MagicMock()
     hass.states.get.return_value = None
     entry = _mock_entry(data={})
     sink = _FakeScheduledActionsSink()
-    manager = _manager_with_day_plan(hass, entry, None)
-    hass.data = {
-        DOMAIN: {"entry-1": {"buy_window_manager": manager, "scheduled_actions_sensor": sink}}
-    }
+    hass.data = {DOMAIN: {"entry-1": {"scheduled_actions_sensor": sink}}}
     coordinator = MagicMock()
     coordinator.get_morning_charge_start.return_value = None
     scheduler = ActionScheduler(hass, entry, coordinator, _resolver())
@@ -632,10 +605,14 @@ def test_schedule_snapshot_lists_afternoon_charge_only_with_a_day_buy_window(
     assert sink.snapshot is not None
     assert all(action["key"] != "afternoon_charge" for action in sink.snapshot["actions"])
 
-    start = dt_util.now().replace(hour=13, minute=0, second=0, microsecond=0)
-    manager._day_current = NightBuyWindowPlan(start, start + timedelta(hours=2), 0.5)
+    planned = ActionScheduler(
+        hass,
+        entry,
+        coordinator,
+        _resolver(day_buy=_hour_window(13, length=2, source=MarketWindowSource.PLAN)),
+    )
 
-    scheduler._publish_schedule_snapshot()
+    planned._publish_schedule_snapshot()
 
     assert any(
         action["key"] == "afternoon_charge" and action["time_local"] == "13:00"

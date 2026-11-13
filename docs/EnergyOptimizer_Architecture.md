@@ -243,6 +243,10 @@ Sensory tworzone i aktualizowane przez EnergyOptimizer na podstawie algorytmu de
   ]
   ```
 
+#### 3.2.4. Market Window Resolver
+
+Wszystkie Market Windows (Night Buy, Day Buy, Morning Sell, Evening Sell, Consume, High-Tariff) są czytane z jednej niezmiennej migawki `MarketWindows`, zwracanej przez `MarketWindowResolver.windows(now)` (`market_windows.py`). Strategie decyzyjne dostają resolver przez wstrzyknięcie i biorą migawkę raz, na początku przebiegu; scheduler i sensory okien czytają tę samą migawkę. Nic poza resolverem nie odczytuje okna z sensora ani nie zna sufiksu unique id, nazwy atrybutu czy domyślnej godziny. Okno, którego nie da się rozwiązać, staje się Default Market Window ze źródłem `DEFAULT` (widocznym w logach i diagnostyce). `NightBuyWindowPlanManager` pozostaje osobnym współpracownikiem za resolverem; dostęp do niego mają tylko koordynator i resolver. Szczegóły: `docs/adr/0003-market-windows-read-from-a-snapshot-resolver.md`.
+
 ### 3.3. Encje pomocnicze
 
 Persystentne dane konfiguracyjne i stanowe zarządzane przez Home Assistant.

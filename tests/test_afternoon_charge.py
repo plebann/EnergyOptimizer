@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -30,9 +31,6 @@ from custom_components.energy_optimizer.market_windows import (
     RankedMarketWindow,
     ResolvedHour,
     StaticMarketWindowResolver,
-)
-from custom_components.energy_optimizer.night_buy_window_manager import (
-    NightBuyWindowPlanManager,
 )
 from tests.conftest import market_windows, window
 
@@ -465,11 +463,13 @@ async def test_forecast_horizon_falls_back_to_night_window_start() -> None:
 
 @pytest.mark.asyncio
 async def test_afternoon_charge_is_skipped_without_a_day_buy_window() -> None:
-    """With a plan manager but no Day Buy Window for today, nothing is forecast or charged."""
+    """A Default Day Buy Window (no plan for today) forecasts and charges nothing."""
     hass, _assist = _hass(current_soc=50.0)
     entry = hass.config_entries.async_get_entry.return_value
-    hass.data[DOMAIN]["entry-1"]["buy_window_manager"] = NightBuyWindowPlanManager(
-        hass, entry
+    default_day_buy = market_windows().day_buy
+    assert default_day_buy.source is MarketWindowSource.DEFAULT
+    hass.data[DOMAIN]["entry-1"]["market_windows"] = StaticMarketWindowResolver(
+        market_windows(day_buy=default_day_buy)
     )
     gather_mock = AsyncMock()
 
@@ -510,11 +510,12 @@ async def test_completion_is_scheduled_at_the_snapshot_day_buy_window() -> None:
 
 
 @pytest.mark.asyncio
-async def test_default_day_buy_window_starts_two_hours_before_high_tariff() -> None:
-    """A Default Day Buy Window is sized from the snapshot's High-Tariff start."""
+async def test_afternoon_charge_runs_with_a_planned_day_buy_window() -> None:
+    """A Day Buy Window from the plan for today is not skipped."""
     hass, _ = _hass(current_soc=20.0)
+    planned = replace(window(13, 15, 0.3), source=MarketWindowSource.PLAN)
     hass.data[DOMAIN]["entry-1"]["market_windows"] = StaticMarketWindowResolver(
-        market_windows()
+        market_windows(day_buy=planned)
     )
     gather_mock = AsyncMock(return_value=_forecast(usage={14: 0.8}))
 
@@ -524,5 +525,5 @@ async def test_default_day_buy_window_starts_two_hours_before_high_tariff() -> N
     ):
         await async_run_afternoon_charge(hass, entry_id="entry-1", margin=1.0)
 
-    assert market_windows().day_buy.source is MarketWindowSource.DEFAULT
+    gather_mock.assert_called_once()
     assert gather_mock.call_args.kwargs["start_hour"] == 13

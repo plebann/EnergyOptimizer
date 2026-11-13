@@ -92,6 +92,7 @@ async def test_setup_entry_registers_the_market_window_resolver() -> None:
 
     runtime = hass.data[DOMAIN]["entry-1"]
     assert "market_windows" in runtime
+    assert "buy_window_manager" not in runtime
     assert isinstance(runtime["market_windows"], CoordinatorMarketWindowResolver)
     assert market_window_resolver(hass, "entry-1") is runtime["market_windows"]
 
