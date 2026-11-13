@@ -229,12 +229,6 @@ def test_scheduler_publishes_structured_daily_snapshot(
         lambda *args, **kwargs: (lambda: None),
     )
     monkeypatch.setattr(
-        "custom_components.energy_optimizer.helpers.get_internal_sensor_entity_id",
-        lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": {
-                "night_buy_next_window": "sensor.night_buy_window_tomorrow",
-        }.get(unique_id_suffix),
-    )
-    monkeypatch.setattr(
         "custom_components.energy_optimizer.scheduler.action_scheduler.dt_util.now",
         lambda: datetime(2026, 3, 11, 0, 5, tzinfo=tz),
     )
@@ -611,10 +605,6 @@ def test_schedule_snapshot_lists_afternoon_charge_only_with_a_day_buy_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The snapshot advertises no afternoon charge while today has no Day Buy Window."""
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.helpers.get_internal_sensor_entity_id",
-        lambda _hass, *, entry_id, unique_id_suffix, entity_domain="sensor": None,
-    )
     hass = MagicMock()
     hass.states.get.return_value = None
     entry = _mock_entry(data={})

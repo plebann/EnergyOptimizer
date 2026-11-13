@@ -17,12 +17,6 @@ from custom_components.energy_optimizer.const import (
 )
 from custom_components.energy_optimizer.helpers import (
     day_buy_window_missing_for_today,
-    get_buy_plan,
-    get_day_plan_for_active_night,
-    get_internal_window_price,
-    get_plan_for_today,
-    resolve_day_buy_window_tomorrow_start_hour,
-    resolve_night_buy_window_tomorrow_start_hour,
 )
 from custom_components.energy_optimizer.night_buy_window import NightBuyWindowPlan
 from custom_components.energy_optimizer.night_buy_window_manager import (
@@ -473,113 +467,6 @@ def test_get_active_plan_prefers_earliest_ending_plan() -> None:
     assert plan.plan_date == date(2026, 10, 28)
 
 
-# --- helper behaviour used by actions --------------------------------------
-
-
-def test_night_tomorrow_resolvers_work_after_midnight(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Regression: the plan keyed by today's date must be found at 02:00."""
-    manager = _manager()
-    manager._upcoming = _night(date(2026, 10, 28))
-    hass = _hass_with(manager)
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.helpers.dt_util.utcnow",
-        lambda: datetime(2026, 10, 28, 2, 0, tzinfo=TZ).astimezone(UTC),
-    )
-
-    hour = resolve_night_buy_window_tomorrow_start_hour(
-        hass, {}, entry_id="entry-1", default_hour=7
-    )
-
-    assert hour == 22
-
-
-def test_night_tomorrow_resolver_falls_back_when_no_plan(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = _manager()
-    hass = _hass_with(manager)
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.helpers.dt_util.utcnow",
-        lambda: datetime(2026, 10, 28, 10, 0, tzinfo=TZ).astimezone(UTC),
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.helpers.get_internal_sensor_entity_id",
-        lambda *a, **k: None,
-    )
-
-    hour = resolve_night_buy_window_tomorrow_start_hour(
-        hass, {}, entry_id="entry-1", default_hour=22
-    )
-
-    assert hour == 22
-
-
-def test_day_plan_for_morning_charge_follows_night_end_date_at_23(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """At 23:00 on D the night ends on D+1, so the day plan of D+1 is compared."""
-    manager = _manager()
-    manager._upcoming = _night(date(2026, 10, 28))
-    manager._day_current = _day(date(2026, 10, 27), price=0.9)
-    manager._day_upcoming = _day(date(2026, 10, 28), start_hour=12, price=0.4)
-    hass = _hass_with(manager)
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.helpers.dt_util.utcnow",
-        lambda: datetime(2026, 10, 27, 23, 0, tzinfo=TZ).astimezone(UTC),
-    )
-
-    plan = get_day_plan_for_active_night(hass, entry_id="entry-1")
-    price = get_internal_window_price(
-        hass,
-        entry_id="entry-1",
-        unique_id_suffix="day_buy_next_window",
-        entity_name="Next day buy window",
-    )
-    explicit = resolve_day_buy_window_tomorrow_start_hour(
-        hass, {}, entry_id="entry-1", default_hour=3, for_date=date(2026, 10, 28)
-    )
-
-    assert plan.start.hour == 12
-    assert price == pytest.approx(0.4)
-    assert explicit == 12
-
-
-def test_morning_sell_finds_day_plan_before_and_after_rotation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    today = date(2026, 10, 28)
-    before = _manager()
-    before._day_upcoming = _day(today, price=0.35)
-    after = _manager()
-    after._day_current = _day(today, price=0.35)
-
-    for manager, utc_now in (
-        (before, datetime(2026, 10, 28, 5, 0, tzinfo=UTC)),
-        (after, datetime(2026, 10, 28, 7, 0, tzinfo=UTC)),
-    ):
-        monkeypatch.setattr(
-            "custom_components.energy_optimizer.helpers.dt_util.utcnow",
-            lambda utc_now=utc_now: utc_now,
-        )
-        monkeypatch.setattr(
-            "custom_components.energy_optimizer.helpers.dt_util.as_local",
-            lambda value: value,
-        )
-        plan = get_plan_for_today(_hass_with(manager), entry_id="entry-1", kind="day")
-        assert plan is not None
-        assert plan.price == pytest.approx(0.35)
-
-
-def test_lookup_helpers_return_none_without_manager() -> None:
-    hass = MagicMock()
-    hass.data = {DOMAIN: {"entry-1": {}}}
-
-    assert get_buy_plan(hass, entry_id="entry-1", kind="night", for_date=date(2026, 10, 28)) is None
-    assert get_day_plan_for_active_night(hass, entry_id="entry-1") is None
-
-
 def test_day_plan_requires_complete_finite_coverage_of_the_tariff_range() -> None:
     manager = _manager()
     day = date(2026, 10, 28)
@@ -656,19 +543,3 @@ def test_day_buy_window_is_missing_only_with_a_manager_and_no_plan_for_today(
 
     hass.data = {DOMAIN: {"entry-1": {}}}
     assert day_buy_window_missing_for_today(hass, entry_id="entry-1") is False
-
-
-def test_manager_lookup_does_not_fall_back_to_stale_day_sensor() -> None:
-    manager = _manager()
-    manager._day_current = _day(date(2026, 10, 27), price=0.1)
-    hass = _hass_with(manager)
-
-    assert get_internal_window_price(
-        hass,
-        entry_id="entry-1",
-        unique_id_suffix="day_buy_window",
-        entity_name="Day buy window",
-    ) is None
-    assert resolve_day_buy_window_tomorrow_start_hour(
-        hass, {}, entry_id="entry-1", default_hour=13, for_date=date(2026, 10, 28)
-    ) == 13
