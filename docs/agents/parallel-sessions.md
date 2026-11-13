@@ -4,7 +4,7 @@ Lessons from the Market Window Resolver epic (#69), where tickets #73–#78 and 
 
 ## Before starting a parallel batch
 
-- **Check where PRs must land.** Run `gh pr list --state all --limit 15 --json number,baseRefName,state` and read the last merged PRs. Issue text can name a stale integration branch (here `feature/market-window-resolver`, while the work had moved to `main`). Name the PR base explicitly in every brief.
+- **Check where PRs must land.** Run `gh pr list --state merged --limit 15 --json number,title,baseRefName,mergedAt` and read the last merged PRs. Issue text can name a stale integration branch (here `feature/market-window-resolver`, while the work had moved to `main`). Name the PR base explicitly in every brief.
 - **Cut every worktree from the branch the PRs will merge into.** Starting from a side branch (here the adapter branch) sent three PRs to that branch and one to `main`, which needed an extra merge PR with five conflicts.
 - **Give each session a disjoint file list** and name the one session that owns any shared module. Say which functions inside a shared file belong to whom when two sessions must touch it.
 - **Do not remove shared helpers in feature tickets.** Leave deletion to a single contract ticket after all readers have moved.
