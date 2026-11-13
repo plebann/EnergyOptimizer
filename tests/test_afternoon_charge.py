@@ -528,3 +528,65 @@ async def test_afternoon_charge_runs_with_a_planned_day_buy_window() -> None:
 
     gather_mock.assert_called_once()
     assert gather_mock.call_args.kwargs["start_hour"] == 13
+
+
+def _logged_action_type(hass: MagicMock) -> str:
+    history = hass.data[DOMAIN]["entry-1"]["optimization_history_sensor"]
+    return history.add_entry.call_args.kwargs["action_type"]
+
+
+@pytest.mark.asyncio
+async def test_positive_gap_is_a_charge_decision() -> None:
+    """Issue #39: a grid-charge plan is reported as `charge`."""
+    hass, _ = _hass(current_soc=21.0)
+    await _run(hass, _forecast(usage={13: 2.0}), arbitrage_enabled=False)
+
+    assert _logged_action_type(hass) == "charge"
+
+
+@pytest.mark.asyncio
+async def test_zero_gap_without_reserve_target_is_no_action_with_truthful_writes() -> None:
+    """Issue #39: the Program 4 floor write is reported, not hidden or relabelled."""
+    hass, _ = _hass(current_soc=44.3)
+    details = await _run(hass, _forecast(), arbitrage_enabled=False)
+
+    assert _logged_action_type(hass) == "no_action"
+    assert "grid_charge_kwh" not in details
+    program_writes = [
+        call.args[2]["value"]
+        for call in hass.services.async_call.call_args_list
+        if call.args[2].get("entity_id") == "number.program4_soc"
+    ]
+    assert program_writes == [46]
+
+
+@pytest.mark.asyncio
+async def test_zero_gap_with_independent_reserve_target_is_secure_energy() -> None:
+    """Issue #39: Program 4 is raised to the reserve target without grid charging."""
+    from custom_components.energy_optimizer.decision_engine.common import EnergyBalance
+    from custom_components.energy_optimizer.decision_engine.afternoon_charge import (
+        AfternoonChargeStrategy,
+    )
+
+    hass, _ = _hass(current_soc=44.3)
+    original = AfternoonChargeStrategy._evaluate_charge
+
+    def _with_reserve_need(self: AfternoonChargeStrategy) -> tuple[float, EnergyBalance]:
+        gap, balance = original(self)
+        # 3 kWh above min_soc 20 % of a 5 kWh pack lands at 80 %, above SOC 44.3.
+        return gap, replace(balance, needed_reserve_kwh=3.0)
+
+    with patch.object(AfternoonChargeStrategy, "_evaluate_charge", _with_reserve_need):
+        details = await _run(hass, _forecast(), arbitrage_enabled=False)
+
+    assert _logged_action_type(hass) == "secure_energy"
+    assert details["program_number"] == 4
+    assert details["grid_charge_kwh"] == 0.0
+    assert details["current_soc"] == 44.3
+    assert details["target_soc"] == pytest.approx(46.0)
+    charge_current_writes = [
+        call
+        for call in hass.services.async_call.call_args_list
+        if call.args[2].get("entity_id") == "number.charge_current"
+    ]
+    assert all(call.args[2]["value"] == 0 for call in charge_current_writes)

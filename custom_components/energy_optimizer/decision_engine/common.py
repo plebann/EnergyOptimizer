@@ -65,6 +65,9 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# Gap and reserve-need threshold separating a charge decision from the rest.
+GAP_EPSILON_KWH = 0.001
+
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class BatteryConfig:
@@ -511,6 +514,49 @@ def build_no_action_outcome(
     )
 
 
+def classify_no_grid_decision(
+    outcome: DecisionOutcome,
+    *,
+    needed_reserve_kwh: float,
+    current_soc: float,
+    target_soc: float,
+    min_soc: float,
+    capacity_ah: float,
+    voltage: float,
+    gap_kwh: float,
+    program_number: int,
+) -> None:
+    """Mark a no-grid-charge outcome as Secure Energy when it protects a reserve.
+
+    Secure Energy needs an independent reserve target: the reserve need must
+    exceed the common epsilon by more than the energy already above ``min_soc``.
+    A written target above the current SOC only through rounding or a safety
+    margin stays ``no_action``. Inverter writes are not changed here.
+    """
+    current_reserve_kwh = soc_to_kwh(
+        max(current_soc - min_soc, 0.0), capacity_ah, voltage
+    )
+    if (
+        needed_reserve_kwh <= GAP_EPSILON_KWH
+        or needed_reserve_kwh - current_reserve_kwh <= GAP_EPSILON_KWH
+        or target_soc <= current_soc
+    ):
+        return
+
+    outcome.action_type = "secure_energy"
+    outcome.summary = f"Energy reserve secured at {target_soc:.0f}% without grid charging"
+    outcome.details.update(
+        {
+            "result": outcome.summary,
+            "current_soc": round(current_soc, 1),
+            "target_soc": round(target_soc, 1),
+            "gap_kwh": round(gap_kwh, 2),
+            "program_number": program_number,
+            "grid_charge_kwh": 0.0,
+        }
+    )
+
+
 async def handle_no_action_soc_update(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -535,7 +581,6 @@ async def handle_no_action_soc_update(
         entities_changed.append({"entity_id": prog_soc_entity, "value": target_soc})
 
     if entities_changed:
-        outcome.action_type = "program_soc_updated"
         outcome.summary = f"Set program SOC to {target_soc:.0f}%"
         outcome.entities_changed = entities_changed
 
@@ -747,7 +792,7 @@ def build_charge_outcome_base(
 
     return DecisionOutcome(
         scenario=scenario,
-        action_type="charge_scheduled",
+        action_type="charge",
         summary=summary,
         reason=reason,
         details=details,

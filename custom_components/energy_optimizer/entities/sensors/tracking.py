@@ -28,7 +28,8 @@ _SCENARIO_CODES = {
     "Evening Peak Sell": "es",
 }
 _ACTION_CODES = {
-    "charge_scheduled": "c",
+    "charge": "c",
+    "secure_energy": "e",
     "sell": "s",
     "high_sell": "s",
     "no_action": "n",

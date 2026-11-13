@@ -1137,3 +1137,98 @@ async def test_morning_no_action_never_writes_program_soc_below_min_soc() -> Non
         and call.args[2].get("entity_id") == "number.prog2_soc"
     ]
     assert soc_writes == [10]
+
+
+def _morning_no_grid_setup(*, soc: str, daily_load: str = "0") -> MagicMock:
+    from custom_components.energy_optimizer.const import CONF_TEST_MODE
+
+    config = {
+        CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
+        CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
+        CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
+        CONF_BATTERY_CAPACITY_AH: 100,
+        CONF_BATTERY_VOLTAGE: 50,
+        CONF_MIN_SOC: 10,
+        CONF_MAX_SOC: 100,
+        CONF_BATTERY_EFFICIENCY: 100,
+        CONF_TEST_MODE: False,
+    }
+    states = {
+        "number.prog2_soc": "50",
+        "time.prog2_start": "04:00:00",
+        "sensor.battery_soc": soc,
+        "sensor.daily_load": daily_load,
+    }
+    return _setup_hass(config, states)
+
+
+def _logged_decision(hass: MagicMock) -> tuple[str, dict[str, object], list[object]]:
+    hist = hass.data[DOMAIN]["entry-1"]["optimization_history_sensor"]
+    (_, details), kwargs = hist.add_entry.call_args
+    event = hass.bus.async_fire.call_args
+    return kwargs["action_type"], details, event
+
+
+@pytest.mark.asyncio
+async def test_morning_no_action_reports_the_floor_write_it_made() -> None:
+    """Zero gap and no reserve need: no_action, with truthful entities_changed (#39)."""
+    hass = _morning_no_grid_setup(soc="90")
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    action_type, details, _ = _logged_decision(hass)
+    assert action_type == "no_action"
+    assert "grid_charge_kwh" not in details
+    soc_writes = [
+        call.args[2]["value"]
+        for call in hass.services.async_call.call_args_list
+        if call.args[2].get("entity_id") == "number.prog2_soc"
+    ]
+    assert soc_writes == [10]
+
+
+@pytest.mark.asyncio
+async def test_morning_secure_energy_writes_only_program_2_soc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Zero gap with an independent reserve target above SOC: secure_energy (#39)."""
+    from custom_components.energy_optimizer.decision_engine import morning_charge
+    from custom_components.energy_optimizer.decision_engine.common import EnergyBalance
+
+    hass = _morning_no_grid_setup(soc="20")
+    # 1.0 kWh needed above min_soc 10 % -> 30 % target; the 20 % SOC holds 0.5 kWh.
+    monkeypatch.setattr(
+        morning_charge,
+        "_calculate_morning_balance",
+        lambda *_a, **_k: (
+            EnergyBalance(
+                reserve_kwh=1.5,
+                required_kwh=1.0,
+                needed_reserve_kwh=1.0,
+                gap_kwh=-0.5,
+                pv_compensation_factor=None,
+            ),
+            0.0,
+            -1.5,
+            1.0,
+            -0.5,
+        ),
+    )
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    action_type, details, _ = _logged_decision(hass)
+    assert action_type == "secure_energy"
+    assert details["target_soc"] == 30.0
+    assert details["current_soc"] == 20.0
+    assert details["program_number"] == 2
+    assert details["grid_charge_kwh"] == 0.0
+    assert "window_start" in details and "window_end" in details
+    written = [
+        (call.args[2].get("entity_id"), call.args[2].get("value"))
+        for call in hass.services.async_call.call_args_list
+        if call.args[0] in ("number", "time")
+    ]
+    assert ("number.prog2_soc", 30) in written
+    assert all(entity in ("number.prog2_soc", "time.prog2_start") for entity, _ in written)

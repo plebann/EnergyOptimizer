@@ -21,7 +21,7 @@ class DecisionOutcome:
 
     # Core identification
     scenario: str  # e.g., "Morning Grid Charge", "Battery Balancing"
-    action_type: str  # e.g., "charge_scheduled", "balancing_enabled", "no_action"
+    action_type: str  # e.g., "charge", "secure_energy", "no_action", "balancing_enabled"
 
     # Concise summary (for logs + notifications)
     summary: str  # e.g., "Set Program 2 SOC to 75%"

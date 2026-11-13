@@ -355,7 +355,6 @@ class BaseChargeStrategy(MarketWindowReader, ABC):
             outcome.action_type = "no_action"
             outcome.summary = "No entity changes required"
         elif len(entities_changed) == 1 and program_soc_changed:
-            outcome.action_type = "program_soc_updated"
             outcome.summary = f"Set program SOC to {action.target_soc:.0f}%"
         outcome.history_windows = self._history_windows()
         outcome.entities_changed = entities_changed

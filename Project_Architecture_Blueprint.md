@@ -826,7 +826,7 @@ Architectural meaning: entity publication depends on a coordinator snapshot, not
 ```python
 outcome = DecisionOutcome(
     scenario="Morning Grid Charge",
-    action_type="charge_scheduled",
+    action_type="charge",
     summary="Set Program 2 SOC to 75%",
     details={"gap_kwh": 4.2},
 )

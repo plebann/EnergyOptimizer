@@ -95,10 +95,10 @@ def _completion_store(charge_type: str) -> _Store:
 
 
 @pytest.mark.asyncio
-async def test_soc_only_no_action_update_uses_program_soc_updated(
+async def test_soc_only_no_action_update_reports_the_floor_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A real SOC-only write is not reported as no-action."""
+    """A no-action decision still reports the SOC write it made (#39)."""
     outcome = build_no_action_outcome(
         scenario="Morning Grid Charge",
         reason="reserve sufficient",
@@ -129,7 +129,7 @@ async def test_soc_only_no_action_update_uses_program_soc_updated(
     )
 
     assert changed is True
-    assert outcome.action_type == "program_soc_updated"
+    assert outcome.action_type == "no_action"
     assert outcome.entities_changed == [
         {"entity_id": "number.program2_soc", "value": 30}
     ]

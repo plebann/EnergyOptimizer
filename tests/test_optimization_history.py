@@ -37,7 +37,7 @@ def test_history_entry_is_compact_and_includes_decision_window() -> None:
             "needed_reserve_kwh": 1.4,
             "required_kwh": 5.6,
         },
-        action_type="charge_scheduled",
+        action_type="charge",
         reason="Gap requires grid charge",
         windows=[["cr", 6, "nb_e", 13, "db_s", False]],
     )
@@ -71,6 +71,17 @@ def test_history_prefers_effective_needed_reserve() -> None:
     entry = sensor.extra_state_attributes["history"][0]
 
     assert entry["m"] == {"n": 1.2}
+
+
+def test_history_action_codes_for_charge_decision_types() -> None:
+    """Charge, secure-energy and no-action decisions get distinct history codes."""
+    sensor = _history_sensor()
+
+    for action_type in ("charge", "secure_energy", "no_action"):
+        sensor.add_entry("Morning Grid Charge", {"result": "x"}, action_type=action_type)
+
+    codes = [entry["a"] for entry in sensor.extra_state_attributes["history"]]
+    assert sorted(codes) == ["c", "e", "n"]
 
 
 def test_history_stores_export_power_in_kw() -> None:
