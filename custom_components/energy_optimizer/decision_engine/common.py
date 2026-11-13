@@ -531,7 +531,11 @@ def classify_no_grid_decision(
     Secure Energy needs an independent reserve target: the reserve need must
     exceed the common epsilon by more than the energy already above ``min_soc``.
     A written target above the current SOC only through rounding or a safety
-    margin stays ``no_action``. Inverter writes are not changed here.
+    margin stays ``no_action``. The reserve is measured above ``min_soc`` at 100 %
+    efficiency, not with the engine gap's efficiency and ``min_soc_pv``: a
+    decision with gap <= 0 would otherwise never show a reserve shortfall. The
+    label is a decision, independent of whether the program SOC already held the
+    target. Inverter writes are not changed here.
     """
     current_reserve_kwh = soc_to_kwh(
         max(current_soc - min_soc, 0.0), capacity_ah, voltage

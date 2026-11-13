@@ -589,4 +589,4 @@ async def test_zero_gap_with_independent_reserve_target_is_secure_energy() -> No
         for call in hass.services.async_call.call_args_list
         if call.args[2].get("entity_id") == "number.charge_current"
     ]
-    assert all(call.args[2]["value"] == 0 for call in charge_current_writes)
+    assert [call.args[2]["value"] for call in charge_current_writes] == [0]
