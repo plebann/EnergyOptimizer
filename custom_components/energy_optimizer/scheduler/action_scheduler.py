@@ -59,7 +59,6 @@ from ..service_handlers.charge_completion import (
 )
 from ..market_windows import MarketWindowResolver, MarketWindows
 from ..helpers import (
-    day_buy_window_missing_for_today,
     resolve_prog4_start_time,
 )
 
@@ -558,7 +557,7 @@ class ActionScheduler:
             self._afternoon_listener()
             self._afternoon_listener = None
 
-        if day_buy_window_missing_for_today(self.hass, entry_id=self.entry.entry_id):
+        if self._windows.day_buy.is_fallback:
             _LOGGER.info(
                 "Afternoon charge not scheduled: no Day Buy Window is planned for today"
             )
@@ -809,7 +808,7 @@ class ActionScheduler:
         )
 
         afternoon_charge_hour = self._windows.day_buy.hour
-        if not day_buy_window_missing_for_today(self.hass, entry_id=self.entry.entry_id):
+        if not windows.day_buy.is_fallback:
             actions.append(
                 self._build_action_entry(
                     key="afternoon_charge",

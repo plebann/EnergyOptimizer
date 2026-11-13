@@ -55,9 +55,6 @@ class EnergyOptimizerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.hass = hass
         self.entry = entry
         self._night_buy_window_manager = NightBuyWindowPlanManager(hass, entry)
-        hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})[
-            "buy_window_manager"
-        ] = self._night_buy_window_manager
 
     @property
     def buy_window_manager(self) -> NightBuyWindowPlanManager:

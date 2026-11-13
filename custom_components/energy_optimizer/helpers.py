@@ -1,7 +1,7 @@
 """Helper utilities for Energy Optimizer integration."""
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time
 import logging
 import re
 from typing import TYPE_CHECKING, Any, Literal
@@ -16,70 +16,6 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def get_buy_plan(
-    hass: HomeAssistant,
-    *,
-    entry_id: str,
-    kind: Literal["night", "day"],
-    for_date: date,
-):
-    """Return the persisted buy plan matching its semantic date.
-
-    Consumers deliberately do not select a sensor by wall-clock phase.  The
-    coordinator owns the plan lifecycle, so this helper is the single lookup
-    seam for actions that need a concrete plan.
-    """
-    from .const import DOMAIN
-
-    entry_data = hass.data.get(DOMAIN, {}).get(entry_id, {})
-    manager = entry_data.get("buy_window_manager") if isinstance(entry_data, dict) else None
-    return manager.get_plan(kind, for_date) if manager is not None else None
-
-
-def _buy_window_manager(hass: HomeAssistant, entry_id: str) -> Any | None:
-    """Return the lifecycle manager when coordinator-backed lookup is active."""
-    from .const import DOMAIN
-
-    entry_data = hass.data.get(DOMAIN, {}).get(entry_id, {})
-    return entry_data.get("buy_window_manager") if isinstance(entry_data, dict) else None
-
-
-def _buy_plan_for_relative_day(
-    hass: HomeAssistant,
-    *,
-    entry_id: str,
-    kind: Literal["night", "day"],
-    offset: int = 0,
-):
-    """Resolve a persisted plan relative to the local calendar day."""
-    from .const import DOMAIN
-
-    if _buy_window_manager(hass, entry_id) is None:
-        return None
-    return get_buy_plan(
-        hass,
-        entry_id=entry_id,
-        kind=kind,
-        for_date=dt_util.as_local(dt_util.utcnow()).date() + timedelta(days=offset),
-    )
-
-
-def get_plan_for_today(hass: HomeAssistant, *, entry_id: str, kind: Literal["night", "day"]):
-    """Return the persisted plan keyed by today's local date, if any."""
-    return _buy_plan_for_relative_day(hass, entry_id=entry_id, kind=kind)
-
-
-def day_buy_window_missing_for_today(hass: HomeAssistant, *, entry_id: str) -> bool:
-    """Return True when the plan manager is active but today has no Day Buy Window.
-
-    Without a plan Afternoon Charge has no window inside the low-tariff range,
-    so callers skip it instead of charging at fallback hours.
-    """
-    if _buy_window_manager(hass, entry_id) is None:
-        return False
-    return get_plan_for_today(hass, entry_id=entry_id, kind="day") is None
 
 
 def is_test_mode(hass: HomeAssistant, entry: ConfigEntry) -> bool:

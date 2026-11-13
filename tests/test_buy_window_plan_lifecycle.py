@@ -13,10 +13,6 @@ from custom_components.energy_optimizer.const import (
     CONF_BUY_PRICE_SENSOR,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
-    DOMAIN,
-)
-from custom_components.energy_optimizer.helpers import (
-    day_buy_window_missing_for_today,
 )
 from custom_components.energy_optimizer.night_buy_window import NightBuyWindowPlan
 from custom_components.energy_optimizer.night_buy_window_manager import (
@@ -98,12 +94,6 @@ def _night_prices(end_day: date) -> list[dict[str, object]]:
         cursor += timedelta(hours=1)
         index += 1
     return prices
-
-
-def _hass_with(manager: NightBuyWindowPlanManager) -> MagicMock:
-    hass = MagicMock()
-    hass.data = {DOMAIN: {"entry-1": {"buy_window_manager": manager}}}
-    return hass
 
 
 # --- rotation ---------------------------------------------------------------
@@ -524,22 +514,3 @@ def test_day_plan_is_none_when_tariff_range_is_shorter_than_two_hours(
     day = date(2026, 10, 28)
 
     assert manager._day_plan(_day_prices(day), "sensor.buy", plan_date=day, local_tz=TZ) is None
-
-
-def test_day_buy_window_is_missing_only_with_a_manager_and_no_plan_for_today(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.helpers.dt_util.utcnow",
-        lambda: datetime(2026, 10, 28, 12, 0, tzinfo=UTC),
-    )
-    manager = _manager()
-    hass = _hass_with(manager)
-
-    assert day_buy_window_missing_for_today(hass, entry_id="entry-1") is True
-
-    manager._day_upcoming = _day(date(2026, 10, 28))
-    assert day_buy_window_missing_for_today(hass, entry_id="entry-1") is False
-
-    hass.data = {DOMAIN: {"entry-1": {}}}
-    assert day_buy_window_missing_for_today(hass, entry_id="entry-1") is False

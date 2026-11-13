@@ -33,7 +33,6 @@ from ..decision_engine.common import (
     resolve_arbitrage_margin_gate,
     resolve_entry,
 )
-from ..helpers import day_buy_window_missing_for_today
 from ..market_windows import MarketWindows
 from ..service_handlers.charge_completion import async_schedule_charge_completion
 from ..utils.decision_dump import active_decision_audit
@@ -203,7 +202,7 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
 
     async def _check_early_exit(self) -> bool:
         """Skip without a Day Buy Window; reject incomplete control configuration."""
-        if day_buy_window_missing_for_today(self.hass, entry_id=self.entry.entry_id):
+        if self.windows.day_buy.is_fallback:
             summary = "Afternoon charge skipped: no Day Buy Window"
             await log_decision_unified(
                 self.hass,
