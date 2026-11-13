@@ -82,6 +82,7 @@ async def async_schedule_charge_completion(
     complete_at: datetime,
     window_start: datetime,
     window_end: datetime,
+    window_source: str | None = None,
 ) -> None:
     """Persist and schedule a temporary charge-target completion."""
     plan = {
@@ -90,6 +91,8 @@ async def async_schedule_charge_completion(
         "window_start": window_start.isoformat(),
         "window_end": window_end.isoformat(),
     }
+    if window_source is not None:
+        plan["window_source"] = window_source
     await _store(hass, entry, charge_type).async_save(plan)
     _plans(hass, entry)[charge_type] = plan
     _cancel_listener(hass, entry, charge_type)
@@ -264,6 +267,7 @@ async def async_handle_charge_completion(
                 complete_at=dt_util.now() + timedelta(minutes=5),
                 window_start=dt_util.as_local(window_start),
                 window_end=dt_util.as_local(window_end),
+                window_source=plan.get("window_source"),
             )
             return
 
@@ -306,6 +310,7 @@ async def async_restore_charge_completions(
                 complete_at=complete_at,
                 window_start=window_start,
                 window_end=window_end,
+                window_source=plan.get("window_source"),
             )
 
 
