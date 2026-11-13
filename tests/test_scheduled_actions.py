@@ -952,6 +952,36 @@ def test_pending_completion_keeps_its_own_source_label() -> None:
     assert completion["source"] == "morning_buy_window_end"
 
 
+def test_pending_completion_reports_the_source_it_was_planned_from() -> None:
+    """A planned completion keeps its source after the night window falls back to a default."""
+    sink = _FakeScheduledActionsSink()
+    scheduler = ActionScheduler(
+        MagicMock(), _mock_entry(), MagicMock(), _resolver()
+    )
+    assert scheduler._windows.night_buy.source.value == "default"
+    scheduler.hass.data = {
+        DOMAIN: {
+            "entry-1": {
+                "scheduled_actions_sensor": sink,
+                "charge_completion_plans": {
+                    "morning": {
+                        "complete_at": "2026-03-11T06:00:00+01:00",
+                        "window_source": "plan",
+                    }
+                },
+            }
+        }
+    }
+    scheduler.coordinator.get_morning_charge_start.return_value = None
+
+    scheduler._publish_schedule_snapshot()
+
+    completion = next(
+        a for a in sink.snapshot["actions"] if a["key"] == "morning_charge_completion"
+    )
+    assert completion["source"] == "plan"
+
+
 @pytest.mark.asyncio
 async def test_tariff_change_during_completion_restore_does_not_plan_morning_charge(
     monkeypatch: pytest.MonkeyPatch,

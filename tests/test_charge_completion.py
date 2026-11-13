@@ -31,6 +31,7 @@ from custom_components.energy_optimizer.decision_engine.afternoon_charge import 
     AfternoonChargeStrategy,
 )
 from custom_components.energy_optimizer.decision_engine.common import BatteryConfig
+from custom_components.energy_optimizer.market_windows import default_market_windows
 from custom_components.energy_optimizer.service_handlers import charge_completion
 from custom_components.energy_optimizer.decision_engine import charge_base
 
@@ -275,6 +276,7 @@ async def test_morning_completion_scheduled_when_target_is_already_present(
     strategy._resolve_completion_window = MagicMock(
         return_value=(start, start + timedelta(hours=2))
     )
+    strategy.windows = default_market_windows(start)
     schedule = AsyncMock()
     monkeypatch.setattr(
         "custom_components.energy_optimizer.decision_engine.morning_charge.async_schedule_charge_completion",
@@ -603,9 +605,11 @@ async def test_schedule_completion_persists_and_tracks_window_end(
         complete_at=end,
         window_start=start,
         window_end=end,
+        window_source="plan",
     )
 
     assert store.saved["complete_at"] == end.isoformat()
+    assert store.saved["window_source"] == "plan"
     assert tracked["when"] == end
     snapshot_callback.assert_called_once()
 
@@ -740,6 +744,7 @@ async def test_completion_write_failure_keeps_and_reschedules_plan(
             "complete_at": now.isoformat(),
             "window_start": (now - timedelta(hours=2)).isoformat(),
             "window_end": now.isoformat(),
+            "window_source": "plan",
         }
     )
     reschedule = AsyncMock()
@@ -762,6 +767,7 @@ async def test_completion_write_failure_keeps_and_reschedules_plan(
     assert store.removed is False
     reschedule.assert_awaited_once()
     assert reschedule.await_args.kwargs["charge_type"] == "morning"
+    assert reschedule.await_args.kwargs["window_source"] == "plan"
 
 
 @pytest.mark.asyncio
@@ -827,3 +833,37 @@ async def test_overdue_completion_runs_during_restore(
     await charge_completion.async_restore_charge_completions(hass, entry)
 
     handle.assert_awaited_once_with(hass, entry, "morning")
+
+
+@pytest.mark.asyncio
+async def test_restore_keeps_the_planned_window_source_and_loads_old_plans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A restored plan keeps its source; a plan stored before the field existed still loads."""
+    now = dt_util.now()
+    entry = _entry({})
+    hass = _hass({})
+    base = {
+        "complete_at": (now + timedelta(hours=1)).isoformat(),
+        "window_start": (now - timedelta(hours=2)).isoformat(),
+        "window_end": (now + timedelta(hours=1)).isoformat(),
+    }
+    stores = {
+        "morning": _Store({"charge_type": "morning", **base, "window_source": "plan"}),
+        "afternoon": _Store({"charge_type": "afternoon", **base}),
+    }
+    schedule = AsyncMock()
+    monkeypatch.setattr(
+        charge_completion,
+        "_store",
+        lambda _hass, _entry, charge_type: stores[charge_type],
+    )
+    monkeypatch.setattr(charge_completion, "async_schedule_charge_completion", schedule)
+
+    await charge_completion.async_restore_charge_completions(hass, entry)
+
+    sources = {
+        c.kwargs["charge_type"]: c.kwargs["window_source"]
+        for c in schedule.await_args_list
+    }
+    assert sources == {"morning": "plan", "afternoon": None}

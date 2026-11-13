@@ -507,6 +507,7 @@ async def test_completion_is_scheduled_at_the_snapshot_day_buy_window() -> None:
     kwargs = schedule.await_args.kwargs
     assert (kwargs["window_start"], kwargs["window_end"]) == (day_buy.start, day_buy.end)
     assert kwargs["complete_at"] == day_buy.end
+    assert kwargs["window_source"] == day_buy.source.value
 
 
 @pytest.mark.asyncio

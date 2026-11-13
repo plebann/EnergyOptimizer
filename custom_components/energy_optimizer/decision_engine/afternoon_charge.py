@@ -238,6 +238,7 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             complete_at=window_end,
             window_start=window_start,
             window_end=window_end,
+            window_source=self.windows.day_buy.source.value,
         )
 
     async def _after_charge_action(

@@ -1009,6 +1009,7 @@ async def test_morning_charge_schedules_completion_at_the_snapshot_night_buy_win
     assert kwargs["complete_at"] == night_buy.end
     assert kwargs["window_start"] == night_buy.start
     assert kwargs["window_end"] == night_buy.end
+    assert kwargs["window_source"] == night_buy.source.value
     opt_sensor = hass.data[DOMAIN]["entry-1"]["last_optimization_sensor"]
     _, details = opt_sensor.log_optimization.call_args.args
     assert details["window_start"] == night_buy.start.isoformat()

@@ -1011,7 +1011,10 @@ class ActionScheduler:
                         label=f"{str(charge_type).title()} charge completion",
                         scheduled_for=dt_util.as_local(scheduled_for),
                         kind="dynamic",
-                        source=f"{charge_type}_buy_window_end",
+                        source=str(
+                            plan.get("window_source")
+                            or f"{charge_type}_buy_window_end"
+                        ),
                         order=105 if charge_type == "morning" else 106,
                     )
                 )
