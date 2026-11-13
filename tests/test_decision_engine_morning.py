@@ -1099,3 +1099,40 @@ async def test_morning_charge_restores_lower_max_current_before_setting_current(
         )
         for entity_id, value in expected_current_calls
     ]
+
+
+@pytest.mark.asyncio
+async def test_morning_no_action_never_writes_program_soc_below_min_soc() -> None:
+    """Negligible reserve need floors Program 2 at min_soc, not min_soc - 4 (#53)."""
+    from custom_components.energy_optimizer.const import CONF_TEST_MODE
+
+    config = {
+        CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
+        CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
+        CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
+        CONF_BATTERY_CAPACITY_AH: 100,
+        CONF_BATTERY_VOLTAGE: 50,
+        CONF_MIN_SOC: 10,
+        CONF_MAX_SOC: 100,
+        CONF_BATTERY_EFFICIENCY: 100,
+        CONF_TEST_MODE: False,
+    }
+    states = {
+        "number.prog2_soc": "50",
+        "time.prog2_start": "04:00:00",
+        "sensor.battery_soc": "90",
+        "sensor.daily_load": "0",
+    }
+    hass = _setup_hass(config, states)
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    soc_writes = [
+        call.args[2]["value"]
+        for call in hass.services.async_call.call_args_list
+        if call.args[0] == "number"
+        and call.args[1] == "set_value"
+        and call.args[2].get("entity_id") == "number.prog2_soc"
+    ]
+    assert soc_writes == [10]
