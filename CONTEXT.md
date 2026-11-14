@@ -115,28 +115,23 @@ _Avoid_: Virtual SOC, Clamped SOC
 
 ### Charge Target Safety Margin
 
-The fixed percentage point (currently 1 point) added to a calculated charge target SOC after rounding it up, before the result is capped at the configured `max_soc`. It applies to the Morning Charge temporary Program 2 target and the Afternoon Charge Program 4 target; sell/discharge targets are unaffected.
+The fixed percentage point (currently 1 point) added to a calculated charge target SOC after rounding it up, before the result is capped at the configured `max_soc`. It applies to the Morning Charge temporary program target and the Afternoon Charge Program 4 target; sell/discharge targets are unaffected.
 _Avoid_: margin (forecast demand multiplier), Arbitrage Margin
 
-### Program 2 Normal SOC Target
+### Morning Charge Program Set
 
-The Program 2 SOC value used after a temporary Morning Charge target ends: `min_soc`.
-_Avoid_: Restored Program 2 SOC
+The inverter programs whose active interval, from its start time up to the next program's start time, overlaps the Night Buy Window measured from the later of the decision time and the window's start. Morning Charge writes its temporary target to every program in the set and to no other program, and never changes any program's start time.
+_Avoid_: Program 2 (as the only Morning Charge program)
+
+### Normal SOC Target
+
+A program's SOC value from before Morning Charge changed it, such as `min_soc` or a value Evening Behavior set. It is recorded per program when the Morning Charge Program Set is written, and the first record for a window is kept if Morning Charge runs again in the same window.
+_Avoid_: Restored Program 2 SOC, Program 2 Normal SOC Target
 
 ### Morning Charge Completion
 
-The instant at the end of the resolved Night Buy Window when the temporary Morning Charge target no longer applies.
+The instant at the end of the resolved Night Buy Window when the temporary Morning Charge target no longer applies. Every program in the Morning Charge Program Set that does not already hold its Normal SOC Target is returned to it.
 _Avoid_: Target SOC reached
-
-### Program 2 Morning Synchronization
-
-The scheduler updates Program 2's start time only alongside an actual Morning Charge SOC change; it leaves the start time unchanged when the SOC remains unchanged.
-_Avoid_: Unconditional Program 2 start update
-
-### Program 2 Start Control
-
-A writable `time` or `input_datetime` entity that holds Program 2's start time.
-_Avoid_: Read-only program time sensor
 
 ### Program SOC Update
 
@@ -145,7 +140,7 @@ _Avoid_: SOC change reported as no action
 
 ### Morning Charge Schedule Log
 
-A concise record of a Morning Charge schedule change containing Program 2 SOC and the resolved Night Buy Window start and end.
+A concise record of a Morning Charge schedule change containing the Morning Charge Program Set, its target SOC and the resolved Night Buy Window start and end.
 _Avoid_: Forecast and energy diagnostic log
 
 ### Afternoon Charge Completion
@@ -155,10 +150,10 @@ _Avoid_: Program 4 solar reset
 
 ### Night Buy Window
 
-A Buy Window within 00:00-06:00, seeded from the cheapest two consecutive hours in that range, then grown outward one
+A Buy Window within 22:00-06:00, seeded from the cheapest two consecutive hours in that range, then grown outward one
 boundary hour at a time on either side while each boundary hour's price stays within 10% of the window's current
 average price (recomputed after every accepted hour). Expansion stops permanently on a side once its next boundary
-hour exceeds the 10% threshold or falls outside 00:00-06:00; a Night Buy Window may end up spanning the full 6-hour
+hour exceeds the 10% threshold or falls outside 22:00-06:00; a Night Buy Window may end up spanning the full 8-hour
 range. Morning Charge starts at the Night Buy Window's start hour and charges for its full (variable) duration.
 
 ### Day Buy Window

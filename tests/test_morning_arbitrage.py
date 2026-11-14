@@ -17,7 +17,11 @@ from custom_components.energy_optimizer.const import (
     CONF_MIN_SOC,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_PROG2_SOC_ENTITY,
+    CONF_PROG1_SOC_ENTITY,
+    CONF_PROG1_TIME_START_ENTITY,
     CONF_PROG2_TIME_START_ENTITY,
+    CONF_PROG6_SOC_ENTITY,
+    CONF_PROG6_TIME_START_ENTITY,
     CONF_PV_FORECAST_REMAINING,
     CONF_PV_FORECAST_TOMORROW,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
@@ -429,9 +433,17 @@ async def test_morning_charge_arbitrage_increases_gap(
         "custom_components.energy_optimizer.decision_engine.morning_charge.async_schedule_charge_completion",
         AsyncMock(),
     )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.async_load_charge_completion_plan",
+        AsyncMock(return_value=None),
+    )
     base_config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
         CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
+        CONF_PROG6_SOC_ENTITY: "number.prog6_soc",
+        CONF_PROG6_TIME_START_ENTITY: "time.prog6_start",
+        CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
+        CONF_PROG1_TIME_START_ENTITY: "time.prog1_start",
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
         CONF_HIGH_TARIFF_END_HOUR_SENSOR: "sensor.tariff_end_hour",
@@ -445,6 +457,10 @@ async def test_morning_charge_arbitrage_increases_gap(
     base_states = {
         "number.prog2_soc": "50",
         "time.prog2_start": "04:00:00",
+        "number.prog6_soc": "50",
+        "time.prog6_start": "22:00:00",
+        "number.prog1_soc": "50",
+        "time.prog1_start": "01:30:00",
         "sensor.battery_soc": "50",
         "sensor.daily_load": "3",
         "sensor.tariff_end_hour": "13",
