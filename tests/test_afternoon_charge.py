@@ -612,3 +612,13 @@ async def test_peak_rise_close_to_epsilon(pv_kwh: float, expected: str) -> None:
     await _run(hass, _forecast(pv={13: pv_kwh}), arbitrage_enabled=False)
 
     assert _logged_action_type(hass) == expected
+
+
+@pytest.mark.asyncio
+async def test_secure_energy_needs_the_capped_written_target_above_soc() -> None:
+    """Issue #39: PV peak 95.5 % caps to a 95 % target below SOC 95.2 %: no_action."""
+    hass, _ = _hass(current_soc=95.2, max_soc=95.5)
+    details = await _run(hass, _forecast(pv={13: 0.015}), arbitrage_enabled=False)
+
+    assert _logged_action_type(hass) == "no_action"
+    assert details["target_soc"] == pytest.approx(95.0)

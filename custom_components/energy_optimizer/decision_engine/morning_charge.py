@@ -479,6 +479,31 @@ class MorningChargeStrategy(BaseChargeStrategy):
         )
         return outcome
 
+    def _classify_no_grid(self, outcome: DecisionOutcome, target_soc: float) -> None:
+        """Report Secure Energy when the reserve signal lifts the program SOC."""
+        if (
+            self._needed_reserve_all_kwh > GAP_EPSILON_KWH
+            and target_soc > self.current_soc
+        ):
+            mark_secure_energy(
+                outcome,
+                current_soc=self.current_soc,
+                target_soc=target_soc,
+                gap_kwh=self._total_gap_kwh,
+                program_number=2,
+            )
+
+    def _classify_sub_epsilon_gap(
+        self,
+        outcome: DecisionOutcome,
+        action: ChargeAction,
+    ) -> None:
+        """Do not report a gap within epsilon as a grid charge."""
+        if self._total_gap_kwh > GAP_EPSILON_KWH:
+            return
+        outcome.action_type = "no_action"
+        self._classify_no_grid(outcome, action.target_soc)
+
     async def _handle_no_action(self, balance: EnergyBalance) -> None:
         """Handle morning no-action path."""
         target_soc = calculate_target_soc_from_needed_reserve(
@@ -564,17 +589,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
         if entities_changed:
             outcome.summary = f"Set Program 2 SOC to {target_soc:.0f}%"
             outcome.entities_changed = entities_changed
-        if (
-            self._needed_reserve_all_kwh > GAP_EPSILON_KWH
-            and target_soc > self.current_soc
-        ):
-            mark_secure_energy(
-                outcome,
-                current_soc=self.current_soc,
-                target_soc=target_soc,
-                gap_kwh=self._total_gap_kwh,
-                program_number=2,
-            )
+        self._classify_no_grid(outcome, target_soc)
         await self._schedule_completion(target_soc)
         await log_decision_unified(
             self.hass,

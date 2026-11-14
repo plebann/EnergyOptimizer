@@ -177,7 +177,8 @@ reserve through its decision horizon, without scheduling grid charging. It requi
 an effective gap at or below the common 0.001 kWh epsilon. Morning Charge: the needed reserve exceeds the epsilon and
 the target SOC is above the current SOC (the Charge Target Safety Margin may lift that target). Afternoon Charge: the
 unrounded forecast peak SOC in the Day Buy Window, before rounding and the margin, exceeds the current SOC by more than
-the epsilon in kWh. A target produced only by technical SOC rounding or a safety margin, with neither signal, is not
+the epsilon in kWh, and the final written target, after the margin and the `max_soc` cap, is above the current SOC. A
+target produced only by technical SOC rounding or a safety margin, with neither signal, is not
 Secure Energy. At the end of the window it restores only the program SOC; it never changes the grid-charge current.
 
 ### Charge Decision Type

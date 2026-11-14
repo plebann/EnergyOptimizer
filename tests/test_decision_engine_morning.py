@@ -1264,3 +1264,84 @@ async def test_morning_secure_energy_needs_reserve_above_epsilon_and_target_abov
     await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
 
     assert _logged_decision(hass)[0] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("gap_kwh", "expected"),
+    [
+        (0.0005, "secure_energy"),  # below epsilon: reserve secured, not a charge
+        (0.001, "secure_energy"),  # at epsilon
+        (0.0015, "charge"),  # above epsilon
+    ],
+)
+async def test_morning_positive_gap_within_epsilon_is_not_a_charge(
+    monkeypatch: pytest.MonkeyPatch,
+    gap_kwh: float,
+    expected: str,
+) -> None:
+    """The reported type applies GAP_EPSILON_KWH to a positive gap (#39)."""
+    from custom_components.energy_optimizer.decision_engine import morning_charge
+    from custom_components.energy_optimizer.decision_engine.common import EnergyBalance
+
+    hass = _morning_no_grid_setup(soc="20")
+    monkeypatch.setattr(
+        morning_charge,
+        "_calculate_morning_balance",
+        lambda *_a, **_k: (
+            EnergyBalance(
+                reserve_kwh=1.0,
+                required_kwh=1.0 + gap_kwh,
+                needed_reserve_kwh=1.0,
+                gap_kwh=gap_kwh,
+                pv_compensation_factor=None,
+            ),
+            1.0,
+            gap_kwh,
+            1.0,
+            gap_kwh,
+        ),
+    )
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    assert _logged_decision(hass)[0] == expected
+
+
+@pytest.mark.asyncio
+async def test_morning_charge_classification_survives_zero_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A positive gap stays `charge` when every write is already in place (#39)."""
+    from custom_components.energy_optimizer.decision_engine import morning_charge
+    from custom_components.energy_optimizer.decision_engine.common import EnergyBalance
+
+    hass = _morning_no_grid_setup(soc="20")
+    monkeypatch.setattr(
+        morning_charge,
+        "_calculate_morning_balance",
+        lambda *_a, **_k: (
+            EnergyBalance(
+                reserve_kwh=1.0,
+                required_kwh=2.0,
+                needed_reserve_kwh=2.0,
+                gap_kwh=1.0,
+                pv_compensation_factor=None,
+            ),
+            2.0,
+            1.0,
+            2.0,
+            1.0,
+        ),
+    )
+    async def _no_writes(*_a: object, **_k: object) -> list[dict[str, object]]:
+        return []
+
+    monkeypatch.setattr(MorningChargeStrategy, "_prepare_charge_action", _no_writes)
+    monkeypatch.setattr(MorningChargeStrategy, "_apply_charge_action", _no_writes)
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    action_type, details, _ = _logged_decision(hass)
+    assert action_type == "charge"
+    assert details.get("entities_changed", []) == []

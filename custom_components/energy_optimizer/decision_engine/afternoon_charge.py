@@ -454,7 +454,7 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
             self.bc.capacity_ah,
             self.bc.voltage,
         )
-        if peak_rise_kwh > _EPSILON_KWH:
+        if peak_rise_kwh > _EPSILON_KWH and action.target_soc > self.current_soc:
             mark_secure_energy(
                 outcome,
                 current_soc=self.current_soc,
