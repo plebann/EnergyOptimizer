@@ -13,10 +13,6 @@ from homeassistant.util import dt as dt_util
 from custom_components.energy_optimizer.const import (
     CONF_BEV_CHARGING_BINARY_SENSOR,
     CONF_BUY_PRICE_SENSOR,
-    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
-    CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
-    CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
-    CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
     CONF_PROG4_TIME_START_ENTITY,
     CONF_SELL_PRICE_SENSOR,
@@ -256,10 +252,6 @@ def test_scheduler_publishes_structured_daily_snapshot(
         data={
             CONF_SELL_PRICE_SENSOR: "sensor.sell_price",
             CONF_HIGH_TARIFF_START_HOUR_SENSOR: "sensor.tariff_start",
-            CONF_MORNING_MAX_PRICE_HOUR_SENSOR: "sensor.morning_peak",
-            CONF_EVENING_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak",
-            CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak_2",
-            CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR: "sensor.daytime_min",
             CONF_PROG4_TIME_START_ENTITY: "time.program4_start",
         }
     )
@@ -776,10 +768,7 @@ async def test_evening_scheduler_passes_primary_and_first_flags(
     hass = MagicMock()
     hass.data = {DOMAIN: {"entry-1": {}}}
     entry = _mock_entry(
-        data={
-            CONF_EVENING_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak",
-            CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR: "sensor.evening_peak_2",
-        }
+        data={}
     )
     scheduler = ActionScheduler(
         hass, entry, resolver=_resolver(evening_sell=_ranked(19, 18))
