@@ -1047,6 +1047,7 @@ class EnergyOptimizerOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Required(
                     CONF_GRID_CHARGE_CURRENT_ENTITY,
+                    default=self._config_entry.data.get(CONF_GRID_CHARGE_CURRENT_ENTITY),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="number")
                 ),
