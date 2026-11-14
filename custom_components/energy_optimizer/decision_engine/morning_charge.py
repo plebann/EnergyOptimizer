@@ -256,43 +256,48 @@ class MorningChargeStrategy(BaseChargeStrategy):
         """Return the numbers of the programs in the Morning Charge Program Set."""
         return [program.number for program in self._program_set]
 
-    async def _resolve_program_set(self) -> tuple[_ProgramTarget, ...] | None:
-        """Return the programs overlapping the Night Buy Window, in time order.
+    def _read_program(
+        self, number: int, soc_key: str, time_key: str
+    ) -> str | tuple[time, _ProgramTarget | None] | None:
+        """Read one program: a failure reason, its start (and target), or None to skip.
 
-        Programs 6, 1 and 2 must have both SOC and start-time controls readable;
-        any other configured program only bounds the intervals.
+        Writable programs need both controls; any other program only needs a
+        readable start time to bound its neighbours' intervals.
         """
+        required = number in _MORNING_PROGRAMS
+        soc_entity = self.config.get(soc_key)
+        time_entity = self.config.get(time_key)
+        if not time_entity or (required and not soc_entity):
+            if required:
+                return f"Program {number} SOC or start-time control not configured"
+            return None
+        start = self._current_program_start_time(str(time_entity))
+        if start is None:
+            if required:
+                return f"Program {number} start-time control unavailable or invalid"
+            return None
+        if not required:
+            return start, None
+        value, _, error = get_float_state_info(self.hass, str(soc_entity))
+        if error is not None or value is None:
+            return f"Program {number} SOC control unavailable or invalid"
+        return start, _ProgramTarget(number, str(soc_entity), value)
+
+    async def _resolve_program_set(self) -> tuple[_ProgramTarget, ...] | None:
+        """Return the programs overlapping the Night Buy Window, in time order."""
         starts: list[tuple[int, time]] = []
         targets: dict[int, _ProgramTarget] = {}
         for number, (soc_key, time_key) in _PROGRAM_CONFIG.items():
-            required = number in _MORNING_PROGRAMS
-            soc_entity = self.config.get(soc_key)
-            time_entity = self.config.get(time_key)
-            if not time_entity or (required and not soc_entity):
-                if required:
-                    await self._log_write_failure(
-                        f"Program {number} SOC or start-time control not configured"
-                    )
-                    return None
-                continue
-            start = self._current_program_start_time(str(time_entity))
-            if start is None:
-                if required:
-                    await self._log_write_failure(
-                        f"Program {number} start-time control unavailable or invalid"
-                    )
-                    return None
-                continue
-            starts.append((number, start))
-            if not required:
-                continue
-            value, _, error = get_float_state_info(self.hass, str(soc_entity))
-            if error is not None or value is None:
-                await self._log_write_failure(
-                    f"Program {number} SOC control unavailable or invalid"
-                )
+            read = self._read_program(number, soc_key, time_key)
+            if isinstance(read, str):
+                await self._log_write_failure(read)
                 return None
-            targets[number] = _ProgramTarget(number, str(soc_entity), value)
+            if read is None:
+                continue
+            start, target = read
+            starts.append((number, start))
+            if target is not None:
+                targets[number] = target
 
         window_start, window_end = self._resolve_completion_window()
         overlapping = programs_overlapping_window(

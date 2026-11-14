@@ -342,24 +342,13 @@ async def _async_handle_charge_completion(
         _publish_schedule_snapshot(hass, entry)
 
 
-async def _async_complete_program_set(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    store: Store,
-    plan: dict[str, Any],
-    restore_targets: dict[str, float],
-    context: Context,
-    scenario: str,
-) -> None:
-    """Return each recorded program to its Normal SOC Target, independently.
-
-    A program that fails is retried alone after five minutes; programs already
-    restored are left as they are.
-    """
-    config = entry.data
+def _read_completion_state(
+    hass: HomeAssistant, restore_targets: dict[str, float]
+) -> tuple[dict[str, float], dict[str, float], list[str]]:
+    """Split programs into those to restore, unreadable ones and failure reasons."""
+    pending: dict[str, float] = {}
     failures: dict[str, float] = {}
     reasons: list[str] = []
-    pending: dict[str, float] = {}
     for entity_id, normal_soc in restore_targets.items():
         current, _, error = get_float_state_info(hass, entity_id)
         if error is not None or current is None:
@@ -367,9 +356,20 @@ async def _async_complete_program_set(
             reasons.append(f"{entity_id}: Program SOC unavailable or invalid at completion")
         elif abs(normal_soc - current) > 0.01:
             pending[entity_id] = normal_soc
+    return pending, failures, reasons
 
+
+async def _restore_programs(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    context: Context,
+    pending: dict[str, float],
+    failures: dict[str, float],
+    reasons: list[str],
+) -> list[dict[str, object]]:
+    """Zero the grid charge current once, then restore each program on its own."""
     entities_changed: list[dict[str, object]] = []
-    grid_charge_current_entity = config.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
+    grid_charge_current_entity = entry.data.get(CONF_GRID_CHARGE_CURRENT_ENTITY)
     if pending and grid_charge_current_entity:
         try:
             await set_charge_current(
@@ -383,11 +383,10 @@ async def _async_complete_program_set(
         except HomeAssistantError as err:
             failures.update(pending)
             reasons.append(str(err))
-            pending = {}
-        else:
-            entities_changed.append(
-                {"entity_id": str(grid_charge_current_entity), "value": 0.0}
-            )
+            return entities_changed
+        entities_changed.append(
+            {"entity_id": str(grid_charge_current_entity), "value": 0.0}
+        )
     for entity_id, normal_soc in pending.items():
         try:
             await set_program_soc(
@@ -403,7 +402,61 @@ async def _async_complete_program_set(
             reasons.append(f"{entity_id}: {err}")
         else:
             entities_changed.append({"entity_id": entity_id, "value": normal_soc})
+    return entities_changed
 
+
+def _program_set_outcome(
+    scenario: str,
+    details: dict[str, object],
+    failed: bool,
+    reasons: list[str],
+    entities_changed: list[dict[str, object]],
+) -> DecisionOutcome:
+    """Classify the completion as failed, already satisfied, or completed."""
+    if failed:
+        return DecisionOutcome(
+            scenario=scenario,
+            action_type="charge_completion_failed",
+            summary=f"{scenario} failed",
+            reason="; ".join(reasons),
+            details=details,
+            entities_changed=entities_changed,
+        )
+    if not entities_changed:
+        return DecisionOutcome(
+            scenario=scenario,
+            action_type="no_action",
+            summary="Program SOC already at its Normal SOC Target",
+            reason="Completion target already present",
+            details=details,
+        )
+    return DecisionOutcome(
+        scenario=scenario,
+        action_type="charge_completed",
+        summary="Programs returned to their Normal SOC Target",
+        details=details,
+        entities_changed=entities_changed,
+    )
+
+
+async def _async_complete_program_set(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    store: Store,
+    plan: dict[str, Any],
+    restore_targets: dict[str, float],
+    context: Context,
+    scenario: str,
+) -> None:
+    """Return each recorded program to its Normal SOC Target, independently.
+
+    A program that fails is retried alone after five minutes; programs already
+    restored are left as they are.
+    """
+    pending, failures, reasons = _read_completion_state(hass, restore_targets)
+    entities_changed = await _restore_programs(
+        hass, entry, context, pending, failures, reasons
+    )
     details = {
         "programs": [
             {"entity_id": entity_id, "soc": soc}
@@ -415,50 +468,28 @@ async def _async_complete_program_set(
     async with active_decision_audit(
         hass, entry, trigger="scheduler:morning_charge_completion"
     ):
-        if failures:
-            outcome = DecisionOutcome(
-                scenario=scenario,
-                action_type="charge_completion_failed",
-                summary=f"{scenario} failed",
-                reason="; ".join(reasons),
-                details=details,
-                entities_changed=entities_changed,
-            )
-        elif not entities_changed:
-            outcome = DecisionOutcome(
-                scenario=scenario,
-                action_type="no_action",
-                summary="Program SOC already at its Normal SOC Target",
-                reason="Completion target already present",
-                details=details,
-            )
-        else:
-            outcome = DecisionOutcome(
-                scenario=scenario,
-                action_type="charge_completed",
-                summary="Programs returned to their Normal SOC Target",
-                details=details,
-                entities_changed=entities_changed,
-            )
+        outcome = _program_set_outcome(
+            scenario, details, bool(failures), reasons, entities_changed
+        )
         await log_decision_unified(
             hass, entry, outcome, context=context, logger=_LOGGER
         )
 
+        window_start = dt_util.parse_datetime(str(plan["window_start"]))
+        window_end = dt_util.parse_datetime(str(plan["window_end"]))
+        if failures and window_start is not None and window_end is not None:
+            await async_schedule_charge_completion(
+                hass,
+                entry,
+                charge_type="morning",
+                complete_at=dt_util.now() + timedelta(minutes=5),
+                window_start=dt_util.as_local(window_start),
+                window_end=dt_util.as_local(window_end),
+                window_source=plan.get("window_source"),
+                restore_targets=failures,
+            )
+            return
         if failures:
-            window_start = dt_util.parse_datetime(str(plan["window_start"]))
-            window_end = dt_util.parse_datetime(str(plan["window_end"]))
-            if window_start is not None and window_end is not None:
-                await async_schedule_charge_completion(
-                    hass,
-                    entry,
-                    charge_type="morning",
-                    complete_at=dt_util.now() + timedelta(minutes=5),
-                    window_start=dt_util.as_local(window_start),
-                    window_end=dt_util.as_local(window_end),
-                    window_source=plan.get("window_source"),
-                    restore_targets=failures,
-                )
-                return
             _LOGGER.error(
                 "Cannot retry morning charge completion with invalid window data"
             )
