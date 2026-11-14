@@ -1,6 +1,7 @@
 """Persistent completion handling for temporary charge targets."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 import logging
 from typing import TYPE_CHECKING, Any, Literal
@@ -36,6 +37,7 @@ _LOGGER = logging.getLogger(__name__)
 _RUNTIME_KEY = "charge_completion_listeners"
 _PLANS_KEY = "charge_completion_plans"
 _SNAPSHOT_CALLBACK_KEY = "charge_completion_snapshot_callback"
+_MORNING_LOCK_KEY = "morning_charge_lock"
 
 
 def _store(hass: HomeAssistant, entry: ConfigEntry, charge_type: ChargeType) -> Store:
@@ -57,6 +59,20 @@ def _plans(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
     """Return the runtime completion-plan registry."""
     entry_data = hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
     return entry_data.setdefault(_PLANS_KEY, {})
+
+
+def morning_charge_lock(hass: HomeAssistant, entry: ConfigEntry) -> asyncio.Lock:
+    """Return the per-entry lock serializing Morning Charge and its completion.
+
+    Morning Charge reads program SOCs, writes targets and records the completion
+    plan; completion reads that plan and restores. Holding one lock across each
+    keeps overlapping manual and scheduled runs from losing the original SOC.
+    """
+    entry_data = hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
+    lock = entry_data.get(_MORNING_LOCK_KEY)
+    if lock is None:
+        lock = entry_data[_MORNING_LOCK_KEY] = asyncio.Lock()
+    return lock
 
 
 def get_charge_completion_plan(
@@ -145,6 +161,19 @@ async def async_handle_charge_completion(
     charge_type: ChargeType,
 ) -> None:
     """Complete one temporary charge target and clear its persisted plan."""
+    if charge_type == "morning":
+        async with morning_charge_lock(hass, entry):
+            await _async_handle_charge_completion(hass, entry, charge_type)
+        return
+    await _async_handle_charge_completion(hass, entry, charge_type)
+
+
+async def _async_handle_charge_completion(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    charge_type: ChargeType,
+) -> None:
+    """Complete one temporary charge target without taking the Morning lock."""
     store = _store(hass, entry, charge_type)
     plan = await store.async_load()
     if not isinstance(plan, dict):

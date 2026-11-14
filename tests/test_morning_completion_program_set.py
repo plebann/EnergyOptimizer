@@ -246,3 +246,27 @@ async def test_restore_after_restart_keeps_the_restore_targets(
     assert completion["reschedule"].await_args.kwargs["restore_targets"] == {
         "number.p6_soc": 20.0
     }
+
+
+@pytest.mark.asyncio
+async def test_completion_waits_for_a_running_morning_charge(
+    monkeypatch: pytest.MonkeyPatch, completion: dict[str, AsyncMock]
+) -> None:
+    """Completion never restores while Morning Charge is mid-transaction."""
+    import asyncio
+
+    store = _plan_store({"number.p6_soc": 20})
+    _use(monkeypatch, store)
+    hass = _hass({"number.p6_soc": "70"})
+    entry = _entry(CONFIG)
+
+    async with charge_completion.morning_charge_lock(hass, entry):
+        task = asyncio.ensure_future(
+            charge_completion.async_handle_charge_completion(hass, entry, "morning")
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        completion["set_soc"].assert_not_awaited()
+
+    await task
+    completion["set_soc"].assert_awaited_once()

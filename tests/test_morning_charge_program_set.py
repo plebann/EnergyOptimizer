@@ -11,6 +11,7 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_EFFICIENCY,
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
+    CONF_CHARGE_CURRENT_ENTITY,
     CONF_DAILY_LOAD_SENSOR,
     CONF_GRID_CHARGE_CURRENT_ENTITY,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
@@ -20,6 +21,7 @@ from custom_components.energy_optimizer.const import (
     CONF_PROG1_TIME_START_ENTITY,
     CONF_PROG2_SOC_ENTITY,
     CONF_PROG2_TIME_START_ENTITY,
+    CONF_PROG3_TIME_START_ENTITY,
     CONF_PROG6_SOC_ENTITY,
     CONF_PROG6_TIME_START_ENTITY,
     CONF_TEST_MODE,
@@ -207,3 +209,60 @@ async def test_unreadable_program_start_time_fails_the_run_without_writes() -> N
     assert _writes(hass) == []
     _, details = _outcome(hass)
     assert "target_soc" not in details
+
+
+@pytest.mark.asyncio
+async def test_time_only_program_still_bounds_the_previous_program_interval() -> None:
+    """P3 (start time, no SOC control) at 05:00 ends P2; 05-06 touches no writable program."""
+    config = {**CONFIG, CONF_PROG3_TIME_START_ENTITY: "time.prog3_start"}
+    states = {**STATES, "time.prog3_start": "05:00:00"}
+    hass = _hass(states, market_windows(night_buy=window(5, 6, 0.4)), config)
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    assert [w for w in _writes(hass) if w[1].endswith("_soc")] == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_program_set_leaves_the_max_charge_current_untouched() -> None:
+    """A run that fails program validation writes nothing, not even the max current."""
+    config = {**CONFIG, CONF_CHARGE_CURRENT_ENTITY: "number.max_charge_current"}
+    states = {
+        **{k: v for k, v in STATES.items() if k != "time.prog1_start"},
+        "number.max_charge_current": "0",
+    }
+    hass = _hass(states, market_windows(night_buy=window(23, 4, 0.4)), config)
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    assert _writes(hass) == []
+
+
+@pytest.mark.asyncio
+async def test_overlapping_runs_for_one_entry_are_serialized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reading, writing and recording the plan never interleave between runs."""
+    import asyncio
+
+    from custom_components.energy_optimizer.decision_engine.morning_charge import (
+        MorningChargeStrategy,
+    )
+
+    events: list[str] = []
+
+    async def _run(self: object) -> None:
+        events.append("in")
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        events.append("out")
+
+    monkeypatch.setattr(MorningChargeStrategy, "run", _run)
+    hass = _hass(STATES)
+
+    await asyncio.gather(
+        async_run_morning_charge(hass, entry_id="entry-1"),
+        async_run_morning_charge(hass, entry_id="entry-1"),
+    )
+
+    assert events == ["in", "out", "in", "out"]

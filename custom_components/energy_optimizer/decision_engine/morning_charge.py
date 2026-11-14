@@ -67,6 +67,7 @@ from ..market_windows import MarketWindows
 from ..service_handlers.charge_completion import (
     async_schedule_charge_completion,
     get_charge_completion_plan,
+    morning_charge_lock,
     plan_restore_targets,
 )
 from ..utils.decision_dump import active_decision_audit
@@ -107,6 +108,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
 
     _program_set: tuple[_ProgramTarget, ...] = ()
     _written_programs: tuple[_ProgramTarget, ...] = ()
+    _validated_program_set: tuple[_ProgramTarget, ...] | None = None
 
     @property
     def scenario_name(self) -> str:
@@ -266,7 +268,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
             required = number in _MORNING_PROGRAMS
             soc_entity = self.config.get(soc_key)
             time_entity = self.config.get(time_key)
-            if not soc_entity or not time_entity:
+            if not time_entity or (required and not soc_entity):
                 if required:
                     await self._log_write_failure(
                         f"Program {number} SOC or start-time control not configured"
@@ -301,6 +303,17 @@ class MorningChargeStrategy(BaseChargeStrategy):
         )
         return tuple(targets[number] for number in overlapping if number in targets)
 
+    async def _prepare_charge_action(
+        self,
+        action: ChargeAction,
+    ) -> list[dict[str, float | str]] | None:
+        """Validate the Program Set before any shared control is written."""
+        del action
+        self._validated_program_set = await self._resolve_program_set()
+        if self._validated_program_set is None:
+            return None
+        return []
+
     async def _write_temporary_program_soc(
         self,
         target_soc: float,
@@ -308,7 +321,9 @@ class MorningChargeStrategy(BaseChargeStrategy):
         """Write the target SOC to every Program Set member not already at it."""
         self._program_set = ()
         self._written_programs = ()
-        program_set = await self._resolve_program_set()
+        program_set = self._validated_program_set
+        if program_set is None:
+            program_set = await self._resolve_program_set()
         if program_set is None:
             return None
         self._program_set = program_set
@@ -684,7 +699,9 @@ async def async_run_morning_charge(
     if entry is None:
         return
     strategy = MorningChargeStrategy(hass, entry_id=entry_id, margin=margin)
-    async with active_decision_audit(hass, entry, trigger=trigger):
+    async with morning_charge_lock(hass, entry), active_decision_audit(
+        hass, entry, trigger=trigger
+    ):
         await strategy.run()
 
 
