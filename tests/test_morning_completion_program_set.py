@@ -283,6 +283,7 @@ def _strategy_with_written_p6(hass, entry):
 
     strategy = MorningChargeStrategy(hass, entry_id=entry.entry_id, margin=None)
     strategy.entry = entry
+    strategy.config = entry.data
     strategy.bc = BatteryConfig(100, 50, 15, 15, 100, 100)
     p6 = _ProgramTarget(6, "number.p6_soc", 70.0)
     strategy._program_set = (p6,)
@@ -370,3 +371,33 @@ async def test_recovery_waits_for_a_running_morning_charge(
 
     await task
     completion["reschedule"].assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pending_legacy_plan_seeds_program_2_with_min_soc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An upgraded install's old plan implies P2 -> min_soc, not the temporary 60 %."""
+    from custom_components.energy_optimizer.const import CONF_PROG2_SOC_ENTITY
+    from custom_components.energy_optimizer.decision_engine.morning_charge import (
+        _ProgramTarget,
+    )
+
+    hass = _hass({})
+    legacy_plan = _plan_store({}).data
+    del legacy_plan["programs"]
+    hass.data[DOMAIN]["entry-1"]["charge_completion_plans"] = {"morning": legacy_plan}
+    schedule = AsyncMock()
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.async_schedule_charge_completion",
+        schedule,
+    )
+    entry = _entry({**CONFIG, CONF_PROG2_SOC_ENTITY: "number.p2_soc"})
+    strategy = _strategy_with_written_p6(hass, entry)
+    p2 = _ProgramTarget(2, "number.p2_soc", 60.0)
+    strategy._program_set = (p2,)
+    strategy._written_programs = (p2,)
+
+    await strategy._schedule_completion(80)
+
+    assert schedule.await_args.kwargs["restore_targets"] == {"number.p2_soc": 15.0}

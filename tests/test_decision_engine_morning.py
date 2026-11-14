@@ -1256,6 +1256,7 @@ async def test_morning_secure_energy_writes_the_program_set_soc(
     assert details["target_soc"] == 30.0
     assert details["current_soc"] == 20.0
     assert details["program_numbers"] == [6, 1, 2]
+    assert details["programs"] == [6, 1, 2]
     assert "program_number" not in details
     assert details["grid_charge_kwh"] == 0.0
     assert "window_start" in details and "window_end" in details

@@ -21,6 +21,7 @@ from ..const import (
     CONF_GRID_CHARGE_CURRENT_ENTITY,
     CONF_ENABLE_HEAT_PUMP,
     CONF_MIN_ARBITRAGE_PRICE,
+    CONF_MIN_SOC,
     CONF_PROG1_SOC_ENTITY,
     CONF_PROG1_TIME_START_ENTITY,
     CONF_PROG2_SOC_ENTITY,
@@ -66,6 +67,7 @@ from ..helpers import (
 from ..market_windows import MarketWindows
 from ..service_handlers.charge_completion import (
     async_schedule_charge_completion,
+    async_clear_charge_completion,
     async_load_charge_completion_plan,
     morning_charge_lock,
     plan_restore_targets,
@@ -109,6 +111,9 @@ class MorningChargeStrategy(BaseChargeStrategy):
     _program_set: tuple[_ProgramTarget, ...] = ()
     _written_programs: tuple[_ProgramTarget, ...] = ()
     _validated_program_set: tuple[_ProgramTarget, ...] | None = None
+    _baselines_persisted: bool = False
+    _recorded_before: dict[str, float] = {}
+    _persisted_targets: dict[str, float] = {}
 
     @property
     def scenario_name(self) -> str:
@@ -333,6 +338,13 @@ class MorningChargeStrategy(BaseChargeStrategy):
             return None
         self._program_set = program_set
 
+        to_write = [
+            program
+            for program in program_set
+            if abs(target_soc - program.value) > 0.01
+        ]
+        if to_write:
+            await self._persist_baselines(to_write)
         changed: list[dict[str, float | str]] = []
         for program in program_set:
             if abs(target_soc - program.value) <= 0.01:
@@ -355,7 +367,11 @@ class MorningChargeStrategy(BaseChargeStrategy):
         return changed
 
     async def _rollback_temporary_program_soc(self) -> None:
-        """Restore the programs already written when a later write fails."""
+        """Restore the programs already written when a later write fails.
+
+        The early restore plan is dropped only once every program is back.
+        """
+        rolled_back = True
         for program in reversed(self._written_programs):
             try:
                 await set_program_soc(
@@ -367,12 +383,66 @@ class MorningChargeStrategy(BaseChargeStrategy):
                     context=self.integration_context,
                 )
             except HomeAssistantError as err:
+                rolled_back = False
                 _LOGGER.error(
                     "Morning charge failed to roll back %s: %s",
                     program.soc_entity,
                     err,
                 )
         self._written_programs = ()
+        if rolled_back and self._baselines_persisted:
+            await self._discard_baselines()
+
+    async def _load_recorded_targets(self) -> dict[str, float]:
+        """Return the restore targets already recorded by a pending plan."""
+        plan = await async_load_charge_completion_plan(self.hass, self.entry, "morning")
+        if plan is None:
+            return {}
+        if "programs" not in plan:
+            # A plan from before per-program targets implies Program 2 -> min_soc.
+            entity = self.config.get(CONF_PROG2_SOC_ENTITY)
+            if not entity:
+                return {}
+            return {str(entity): float(self.config.get(CONF_MIN_SOC, 15))}
+        return plan_restore_targets(plan)
+
+    async def _persist_baselines(self, to_write: list[_ProgramTarget]) -> None:
+        """Store each program's current SOC as its restore target before writing."""
+        self._recorded_before = await self._load_recorded_targets()
+        targets = dict(self._recorded_before)
+        for program in to_write:
+            targets.setdefault(program.soc_entity, program.value)
+        window_start, window_end = self._resolve_completion_window()
+        await async_schedule_charge_completion(
+            self.hass,
+            self.entry,
+            charge_type="morning",
+            complete_at=window_end,
+            window_start=window_start,
+            window_end=window_end,
+            window_source=self.windows.night_buy.source.value,
+            restore_targets=targets,
+        )
+        self._persisted_targets = targets
+        self._baselines_persisted = True
+
+    async def _discard_baselines(self) -> None:
+        """Return the stored plan to what it was before this run."""
+        self._baselines_persisted = False
+        if not self._recorded_before:
+            await async_clear_charge_completion(self.hass, self.entry, "morning")
+            return
+        window_start, window_end = self._resolve_completion_window()
+        await async_schedule_charge_completion(
+            self.hass,
+            self.entry,
+            charge_type="morning",
+            complete_at=window_end,
+            window_start=window_start,
+            window_end=window_end,
+            window_source=self.windows.night_buy.source.value,
+            restore_targets=self._recorded_before,
+        )
 
     async def _log_write_failure(self, reason: str) -> None:
         """Emit an explicit morning charge write failure."""
@@ -409,8 +479,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
         `min_soc`.
         """
         window_start, window_end = self._resolve_completion_window()
-        plan = await async_load_charge_completion_plan(self.hass, self.entry, "morning")
-        recorded = plan_restore_targets(plan) if plan is not None else {}
+        recorded = await self._load_recorded_targets()
         written = {program.soc_entity for program in self._written_programs}
         restore_targets = dict(recorded)
         for program in self._program_set:
@@ -425,7 +494,9 @@ class MorningChargeStrategy(BaseChargeStrategy):
             for entity_id, soc in restore_targets.items()
             if entity_id in recorded or abs(soc - target_soc) > 0.01
         }
-        if not restore_targets:
+        if not restore_targets or (
+            self._baselines_persisted and restore_targets == self._persisted_targets
+        ):
             return
         await async_schedule_charge_completion(
             self.hass,
@@ -676,6 +747,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
         entities_changed = await self._write_temporary_program_soc(target_soc)
         if entities_changed is None:
             return
+        outcome.details["programs"] = self._program_numbers()
         if entities_changed:
             outcome.summary = f"Set Program 2 SOC to {target_soc:.0f}%"
             outcome.entities_changed = entities_changed

@@ -46,6 +46,8 @@ def programs_overlapping_window(
     overlaps: list[tuple[datetime, _K]] = []
     for index, (key, start) in enumerate(ordered):
         next_start = ordered[(index + 1) % len(ordered)][1]
+        if next_start == start and len(ordered) > 1:
+            continue  # a program sharing its start with the next one is never active
         end_offset = timedelta(days=0 if next_start > start else 1)
         day = reference.astimezone(tzinfo).date() - timedelta(days=1)
         while day <= window_end.date():

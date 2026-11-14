@@ -121,6 +121,16 @@ def _cancel_listener(hass: HomeAssistant, entry: ConfigEntry, charge_type: str) 
         remove_listener()
 
 
+async def async_clear_charge_completion(
+    hass: HomeAssistant, entry: ConfigEntry, charge_type: ChargeType
+) -> None:
+    """Drop a pending completion plan and its listener."""
+    _cancel_listener(hass, entry, charge_type)
+    await _store(hass, entry, charge_type).async_remove()
+    _plans(hass, entry).pop(charge_type, None)
+    _publish_schedule_snapshot(hass, entry)
+
+
 async def async_schedule_charge_completion(
     hass: HomeAssistant,
     entry: ConfigEntry,

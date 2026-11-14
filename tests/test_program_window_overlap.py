@@ -108,3 +108,24 @@ def test_repeated_hour_at_the_end_of_dst_includes_a_program_in_the_first_pass() 
     )
 
     assert result == ["p1", "p2"]
+
+
+def test_program_sharing_a_start_with_another_has_an_empty_interval() -> None:
+    """P1 and P2 both at 04:00: only one of them is active after 04:00."""
+    programs = [("p6", time(22, 0)), ("p1", time(4, 0)), ("p2", time(4, 0))]
+
+    before_four = programs_overlapping_window(
+        programs,
+        window_start=_at(10, 23),
+        window_end=_at(11, 3),
+        now=_at(10, 22, 30),
+    )
+    across_four = programs_overlapping_window(
+        programs,
+        window_start=_at(10, 23),
+        window_end=_at(11, 5),
+        now=_at(10, 22, 30),
+    )
+
+    assert before_four == ["p6"]
+    assert across_four == ["p6", "p2"]

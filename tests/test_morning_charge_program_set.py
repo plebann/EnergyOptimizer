@@ -122,6 +122,16 @@ def _outcome(hass: MagicMock) -> tuple[str, dict[str, object]]:
 
 
 @pytest.fixture(autouse=True)
+def _clear_completion(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    clear = AsyncMock()
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.async_clear_charge_completion",
+        clear,
+    )
+    return clear
+
+
+@pytest.fixture(autouse=True)
 def _schedule_completion(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     schedule = AsyncMock()
     monkeypatch.setattr(
@@ -270,3 +280,39 @@ async def test_overlapping_runs_for_one_entry_are_serialized(
     )
 
     assert events == ["in", "out", "in", "out"]
+
+
+@pytest.mark.asyncio
+async def test_baselines_are_persisted_before_the_first_soc_write(
+    _schedule_completion: AsyncMock,
+) -> None:
+    """A run cancelled mid-write must already have its restore targets stored."""
+    hass = _hass(STATES, market_windows(night_buy=window(23, 4, 0.4)))
+    seen: list[dict[str, float]] = []
+
+    async def _call(domain: str, service: str, data: dict, **_kwargs: object) -> None:
+        if data.get("entity_id") == "number.prog6_soc" and not seen:
+            seen.append(dict(_schedule_completion.await_args.kwargs["restore_targets"]))
+
+    hass.services.async_call = AsyncMock(side_effect=_call)
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    assert seen == [{"number.prog6_soc": 10.0, "number.prog1_soc": 10.0}]
+
+
+@pytest.mark.asyncio
+async def test_baselines_are_dropped_once_a_failed_run_is_rolled_back(
+    _clear_completion: AsyncMock,
+) -> None:
+    hass = _hass(STATES, market_windows(night_buy=window(23, 4, 0.4)))
+
+    async def _call(domain: str, service: str, data: dict, **_kwargs: object) -> None:
+        if data.get("entity_id") == "number.prog1_soc" and data["value"] != 10:
+            raise HomeAssistantError("write failed")
+
+    hass.services.async_call = AsyncMock(side_effect=_call)
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    _clear_completion.assert_awaited_once()
