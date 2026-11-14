@@ -270,3 +270,103 @@ async def test_completion_waits_for_a_running_morning_charge(
 
     await task
     completion["set_soc"].assert_awaited_once()
+
+
+def _strategy_with_written_p6(hass, entry):
+    """A Morning Charge strategy that has just written P6 from 70 to 80."""
+    from custom_components.energy_optimizer.decision_engine.morning_charge import (
+        MorningChargeStrategy,
+        _ProgramTarget,
+    )
+    from custom_components.energy_optimizer.decision_engine.common import BatteryConfig
+    from custom_components.energy_optimizer.market_windows import default_market_windows
+
+    strategy = MorningChargeStrategy(hass, entry_id=entry.entry_id, margin=None)
+    strategy.entry = entry
+    strategy.bc = BatteryConfig(100, 50, 15, 15, 100, 100)
+    p6 = _ProgramTarget(6, "number.p6_soc", 70.0)
+    strategy._program_set = (p6,)
+    strategy._written_programs = (p6,)
+    start = dt_util.now().replace(hour=23, minute=0, second=0, microsecond=0)
+    strategy._resolve_completion_window = lambda: (start, start + timedelta(hours=5))
+    strategy.windows = default_market_windows(start)
+    return strategy
+
+
+@pytest.mark.asyncio
+async def test_baseline_persisted_before_a_restart_is_not_overwritten(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run before recovery repopulates the cache still keeps the stored 20 %."""
+    store = _plan_store({"number.p6_soc": 20})
+    _use(monkeypatch, store)
+    schedule = AsyncMock()
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.async_schedule_charge_completion",
+        schedule,
+    )
+    entry = _entry(CONFIG)
+    strategy = _strategy_with_written_p6(_hass({}), entry)
+
+    await strategy._schedule_completion(80)
+
+    assert schedule.await_args.kwargs["restore_targets"] == {"number.p6_soc": 20.0}
+
+
+@pytest.mark.asyncio
+async def test_unresolved_baseline_from_an_older_window_is_carried_forward(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P6 20 % that never restored is not replaced by the next night's 70 %."""
+    hass = _hass({})
+    old_plan = _plan_store({"number.p6_soc": 20}).data
+    old_plan["window_end"] = (dt_util.now() - timedelta(days=1)).isoformat()
+    hass.data[DOMAIN]["entry-1"]["charge_completion_plans"] = {"morning": old_plan}
+    monkeypatch.setattr(charge_completion, "_store", lambda *_args: _Store(old_plan))
+    schedule = AsyncMock()
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.async_schedule_charge_completion",
+        schedule,
+    )
+    strategy = _strategy_with_written_p6(hass, _entry(CONFIG))
+
+    await strategy._schedule_completion(80)
+
+    assert schedule.await_args.kwargs["restore_targets"] == {"number.p6_soc": 20.0}
+
+
+@pytest.mark.asyncio
+async def test_recovery_waits_for_a_running_morning_charge(
+    monkeypatch: pytest.MonkeyPatch, completion: dict[str, AsyncMock]
+) -> None:
+    """Startup recovery never reschedules a plan while Morning Charge is writing."""
+    import asyncio
+
+    end = dt_util.now() + timedelta(hours=2)
+    store = _Store(
+        {
+            "charge_type": "morning",
+            "complete_at": end.isoformat(),
+            "window_start": (end - timedelta(hours=5)).isoformat(),
+            "window_end": end.isoformat(),
+            "programs": [{"entity_id": "number.p6_soc", "soc": 20.0}],
+        }
+    )
+    monkeypatch.setattr(
+        charge_completion,
+        "_store",
+        lambda _hass, _entry, charge_type: store if charge_type == "morning" else _Store(),
+    )
+    hass = _hass({})
+    entry = _entry({})
+
+    async with charge_completion.morning_charge_lock(hass, entry):
+        task = asyncio.ensure_future(
+            charge_completion.async_restore_charge_completions(hass, entry)
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        completion["reschedule"].assert_not_awaited()
+
+    await task
+    completion["reschedule"].assert_awaited_once()

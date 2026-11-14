@@ -1,7 +1,7 @@
 """Selection of the Morning Charge Program Set from program start times."""
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from custom_components.energy_optimizer.utils.programs import (
     programs_overlapping_window,
@@ -90,3 +90,21 @@ def test_single_program_is_active_for_any_window() -> None:
     )
 
     assert result == ["p2"]
+
+
+def test_repeated_hour_at_the_end_of_dst_includes_a_program_in_the_first_pass() -> None:
+    """Warsaw 2026-10-25: 02:00 CEST to 02:00 CET contains the first 02:30."""
+    from zoneinfo import ZoneInfo
+
+    warsaw = ZoneInfo("Europe/Warsaw")
+    window_start = datetime(2026, 10, 25, 0, 0, tzinfo=UTC).astimezone(warsaw)
+    window_end = datetime(2026, 10, 25, 1, 0, tzinfo=UTC).astimezone(warsaw)
+
+    result = programs_overlapping_window(
+        [("p1", time(1, 30)), ("p2", time(2, 30)), ("p3", time(4, 0))],
+        window_start=window_start,
+        window_end=window_end,
+        now=window_start - timedelta(minutes=5),
+    )
+
+    assert result == ["p1", "p2"]

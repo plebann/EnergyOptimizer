@@ -433,6 +433,10 @@ async def test_morning_charge_arbitrage_increases_gap(
         "custom_components.energy_optimizer.decision_engine.morning_charge.async_schedule_charge_completion",
         AsyncMock(),
     )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.async_load_charge_completion_plan",
+        AsyncMock(return_value=None),
+    )
     base_config = {
         CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
         CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",

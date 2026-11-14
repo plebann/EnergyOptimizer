@@ -66,7 +66,7 @@ from ..helpers import (
 from ..market_windows import MarketWindows
 from ..service_handlers.charge_completion import (
     async_schedule_charge_completion,
-    get_charge_completion_plan,
+    async_load_charge_completion_plan,
     morning_charge_lock,
     plan_restore_targets,
 )
@@ -402,18 +402,15 @@ class MorningChargeStrategy(BaseChargeStrategy):
         """Schedule restoration of every program holding a temporary target.
 
         Each program returns to the value it held before Morning Charge changed
-        it. A program already recorded for this window keeps its first record,
-        so a repeated run never turns a temporary value into a restore target.
+        it. A program already recorded, even for an older window whose
+        restore has not succeeded yet, keeps its first record, so a repeated run
+        never turns a temporary value into a restore target.
         A program that already held the target with no record falls back to
         `min_soc`.
         """
         window_start, window_end = self._resolve_completion_window()
-        plan = get_charge_completion_plan(self.hass, self.entry, "morning")
-        recorded = (
-            plan_restore_targets(plan)
-            if plan is not None and plan.get("window_end") == window_end.isoformat()
-            else {}
-        )
+        plan = await async_load_charge_completion_plan(self.hass, self.entry, "morning")
+        recorded = plan_restore_targets(plan) if plan is not None else {}
         written = {program.soc_entity for program in self._written_programs}
         restore_targets = dict(recorded)
         for program in self._program_set:

@@ -83,6 +83,17 @@ def get_charge_completion_plan(
     return plan if isinstance(plan, dict) else None
 
 
+async def async_load_charge_completion_plan(
+    hass: HomeAssistant, entry: ConfigEntry, charge_type: ChargeType
+) -> dict[str, Any] | None:
+    """Return the pending plan, reading the store when recovery has not run yet."""
+    plan = get_charge_completion_plan(hass, entry, charge_type)
+    if plan is not None:
+        return plan
+    stored = await _store(hass, entry, charge_type).async_load()
+    return stored if isinstance(stored, dict) else None
+
+
 def plan_restore_targets(plan: dict[str, Any]) -> dict[str, float]:
     """Return the entity -> Normal SOC Target map recorded in a plan."""
     programs = plan.get("programs")
@@ -499,43 +510,56 @@ async def _async_complete_program_set(
         _publish_schedule_snapshot(hass, entry)
 
 
+async def _async_restore_charge_completion(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    charge_type: ChargeType,
+) -> None:
+    """Restore one persisted completion plan without taking the Morning lock."""
+    now = dt_util.now()
+    store = _store(hass, entry, charge_type)
+    plan = await store.async_load()
+    if not isinstance(plan, dict):
+        return
+    complete_at = dt_util.parse_datetime(str(plan.get("complete_at")))
+    window_start = dt_util.parse_datetime(str(plan.get("window_start")))
+    window_end = dt_util.parse_datetime(str(plan.get("window_end")))
+    if complete_at is None or window_start is None or window_end is None:
+        _LOGGER.error("Invalid persisted %s charge completion plan", charge_type)
+        await store.async_remove()
+        _plans(hass, entry).pop(charge_type, None)
+        _publish_schedule_snapshot(hass, entry)
+        return
+    complete_at = dt_util.as_local(complete_at)
+    window_start = dt_util.as_local(window_start)
+    window_end = dt_util.as_local(window_end)
+    if dt_util.as_utc(complete_at) <= dt_util.as_utc(now):
+        _plans(hass, entry)[charge_type] = plan
+        await _async_handle_charge_completion(hass, entry, charge_type)
+    else:
+        await async_schedule_charge_completion(
+            hass,
+            entry,
+            charge_type=charge_type,
+            complete_at=complete_at,
+            window_start=window_start,
+            window_end=window_end,
+            window_source=plan.get("window_source"),
+            restore_targets=plan_restore_targets(plan) or None,
+        )
+
+
 async def async_restore_charge_completions(
     hass: HomeAssistant,
     entry: ConfigEntry,
 ) -> None:
     """Restore pending completion listeners and run overdue plans."""
-    now = dt_util.now()
     for charge_type in ("morning", "afternoon"):
-        store = _store(hass, entry, charge_type)
-        plan = await store.async_load()
-        if not isinstance(plan, dict):
-            continue
-        complete_at = dt_util.parse_datetime(str(plan.get("complete_at")))
-        window_start = dt_util.parse_datetime(str(plan.get("window_start")))
-        window_end = dt_util.parse_datetime(str(plan.get("window_end")))
-        if complete_at is None or window_start is None or window_end is None:
-            _LOGGER.error("Invalid persisted %s charge completion plan", charge_type)
-            await store.async_remove()
-            _plans(hass, entry).pop(charge_type, None)
-            _publish_schedule_snapshot(hass, entry)
-            continue
-        complete_at = dt_util.as_local(complete_at)
-        window_start = dt_util.as_local(window_start)
-        window_end = dt_util.as_local(window_end)
-        if dt_util.as_utc(complete_at) <= dt_util.as_utc(now):
-            _plans(hass, entry)[charge_type] = plan
-            await async_handle_charge_completion(hass, entry, charge_type)
+        if charge_type == "morning":
+            async with morning_charge_lock(hass, entry):
+                await _async_restore_charge_completion(hass, entry, charge_type)
         else:
-            await async_schedule_charge_completion(
-                hass,
-                entry,
-                charge_type=charge_type,
-                complete_at=complete_at,
-                window_start=window_start,
-                window_end=window_end,
-                window_source=plan.get("window_source"),
-                restore_targets=plan_restore_targets(plan) or None,
-            )
+            await _async_restore_charge_completion(hass, entry, charge_type)
 
 
 def cancel_charge_completion_listeners(

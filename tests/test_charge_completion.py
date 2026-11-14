@@ -184,6 +184,11 @@ async def test_morning_completion_scheduled_when_target_is_already_present(
         schedule,
     )
 
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.async_load_charge_completion_plan",
+        AsyncMock(return_value=None),
+    )
+
     await strategy._schedule_completion(60)
 
     schedule.assert_awaited_once()
@@ -731,7 +736,7 @@ async def test_overdue_completion_runs_during_restore(
         "_store",
         lambda _hass, _entry, charge_type: stores[charge_type],
     )
-    monkeypatch.setattr(charge_completion, "async_handle_charge_completion", handle)
+    monkeypatch.setattr(charge_completion, "_async_handle_charge_completion", handle)
     monkeypatch.setattr(charge_completion.dt_util, "now", lambda: now)
 
     await charge_completion.async_restore_charge_completions(hass, entry)

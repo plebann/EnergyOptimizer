@@ -68,6 +68,10 @@ def _mock_charge_completion(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         "custom_components.energy_optimizer.decision_engine.morning_charge.async_schedule_charge_completion",
         schedule,
     )
+    monkeypatch.setattr(
+        "custom_components.energy_optimizer.decision_engine.morning_charge.async_load_charge_completion_plan",
+        AsyncMock(return_value=None),
+    )
     return schedule
 
 
