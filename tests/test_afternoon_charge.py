@@ -13,7 +13,6 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_SOC_SENSOR,
     CONF_BATTERY_VOLTAGE,
     CONF_GRID_CHARGE_CURRENT_ENTITY,
-    CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_MAX_SOC,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MIN_SOC,
@@ -95,7 +94,6 @@ def _hass(
         CONF_MIN_SOC: 20.0,
         CONF_MAX_SOC: max_soc,
         CONF_BATTERY_EFFICIENCY: efficiency,
-        CONF_EVENING_MAX_PRICE_SENSOR: "sensor.evening_price",
         CONF_MIN_ARBITRAGE_PRICE: 0.2,
         CONF_TEST_MODE: False,
     }

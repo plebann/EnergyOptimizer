@@ -16,13 +16,11 @@ from custom_components.energy_optimizer.const import (
     CONF_BATTERY_VOLTAGE,
     CONF_BUY_PRICE_SENSOR,
     CONF_DISCHARGE_CURRENT_ENTITY,
-    CONF_EVENING_MAX_PRICE_SENSOR,
     CONF_EXPORT_POWER_ENTITY,
     CONF_MIN_ARBITRAGE_PRICE,
     CONF_MIN_SOC,
     CONF_MIN_SOC_PV,
     CONF_MORNING_SELL_PV_COVERAGE_MARGIN,
-    CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_PROG3_SOC_ENTITY,
     CONF_PV_FORECAST_TODAY,
     CONF_PV_PRODUCTION_SENSOR,
@@ -124,8 +122,6 @@ def _base_config() -> dict[str, object]:
     return {
         CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
         CONF_PROG3_SOC_ENTITY: "number.prog3_soc",
-        CONF_MORNING_MAX_PRICE_SENSOR: "sensor.morning_price",
-        CONF_EVENING_MAX_PRICE_SENSOR: "sensor.evening_price",
         CONF_MIN_ARBITRAGE_PRICE: 400.0,
         CONF_WORK_MODE_ENTITY: "select.work_mode",
         CONF_EXPORT_POWER_ENTITY: "number.export_power",
@@ -1308,7 +1304,7 @@ async def test_morning_sell_records_the_source_of_each_window_value(
         _base_config(),
         _base_states(),
         morning_sell=RankedMarketWindow(
-            replace(window(7, 8, price=250.0), source=MarketWindowSource.LEGACY_ENTITY),
+            replace(window(7, 8, price=250.0), source=MarketWindowSource.PRICES),
             None,
         ),
         evening_sell=defaults.evening_sell,
@@ -1322,7 +1318,7 @@ async def test_morning_sell_records_the_source_of_each_window_value(
     await async_run_morning_sell(hass, entry_id="entry-1", margin=1.0)
 
     details = outcomes[-1].details
-    assert details["morning_price_source"] == "legacy_entity"
+    assert details["morning_price_source"] == "prices"
     assert details["evening_price_source"] == "default"
     # A Default Day Buy Window falls back to the High-Tariff end for the demand end.
     assert details["demand_end_source"] == "config_entity"

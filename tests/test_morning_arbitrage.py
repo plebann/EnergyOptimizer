@@ -16,7 +16,6 @@ from custom_components.energy_optimizer.const import (
     CONF_MAX_SOC,
     CONF_MIN_SOC,
     CONF_MIN_ARBITRAGE_PRICE,
-    CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_PROG2_SOC_ENTITY,
     CONF_PROG2_TIME_START_ENTITY,
     CONF_PV_FORECAST_REMAINING,
@@ -233,7 +232,6 @@ def _arb_config(
     min_price: float = 0.5,
 ) -> dict:
     return {
-        CONF_MORNING_MAX_PRICE_SENSOR: sell_price_entity,
         CONF_PV_FORECAST_REMAINING: remaining_entity,
         CONF_MIN_ARBITRAGE_PRICE: min_price,
     }
@@ -462,7 +460,6 @@ async def test_morning_charge_arbitrage_increases_gap(
     # Run with arbitrage enabled
     arb_config = {
         **base_config,
-        CONF_MORNING_MAX_PRICE_SENSOR: "sensor.morning_price",
         CONF_PV_FORECAST_REMAINING: "sensor.pv_remaining",
         CONF_MIN_ARBITRAGE_PRICE: 0.5,
     }

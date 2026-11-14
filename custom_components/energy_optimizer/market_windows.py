@@ -7,7 +7,6 @@ from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from enum import StrEnum
 import logging
 from math import isfinite
-import re
 from typing import TYPE_CHECKING, Final, Literal, Protocol, TypeVar
 
 from homeassistant.util import dt as dt_util
@@ -19,18 +18,9 @@ from .calculations.price_windows import (
 )
 from .const import (
     CONF_BUY_PRICE_SENSOR,
-    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
-    CONF_DAYTIME_MIN_PRICE_SENSOR,
-    CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
-    CONF_EVENING_MAX_PRICE_SENSOR,
-    CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
-    CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
     CONF_HIGH_TARIFF_START_HOUR_SENSOR,
-    CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
-    CONF_MORNING_MAX_PRICE_SENSOR,
     CONF_SELL_PRICE_SENSOR,
-    CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
     DOMAIN,
     NIGHT_BUY_WINDOW_END_HOUR,
     NIGHT_BUY_WINDOW_START_HOUR,
@@ -59,7 +49,6 @@ class MarketWindowSource(StrEnum):
     PLAN = "plan"
     PRICES = "prices"
     CONFIG_ENTITY = "config_entity"
-    LEGACY_ENTITY = "legacy_entity"
     DEFAULT = "default"
 
 
@@ -377,7 +366,6 @@ class StaticMarketWindowResolver:
 
 
 _UNAVAILABLE_STATES: Final = frozenset({"unknown", "unavailable"})
-_TIME_RANGE: Final = re.compile(r"^\s*\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\s*$")
 
 _Span = tuple[datetime, datetime, float | None]
 _RankedSpans = tuple[_Span, _Span | None, float | None]
@@ -434,15 +422,6 @@ def _gap_pct(primary_price: float | None, secondary_price: float | None) -> floa
     if not primary_price or secondary_price is None:
         return None
     return (primary_price - secondary_price) / primary_price * 100
-
-
-def _split_range(state_value: object) -> tuple[str, str | None]:
-    """Split an `HH:MM-HH:MM` entity state into its two times; else (state, None)."""
-    raw_value = str(state_value)
-    if not _TIME_RANGE.match(raw_value):
-        return raw_value, None
-    first, second = raw_value.split("-", 1)
-    return first.strip(), second.strip()
 
 
 def _parse_clock(state_value: object) -> time | None:
@@ -705,13 +684,6 @@ class CoordinatorMarketWindowResolver:
             default=lambda reason: _default_ranked(
                 today, DEFAULT_MORNING_SELL_HOUR, tz, reason=reason
             ),
-            legacy=lambda: self._legacy_ranked(
-                today,
-                tz,
-                CONF_MORNING_MAX_PRICE_HOUR_SENSOR,
-                CONF_MORNING_MAX_PRICE_SENSOR,
-                default_hour=DEFAULT_MORNING_SELL_HOUR,
-            ),
         )
         reference_start_hour = (morning_sell.primary.hour + 1) % 24
         morning_sell_buy_reference = _resolve(
@@ -751,13 +723,6 @@ class CoordinatorMarketWindowResolver:
                 default=lambda reason: _default_ranked(
                     tomorrow, DEFAULT_MORNING_SELL_HOUR, tz, reason=reason
                 ),
-                legacy=lambda: self._legacy_ranked(
-                    tomorrow,
-                    tz,
-                    None,
-                    CONF_TOMORROW_MORNING_MAX_PRICE_SENSOR,
-                    default_hour=DEFAULT_MORNING_SELL_HOUR,
-                ),
             ),
             evening_sell=self._ranked_sell(
                 sell_today,
@@ -766,15 +731,6 @@ class CoordinatorMarketWindowResolver:
                 current,
                 default=lambda reason: _default_ranked(
                     today, DEFAULT_EVENING_SELL_HOUR, tz, reason=reason
-                ),
-                legacy=lambda: self._legacy_ranked(
-                    today,
-                    tz,
-                    CONF_EVENING_MAX_PRICE_HOUR_SENSOR,
-                    CONF_EVENING_MAX_PRICE_SENSOR,
-                    default_hour=DEFAULT_EVENING_SELL_HOUR,
-                    second_hour_key=CONF_EVENING_SECOND_MAX_PRICE_HOUR_SENSOR,
-                    second_price_key=CONF_EVENING_SECOND_MAX_PRICE_SENSOR,
                 ),
             ),
             evening_sell_tomorrow=self._ranked_sell(
@@ -792,13 +748,6 @@ class CoordinatorMarketWindowResolver:
                 current,
                 default=lambda reason: _default_hour_window(
                     today, DEFAULT_CONSUME_HOUR, tz, reason=reason
-                ),
-                legacy=lambda: self._legacy_span(
-                    today,
-                    tz,
-                    CONF_DAYTIME_MIN_PRICE_HOUR_SENSOR,
-                    CONF_DAYTIME_MIN_PRICE_SENSOR,
-                    whole_hour=False,
                 ),
             ),
             consume_tomorrow=self._consume(
@@ -855,17 +804,14 @@ class CoordinatorMarketWindowResolver:
         now_local: datetime,
         *,
         default: Callable[[DefaultReason], RankedMarketWindow],
-        legacy: Callable[[], _RankedSpans | None] | None = None,
     ) -> RankedMarketWindow:
-        """Sell Window Ranking: the price payload, the legacy entities, else the default."""
+        """Sell Window Ranking: the price payload, else the default."""
         chain: list[tuple[MarketWindowSource, Callable[[], _RankedSpans | None]]] = [
             (
                 MarketWindowSource.PRICES,
                 lambda: _ranked_from_prices(prices, entity_id, hours, now_local),
             )
         ]
-        if legacy is not None:
-            chain.append((MarketWindowSource.LEGACY_ENTITY, legacy))
         return _resolve(chain, build=_ranked, default=default, name="Sell Window Ranking")
 
     def _consume(
@@ -875,17 +821,14 @@ class CoordinatorMarketWindowResolver:
         now_local: datetime,
         *,
         default: Callable[[DefaultReason], ResolvedMarketWindow],
-        legacy: Callable[[], _Span | None] | None = None,
     ) -> ResolvedMarketWindow:
-        """Consume Window: the price payload, the legacy entities, else the default."""
+        """Consume Window: the price payload, else the default."""
         chain: list[tuple[MarketWindowSource, Callable[[], _Span | None]]] = [
             (
                 MarketWindowSource.PRICES,
                 lambda: _consume_from_prices(prices, entity_id, now_local),
             )
         ]
-        if legacy is not None:
-            chain.append((MarketWindowSource.LEGACY_ENTITY, legacy))
         return _resolve(chain, build=_window, default=default, name="Consume Window")
 
     # --- entity reads -------------------------------------------------------
@@ -907,106 +850,6 @@ class CoordinatorMarketWindowResolver:
         if not lowest <= hour <= highest:
             raise ValueError(f"hour {hour} outside {lowest}-{highest}")
         return hour
-
-    def _legacy_span(
-        self,
-        day: date,
-        tz: tzinfo,
-        time_key: str,
-        price_key: str,
-        *,
-        whole_hour: bool = True,
-    ) -> _Span | None:
-        """A window at a legacy time entity's time, priced by its price entity.
-
-        A sell window is the whole hour the entity names. The Consume Window
-        keeps the entity's minutes and, for an `HH:MM-HH:MM` state, its end;
-        otherwise a window lasts one hour.
-        """
-        entity_id, raw_time = self._entity_state(time_key)
-        if raw_time is None:
-            return None
-        first, second = (raw_time, None) if whole_hour else _split_range(raw_time)
-        clock = _parse_clock(first)
-        if clock is None:
-            clock = time(_parse_hour_number(first))
-        if whole_hour:
-            clock = time(clock.hour)
-        start = datetime.combine(day, clock, tzinfo=tz)
-        end = start + timedelta(hours=1)
-        if second is not None:
-            range_end = dt_util.parse_time(second)
-            if range_end is None:
-                _LOGGER.warning(
-                    "Legacy time entity %s range %s has an end that is not a time of day, "
-                    "window lasts one hour",
-                    entity_id,
-                    raw_time,
-                )
-            elif datetime.combine(day, range_end, tzinfo=tz) > start:
-                end = datetime.combine(day, range_end, tzinfo=tz)
-            else:
-                _LOGGER.warning(
-                    "Legacy time entity %s range %s ends at or before its start on the same "
-                    "day, window lasts one hour",
-                    entity_id,
-                    raw_time,
-                )
-        return start, end, self._legacy_price(price_key)
-
-    def _legacy_price(self, price_key: str) -> float | None:
-        """The legacy price entity's finite price, or None when it has none."""
-        entity_id, raw_price = self._entity_state(price_key)
-        try:
-            price = float(raw_price) if raw_price is not None else None
-        except (TypeError, ValueError):
-            price = None
-        if price is None or not isfinite(price):
-            if raw_price is not None:
-                _LOGGER.warning(
-                    "Legacy price entity %s has invalid value %s, window keeps no price",
-                    entity_id,
-                    raw_price,
-                )
-            return None
-        return price
-
-    def _legacy_ranked(
-        self,
-        day: date,
-        tz: tzinfo,
-        hour_key: str | None,
-        price_key: str,
-        *,
-        default_hour: int,
-        second_hour_key: str | None = None,
-        second_price_key: str | None = None,
-    ) -> _RankedSpans | None:
-        """Legacy Primary Market Window with its optional Secondary Market Window.
-
-        A configured price without an hour entity (or whose hour entity has no
-        state) is still usable: it prices the default sell hour.
-        """
-        primary = (
-            self._legacy_span(day, tz, hour_key, price_key) if hour_key else None
-        )
-        if primary is None:
-            price = self._legacy_price(price_key)
-            if price is None:
-                return None
-            start = datetime.combine(day, time(default_hour), tzinfo=tz)
-            primary = (start, start + timedelta(hours=1), price)
-        secondary = None
-        if second_hour_key and second_price_key:
-            try:
-                secondary = self._legacy_span(day, tz, second_hour_key, second_price_key)
-            except (TypeError, ValueError) as err:
-                _LOGGER.warning(
-                    "Legacy second hour entity %s is invalid (%s), no Secondary Market Window",
-                    self._entry.data.get(second_hour_key),
-                    err,
-                )
-        return primary, secondary, _gap_pct(primary[2], secondary[2] if secondary else None)
 
 
 def market_window_resolver(hass: HomeAssistant, entry_id: str) -> MarketWindowResolver:
