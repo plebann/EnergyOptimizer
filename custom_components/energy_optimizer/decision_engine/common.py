@@ -514,39 +514,20 @@ def build_no_action_outcome(
     )
 
 
-def classify_no_grid_decision(
+def mark_secure_energy(
     outcome: DecisionOutcome,
     *,
-    needed_reserve_kwh: float,
     current_soc: float,
     target_soc: float,
-    min_soc: float,
-    capacity_ah: float,
-    voltage: float,
     gap_kwh: float,
     program_number: int,
 ) -> None:
-    """Mark a no-grid-charge outcome as Secure Energy when it protects a reserve.
+    """Label a no-grid-charge outcome as Secure Energy.
 
-    Secure Energy needs an independent reserve target: the reserve need must
-    exceed the common epsilon by more than the energy already above ``min_soc``.
-    A written target above the current SOC only through rounding or a safety
-    margin stays ``no_action``. The reserve is measured above ``min_soc`` at 100 %
-    efficiency, not with the engine gap's efficiency and ``min_soc_pv``: a
-    decision with gap <= 0 would otherwise never show a reserve shortfall. The
+    The caller decides eligibility from its own independent reserve signal. The
     label is a decision, independent of whether the program SOC already held the
     target. Inverter writes are not changed here.
     """
-    current_reserve_kwh = soc_to_kwh(
-        max(current_soc - min_soc, 0.0), capacity_ah, voltage
-    )
-    if (
-        needed_reserve_kwh <= GAP_EPSILON_KWH
-        or needed_reserve_kwh - current_reserve_kwh <= GAP_EPSILON_KWH
-        or target_soc <= current_soc
-    ):
-        return
-
     outcome.action_type = "secure_energy"
     outcome.summary = f"Energy reserve secured at {target_soc:.0f}% without grid charging"
     outcome.details.update(

@@ -560,33 +560,55 @@ async def test_zero_gap_without_reserve_target_is_no_action_with_truthful_writes
     assert program_writes == [46]
 
 
+
+
 @pytest.mark.asyncio
-async def test_zero_gap_with_independent_reserve_target_is_secure_energy() -> None:
-    """Issue #39: Program 4 is raised to the reserve target without grid charging."""
-    from custom_components.energy_optimizer.decision_engine.common import EnergyBalance
-    from custom_components.energy_optimizer.decision_engine.afternoon_charge import (
-        AfternoonChargeStrategy,
-    )
-
+async def test_pv_peak_above_soc_in_day_buy_window_is_secure_energy() -> None:
+    """Issue #39: a sunny afternoon lifts the unrounded peak SOC above SOC."""
     hass, _ = _hass(current_soc=44.3)
-    original = AfternoonChargeStrategy._evaluate_charge
-
-    def _with_reserve_need(self: AfternoonChargeStrategy) -> tuple[float, EnergyBalance]:
-        gap, balance = original(self)
-        # 3 kWh above min_soc 20 % of a 5 kWh pack lands at 80 %, above SOC 44.3.
-        return gap, replace(balance, needed_reserve_kwh=3.0)
-
-    with patch.object(AfternoonChargeStrategy, "_evaluate_charge", _with_reserve_need):
-        details = await _run(hass, _forecast(), arbitrage_enabled=False)
+    details = await _run(hass, _forecast(pv={13: 1.0}), arbitrage_enabled=False)
 
     assert _logged_action_type(hass) == "secure_energy"
     assert details["program_number"] == 4
     assert details["grid_charge_kwh"] == 0.0
     assert details["current_soc"] == 44.3
-    assert details["target_soc"] == pytest.approx(46.0)
-    charge_current_writes = [
-        call
+    # Peak 44.3 + 1.0 kWh of 5 kWh = 64.3 -> ceil + 1 margin; writes are unchanged.
+    assert details["target_soc"] == pytest.approx(66.0)
+    written = [
+        (call.args[2].get("entity_id"), call.args[2].get("value"))
         for call in hass.services.async_call.call_args_list
-        if call.args[2].get("entity_id") == "number.charge_current"
+        if call.args[0] in ("number", "time")
     ]
-    assert [call.args[2]["value"] for call in charge_current_writes] == [0]
+    assert ("number.program4_soc", 66) in written
+    assert [value for entity, value in written if entity == "number.charge_current"] == [0]
+    assert {entity for entity, _ in written} <= {
+        "number.program4_soc",
+        "time.program4_start",
+        "number.charge_current",
+    }
+
+
+@pytest.mark.asyncio
+async def test_pv_that_does_not_lift_soc_is_no_action() -> None:
+    """Issue #39: cloudy or fully consumed PV leaves the peak at SOC: no_action."""
+    hass, _ = _hass(current_soc=44.3)
+    await _run(
+        hass,
+        _forecast(usage={13: 1.0}, pv={13: 1.0}),
+        arbitrage_enabled=False,
+    )
+
+    assert _logged_action_type(hass) == "no_action"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("pv_kwh", "expected"),
+    [(0.0005, "no_action"), (0.001, "no_action"), (0.0015, "secure_energy")],
+)
+async def test_peak_rise_close_to_epsilon(pv_kwh: float, expected: str) -> None:
+    """Issue #39: the peak must exceed SOC by more than 0.001 kWh."""
+    hass, _ = _hass(current_soc=44.3)
+    await _run(hass, _forecast(pv={13: pv_kwh}), arbitrage_enabled=False)
+
+    assert _logged_action_type(hass) == expected

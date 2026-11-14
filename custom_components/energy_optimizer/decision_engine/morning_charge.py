@@ -37,7 +37,8 @@ from ..decision_engine.common import (
     SufficiencyResult,
     _compute_arbitrage_from_cap,
     build_no_action_outcome,
-    classify_no_grid_decision,
+    GAP_EPSILON_KWH,
+    mark_secure_energy,
     build_morning_charge_outcome,
     build_forecast_hour_window,
     calculate_target_soc_from_needed_reserve,
@@ -563,17 +564,17 @@ class MorningChargeStrategy(BaseChargeStrategy):
         if entities_changed:
             outcome.summary = f"Set Program 2 SOC to {target_soc:.0f}%"
             outcome.entities_changed = entities_changed
-        classify_no_grid_decision(
-            outcome,
-            needed_reserve_kwh=self._needed_reserve_all_kwh,
-            current_soc=self.current_soc,
-            target_soc=target_soc,
-            min_soc=self.bc.min_soc,
-            capacity_ah=self.bc.capacity_ah,
-            voltage=self.bc.voltage,
-            gap_kwh=self._total_gap_kwh,
-            program_number=2,
-        )
+        if (
+            self._needed_reserve_all_kwh > GAP_EPSILON_KWH
+            and target_soc > self.current_soc
+        ):
+            mark_secure_energy(
+                outcome,
+                current_soc=self.current_soc,
+                target_soc=target_soc,
+                gap_kwh=self._total_gap_kwh,
+                program_number=2,
+            )
         await self._schedule_completion(target_soc)
         await log_decision_unified(
             self.hass,

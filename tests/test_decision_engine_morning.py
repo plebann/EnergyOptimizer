@@ -1188,33 +1188,37 @@ async def test_morning_no_action_reports_the_floor_write_it_made() -> None:
     assert soc_writes == [10]
 
 
-@pytest.mark.asyncio
-async def test_morning_secure_energy_writes_only_program_2_soc(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Zero gap with an independent reserve target above SOC: secure_energy (#39)."""
+def _stub_morning_balance(monkeypatch: pytest.MonkeyPatch, needed_reserve_kwh: float) -> None:
     from custom_components.energy_optimizer.decision_engine import morning_charge
     from custom_components.energy_optimizer.decision_engine.common import EnergyBalance
 
-    hass = _morning_no_grid_setup(soc="20")
-    # 1.0 kWh needed above min_soc 10 % -> 30 % target; the 20 % SOC holds 0.5 kWh.
     monkeypatch.setattr(
         morning_charge,
         "_calculate_morning_balance",
         lambda *_a, **_k: (
             EnergyBalance(
-                reserve_kwh=1.5,
-                required_kwh=1.0,
-                needed_reserve_kwh=1.0,
+                reserve_kwh=needed_reserve_kwh + 0.5,
+                required_kwh=needed_reserve_kwh,
+                needed_reserve_kwh=needed_reserve_kwh,
                 gap_kwh=-0.5,
                 pv_compensation_factor=None,
             ),
             0.0,
             -1.5,
-            1.0,
+            needed_reserve_kwh,
             -0.5,
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_morning_secure_energy_writes_only_program_2_soc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Zero gap, reserve need above epsilon, target above SOC: secure_energy (#39)."""
+    hass = _morning_no_grid_setup(soc="20")
+    # 1.0 kWh needed above min_soc 10 % of a 5 kWh pack -> 30 % target.
+    _stub_morning_balance(monkeypatch, 1.0)
 
     await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
 
@@ -1231,4 +1235,32 @@ async def test_morning_secure_energy_writes_only_program_2_soc(
         if call.args[0] in ("number", "time")
     ]
     assert ("number.prog2_soc", 30) in written
-    assert all(entity in ("number.prog2_soc", "time.prog2_start") for entity, _ in written)
+    assert {entity for entity, _ in written} == {"number.prog2_soc", "time.prog2_start"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("soc", "needed_reserve_kwh", "expected"),
+    [
+        ("20", 0.0, "no_action"),  # no reserve need
+        ("20", 0.3, "no_action"),  # target 16 % is below SOC
+        ("20", 0.5, "no_action"),  # target 20 % equals SOC
+        ("19.5", 0.5, "secure_energy"),  # target 20 % above SOC, margin may lift it
+        ("10", 0.001, "no_action"),  # reserve need at epsilon
+        ("10", 0.0005, "no_action"),  # reserve need below epsilon
+        ("10", 0.0011, "no_action"),  # above epsilon but converts to 0 % SOC: target = floor
+        ("10", 0.05, "secure_energy"),  # 1 % of SOC needed: target 11 % > 10 %
+    ],
+)
+async def test_morning_secure_energy_needs_reserve_above_epsilon_and_target_above_soc(
+    monkeypatch: pytest.MonkeyPatch,
+    soc: str,
+    needed_reserve_kwh: float,
+    expected: str,
+) -> None:
+    hass = _morning_no_grid_setup(soc=soc)
+    _stub_morning_balance(monkeypatch, needed_reserve_kwh)
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    assert _logged_decision(hass)[0] == expected

@@ -173,10 +173,10 @@ Ten algorytm zapewnia:
    `night_buy_next_window`; reset przetrwa restart Home Assistant i wykona się po
   starcie, jeśli termin już minął.
 - W ścieżce bez deficytu (luka ≤ 0,001 kWh) wynik to `secure_energy` albo `no_action`.
-  `secure_energy` wymaga niezależnego celu rezerwy (`needed_reserve > 0,001 kWh`)
-  powyżej bieżącego SOC; zapisuje tylko SOC programu 2 (bez ładowania z sieci i bez
-  zmiany prądu), a log ma `grid_charge_kwh = 0`. Cel wynikający wyłącznie z
-  zaokrąglenia lub marginesu to `no_action`.
+  `secure_energy` wymaga potrzebnej rezerwy (`needed_reserve > 0,001 kWh`) oraz celu SOC
+  powyżej bieżącego SOC (margines bezpieczeństwa może go podbić); zapisuje tylko SOC programu 2 (bez ładowania z sieci i bez
+  zmiany prądu), a log ma `grid_charge_kwh = 0`. Cel SOC powyżej bieżącego bez
+  potrzebnej rezerwy powyżej progu to `no_action`.
 - `no_action` nie jest pustą operacją: zapis podłogi SOC programu 2 (`min_soc`)
   nadal następuje, gdy różni się od bieżącej wartości, a `entities_changed` zawiera
   tę zmianę. Typ decyzji opisuje klasyfikację biznesową, nie to, czy coś zapisano.

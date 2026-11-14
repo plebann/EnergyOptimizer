@@ -29,7 +29,7 @@ from ..decision_engine.common import (
     EnergyBalance,
     GAP_EPSILON_KWH,
     ForecastData,
-    classify_no_grid_decision,
+    mark_secure_energy,
     get_entry_data,
     get_required_prog4_soc_state,
     resolve_arbitrage_margin_gate,
@@ -449,17 +449,19 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
         outcome = self._build_charge_outcome(action, balance)
         outcome.history_windows = self._history_windows()
         outcome.entities_changed = entities_changed
-        classify_no_grid_decision(
-            outcome,
-            needed_reserve_kwh=balance.needed_reserve_kwh,
-            current_soc=self.current_soc,
-            target_soc=action.target_soc,
-            min_soc=self.bc.min_soc,
-            capacity_ah=self.bc.capacity_ah,
-            voltage=self.bc.voltage,
-            gap_kwh=self._plan.planned_grid_charge_kwh,
-            program_number=4,
+        peak_rise_kwh = soc_to_kwh(
+            self._plan.simulation.charge_window_peak_soc - self.current_soc,
+            self.bc.capacity_ah,
+            self.bc.voltage,
         )
+        if peak_rise_kwh > _EPSILON_KWH:
+            mark_secure_energy(
+                outcome,
+                current_soc=self.current_soc,
+                target_soc=action.target_soc,
+                gap_kwh=self._plan.planned_grid_charge_kwh,
+                program_number=4,
+            )
         await log_decision_unified(
             self.hass,
             self.entry,
