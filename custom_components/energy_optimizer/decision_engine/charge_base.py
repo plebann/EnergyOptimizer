@@ -102,6 +102,13 @@ class BaseChargeStrategy(MarketWindowReader, ABC):
     async def _handle_no_action(self, balance: EnergyBalance) -> None:
         """Handle no-action path, including any SOC updates and logging."""
 
+    def _classify_sub_epsilon_gap(
+        self,
+        outcome: DecisionOutcome,
+        action: ChargeAction,
+    ) -> None:
+        """Optional hook: reclassify a positive gap too small to be a charge."""
+
     async def _check_early_exit(self) -> bool:
         """Optional early-exit hook. Return True to stop processing."""
         return False
@@ -352,11 +359,10 @@ class BaseChargeStrategy(MarketWindowReader, ABC):
 
         outcome = self._build_charge_outcome(action, balance)
         if not entities_changed:
-            outcome.action_type = "no_action"
             outcome.summary = "No entity changes required"
         elif len(entities_changed) == 1 and program_soc_changed:
-            outcome.action_type = "program_soc_updated"
             outcome.summary = f"Set program SOC to {action.target_soc:.0f}%"
+        self._classify_sub_epsilon_gap(outcome, action)
         outcome.history_windows = self._history_windows()
         outcome.entities_changed = entities_changed
         await log_decision_unified(

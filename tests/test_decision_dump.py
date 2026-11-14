@@ -39,7 +39,7 @@ def test_emit_decision_dump_produces_replay_fixture(monkeypatch) -> None:
         audit,
         {
             "scenario": "Morning Grid Charge",
-            "action_type": "charge_scheduled",
+            "action_type": "charge",
             "summary": "Battery scheduled to charge to 75%",
             "reason": "Deficit",
             "details": {"target_soc": 75},
@@ -56,7 +56,7 @@ def test_emit_decision_dump_produces_replay_fixture(monkeypatch) -> None:
     assert payload["algorithm_revision"]
     assert payload["config_snapshot_id"]
     assert payload["trigger"] == "scheduler:morning_charge"
-    assert payload["expected_decision"]["action_type"] == "charge_scheduled"
+    assert payload["expected_decision"]["action_type"] == "charge"
     assert payload["inputs"] == {
         "battery_soc_sensor": {"state": "42.5", "status": "ok"}
     }

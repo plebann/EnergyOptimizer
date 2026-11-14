@@ -1137,3 +1137,211 @@ async def test_morning_no_action_never_writes_program_soc_below_min_soc() -> Non
         and call.args[2].get("entity_id") == "number.prog2_soc"
     ]
     assert soc_writes == [10]
+
+
+def _morning_no_grid_setup(*, soc: str, daily_load: str = "0") -> MagicMock:
+    from custom_components.energy_optimizer.const import CONF_TEST_MODE
+
+    config = {
+        CONF_PROG2_SOC_ENTITY: "number.prog2_soc",
+        CONF_PROG2_TIME_START_ENTITY: "time.prog2_start",
+        CONF_BATTERY_SOC_SENSOR: "sensor.battery_soc",
+        CONF_DAILY_LOAD_SENSOR: "sensor.daily_load",
+        CONF_BATTERY_CAPACITY_AH: 100,
+        CONF_BATTERY_VOLTAGE: 50,
+        CONF_MIN_SOC: 10,
+        CONF_MAX_SOC: 100,
+        CONF_BATTERY_EFFICIENCY: 100,
+        CONF_TEST_MODE: False,
+    }
+    states = {
+        "number.prog2_soc": "50",
+        "time.prog2_start": "04:00:00",
+        "sensor.battery_soc": soc,
+        "sensor.daily_load": daily_load,
+    }
+    return _setup_hass(config, states)
+
+
+def _logged_decision(hass: MagicMock) -> tuple[str, dict[str, object], list[object]]:
+    hist = hass.data[DOMAIN]["entry-1"]["optimization_history_sensor"]
+    (_, details), kwargs = hist.add_entry.call_args
+    event = hass.bus.async_fire.call_args
+    return kwargs["action_type"], details, event
+
+
+@pytest.mark.asyncio
+async def test_morning_no_action_reports_the_floor_write_it_made() -> None:
+    """Zero gap and no reserve need: no_action, with truthful entities_changed (#39)."""
+    hass = _morning_no_grid_setup(soc="90")
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    action_type, details, _ = _logged_decision(hass)
+    assert action_type == "no_action"
+    assert "grid_charge_kwh" not in details
+    soc_writes = [
+        call.args[2]["value"]
+        for call in hass.services.async_call.call_args_list
+        if call.args[2].get("entity_id") == "number.prog2_soc"
+    ]
+    assert soc_writes == [10]
+
+
+def _stub_morning_balance(monkeypatch: pytest.MonkeyPatch, needed_reserve_kwh: float) -> None:
+    from custom_components.energy_optimizer.decision_engine import morning_charge
+    from custom_components.energy_optimizer.decision_engine.common import EnergyBalance
+
+    monkeypatch.setattr(
+        morning_charge,
+        "_calculate_morning_balance",
+        lambda *_a, **_k: (
+            EnergyBalance(
+                reserve_kwh=needed_reserve_kwh + 0.5,
+                required_kwh=needed_reserve_kwh,
+                needed_reserve_kwh=needed_reserve_kwh,
+                gap_kwh=-0.5,
+                pv_compensation_factor=None,
+            ),
+            0.0,
+            -1.5,
+            needed_reserve_kwh,
+            -0.5,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_morning_secure_energy_writes_only_program_2_soc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Zero gap, reserve need above epsilon, target above SOC: secure_energy (#39)."""
+    hass = _morning_no_grid_setup(soc="20")
+    # 1.0 kWh needed above min_soc 10 % of a 5 kWh pack -> 30 % target.
+    _stub_morning_balance(monkeypatch, 1.0)
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    action_type, details, _ = _logged_decision(hass)
+    assert action_type == "secure_energy"
+    assert details["target_soc"] == 30.0
+    assert details["current_soc"] == 20.0
+    assert details["program_number"] == 2
+    assert details["grid_charge_kwh"] == 0.0
+    assert "window_start" in details and "window_end" in details
+    written = [
+        (call.args[2].get("entity_id"), call.args[2].get("value"))
+        for call in hass.services.async_call.call_args_list
+        if call.args[0] in ("number", "time")
+    ]
+    assert ("number.prog2_soc", 30) in written
+    assert {entity for entity, _ in written} == {"number.prog2_soc", "time.prog2_start"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("soc", "needed_reserve_kwh", "expected"),
+    [
+        ("20", 0.0, "no_action"),  # no reserve need
+        ("20", 0.3, "no_action"),  # target 16 % is below SOC
+        ("20", 0.5, "no_action"),  # target 20 % equals SOC
+        ("19.5", 0.5, "secure_energy"),  # target 20 % above SOC, margin may lift it
+        ("10", 0.001, "no_action"),  # reserve need at epsilon
+        ("10", 0.0005, "no_action"),  # reserve need below epsilon
+        ("10", 0.0011, "no_action"),  # above epsilon but converts to 0 % SOC: target = floor
+        ("10", 0.05, "secure_energy"),  # 1 % of SOC needed: target 11 % > 10 %
+    ],
+)
+async def test_morning_secure_energy_needs_reserve_above_epsilon_and_target_above_soc(
+    monkeypatch: pytest.MonkeyPatch,
+    soc: str,
+    needed_reserve_kwh: float,
+    expected: str,
+) -> None:
+    hass = _morning_no_grid_setup(soc=soc)
+    _stub_morning_balance(monkeypatch, needed_reserve_kwh)
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    assert _logged_decision(hass)[0] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("gap_kwh", "expected"),
+    [
+        (0.0005, "secure_energy"),  # below epsilon: reserve secured, not a charge
+        (0.001, "secure_energy"),  # at epsilon
+        (0.0015, "charge"),  # above epsilon
+    ],
+)
+async def test_morning_positive_gap_within_epsilon_is_not_a_charge(
+    monkeypatch: pytest.MonkeyPatch,
+    gap_kwh: float,
+    expected: str,
+) -> None:
+    """The reported type applies GAP_EPSILON_KWH to a positive gap (#39)."""
+    from custom_components.energy_optimizer.decision_engine import morning_charge
+    from custom_components.energy_optimizer.decision_engine.common import EnergyBalance
+
+    hass = _morning_no_grid_setup(soc="20")
+    monkeypatch.setattr(
+        morning_charge,
+        "_calculate_morning_balance",
+        lambda *_a, **_k: (
+            EnergyBalance(
+                reserve_kwh=1.0,
+                required_kwh=1.0 + gap_kwh,
+                needed_reserve_kwh=1.0,
+                gap_kwh=gap_kwh,
+                pv_compensation_factor=None,
+            ),
+            1.0,
+            gap_kwh,
+            1.0,
+            gap_kwh,
+        ),
+    )
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    assert _logged_decision(hass)[0] == expected
+
+
+@pytest.mark.asyncio
+async def test_morning_charge_classification_survives_zero_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A positive gap stays `charge` when every write is already in place (#39)."""
+    from custom_components.energy_optimizer.decision_engine import morning_charge
+    from custom_components.energy_optimizer.decision_engine.common import EnergyBalance
+
+    hass = _morning_no_grid_setup(soc="20")
+    monkeypatch.setattr(
+        morning_charge,
+        "_calculate_morning_balance",
+        lambda *_a, **_k: (
+            EnergyBalance(
+                reserve_kwh=1.0,
+                required_kwh=2.0,
+                needed_reserve_kwh=2.0,
+                gap_kwh=1.0,
+                pv_compensation_factor=None,
+            ),
+            2.0,
+            1.0,
+            2.0,
+            1.0,
+        ),
+    )
+    async def _no_writes(*_a: object, **_k: object) -> list[dict[str, object]]:
+        return []
+
+    monkeypatch.setattr(MorningChargeStrategy, "_prepare_charge_action", _no_writes)
+    monkeypatch.setattr(MorningChargeStrategy, "_apply_charge_action", _no_writes)
+
+    await async_run_morning_charge(hass, entry_id="entry-1", margin=1.0)
+
+    action_type, details, _ = _logged_decision(hass)
+    assert action_type == "charge"
+    assert details.get("entities_changed", []) == []

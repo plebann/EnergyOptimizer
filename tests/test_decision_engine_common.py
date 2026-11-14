@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from custom_components.energy_optimizer.decision_engine.common import (
+    build_no_action_outcome,
+    mark_secure_energy,
     resolve_arbitrage_margin_gate,
     resolve_entry,
 )
@@ -116,3 +118,33 @@ def test_arbitrage_margin_gate_fails_closed_without_reference_price() -> None:
         "arbitrage_reason": "missing_buy_reference_price",
         "buy_reference_source": "default",
     }
+
+
+@pytest.mark.parametrize("program_number", [2, 4])
+def test_mark_secure_energy_reports_secured_not_charged_energy(
+    program_number: int,
+) -> None:
+    outcome = build_no_action_outcome(
+        scenario="Morning Grid Charge",
+        reason="no gap",
+        current_soc=20,
+        reserve_kwh=0.5,
+        required_kwh=0.5,
+        pv_forecast_kwh=0,
+    )
+
+    mark_secure_energy(
+        outcome,
+        current_soc=20.0,
+        target_soc=30.0,
+        gap_kwh=0.0,
+        program_number=program_number,
+    )
+
+    assert outcome.action_type == "secure_energy"
+    assert outcome.summary == "Energy reserve secured at 30% without grid charging"
+    assert outcome.details["current_soc"] == 20
+    assert outcome.details["target_soc"] == 30.0
+    assert outcome.details["gap_kwh"] == 0.0
+    assert outcome.details["program_number"] == program_number
+    assert outcome.details["grid_charge_kwh"] == 0.0

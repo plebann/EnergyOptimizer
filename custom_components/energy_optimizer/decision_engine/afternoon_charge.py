@@ -27,7 +27,9 @@ from ..decision_engine.common import (
     BatteryConfig,
     ChargeAction,
     EnergyBalance,
+    GAP_EPSILON_KWH,
     ForecastData,
+    mark_secure_energy,
     get_entry_data,
     get_required_prog4_soc_state,
     resolve_arbitrage_margin_gate,
@@ -44,7 +46,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
-_EPSILON_KWH = 0.001
+_EPSILON_KWH = GAP_EPSILON_KWH
 _SEARCH_ITERATIONS = 48
 
 
@@ -398,7 +400,7 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
         return DecisionOutcome(
             scenario=self.scenario_name,
             action_type=(
-                "charge_scheduled"
+                "charge"
                 if self._plan.planned_grid_charge_kwh > _EPSILON_KWH
                 else "no_action"
             ),
@@ -447,11 +449,19 @@ class AfternoonChargeStrategy(BaseChargeStrategy):
         outcome = self._build_charge_outcome(action, balance)
         outcome.history_windows = self._history_windows()
         outcome.entities_changed = entities_changed
-        if any(
-            change["entity_id"] == self.prog_soc_entity
-            for change in entities_changed
-        ):
-            outcome.action_type = "program_settings_updated"
+        peak_rise_kwh = soc_to_kwh(
+            self._plan.simulation.charge_window_peak_soc - self.current_soc,
+            self.bc.capacity_ah,
+            self.bc.voltage,
+        )
+        if peak_rise_kwh > _EPSILON_KWH and action.target_soc > self.current_soc:
+            mark_secure_energy(
+                outcome,
+                current_soc=self.current_soc,
+                target_soc=action.target_soc,
+                gap_kwh=self._plan.planned_grid_charge_kwh,
+                program_number=4,
+            )
         await log_decision_unified(
             self.hass,
             self.entry,

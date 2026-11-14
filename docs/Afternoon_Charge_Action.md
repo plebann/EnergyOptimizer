@@ -134,6 +134,8 @@ flowchart TD
 
 **Docelowy SOC programu 4** (szczyt SOC w oknie ładowania) trafia do falownika z tym samym w górę zaokrągleniem i **Charge Target Safety Margin** (patrz `CONTEXT.md`) jak w porannym scenariuszu — wynik jest cięty do `max_soc`.
 
+**Typ decyzji** (bez zmiany zapisów do falownika): luka > 0,001 kWh to `charge`. Przy luce ≤ 0,001 kWh wynik to `secure_energy`, gdy niezaokrąglony prognozowany szczyt SOC w oknie Day Buy (przed zaokrągleniem i marginesem +1 pp) przekracza bieżący SOC o więcej niż 0,001 kWh — np. słoneczne popołudnie podnosi baterię. Log ma wtedy `program_number = 4` i `grid_charge_kwh = 0`. W przeciwnym razie wynik to `no_action`; zapis SOC programu 4 nadal następuje, a `entities_changed` zawiera go zgodnie z prawdą.
+
 ## Wpływ na maszynę stanów
 
 - NORMAL → CHARGING_FROM_GRID, gdy wymagane jest ładowanie magazynu z sieci
