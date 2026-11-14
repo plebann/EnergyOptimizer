@@ -183,6 +183,6 @@ Secure Energy. At the end of the window it restores only the program SOC; it nev
 ### Charge Decision Type
 
 The business classification of a Morning Charge or Afternoon Charge decision: `charge` for an effective energy gap
-above the common 0.001 kWh epsilon, `secure_energy` for a no-grid-charge decision that raises SOC to an independent
-reserve-protection target, or `no_action` when no write can improve energy security. Avoid technical write-oriented
+above the common 0.001 kWh epsilon, `secure_energy` for a no-grid-charge decision that raises the program SOC above the
+current SOC on an independent reserve signal (see Secure Energy), or `no_action` otherwise. Avoid technical write-oriented
 labels such as `charge_scheduled`, `program_soc_updated`, and `program_settings_updated` for these decisions.
