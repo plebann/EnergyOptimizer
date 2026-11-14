@@ -1,6 +1,7 @@
 """Shared helpers for decision engine modules."""
 from __future__ import annotations
 
+from collections.abc import Sequence
 import dataclasses
 from datetime import datetime
 import logging
@@ -520,7 +521,8 @@ def mark_secure_energy(
     current_soc: float,
     target_soc: float,
     gap_kwh: float,
-    program_number: int,
+    program_number: int | None = None,
+    program_numbers: Sequence[int] | None = None,
 ) -> None:
     """Label a no-grid-charge outcome as Secure Energy.
 
@@ -536,10 +538,13 @@ def mark_secure_energy(
             "current_soc": round(current_soc, 1),
             "target_soc": round(target_soc, 1),
             "gap_kwh": round(gap_kwh, 2),
-            "program_number": program_number,
             "grid_charge_kwh": 0.0,
         }
     )
+    if program_number is not None:
+        outcome.details["program_number"] = program_number
+    if program_numbers is not None:
+        outcome.details["program_numbers"] = list(program_numbers)
 
 
 async def handle_no_action_soc_update(

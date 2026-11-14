@@ -16,7 +16,6 @@ from custom_components.energy_optimizer.const import (
     CONF_MIN_SOC,
     CONF_MIN_SOC_PV,
     CONF_PROG2_SOC_ENTITY,
-    CONF_PROG2_TIME_START_ENTITY,
     CONF_PROG4_SOC_ENTITY,
     DOMAIN,
 )
@@ -26,6 +25,7 @@ from custom_components.energy_optimizer.decision_engine.common import (
 )
 from custom_components.energy_optimizer.decision_engine.morning_charge import (
     MorningChargeStrategy,
+    _ProgramTarget,
 )
 from custom_components.energy_optimizer.decision_engine.afternoon_charge import (
     AfternoonChargeStrategy,
@@ -136,106 +136,6 @@ async def test_soc_only_no_action_update_reports_the_floor_write(
 
 
 @pytest.mark.asyncio
-async def test_morning_soc_failure_restores_previous_start_time(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Program 2 SOC failure rolls the successful time write back."""
-    entry = _entry(
-        {
-            CONF_PROG2_SOC_ENTITY: "number.program2_soc",
-            CONF_PROG2_TIME_START_ENTITY: "time.program2_start",
-        }
-    )
-    hass = _hass({"time.program2_start": "03:30:00"})
-    strategy = MorningChargeStrategy(hass, entry_id=entry.entry_id, margin=None)
-    strategy.entry = entry
-    strategy.config = entry.data
-    strategy.prog_soc_entity = "number.program2_soc"
-    strategy.prog_soc_value = 20
-    strategy.integration_context = Context()
-    start = dt_util.now().replace(hour=4, minute=0, second=0, microsecond=0)
-    monkeypatch.setattr(
-        strategy,
-        "_resolve_completion_window",
-        lambda: (start, start + timedelta(hours=2)),
-    )
-    set_time = AsyncMock()
-    set_soc = AsyncMock(side_effect=HomeAssistantError("SOC write failed"))
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.set_program_start_time",
-        set_time,
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.set_program_soc",
-        set_soc,
-    )
-    strategy._log_write_failure = AsyncMock()
-
-    changed = await strategy._write_temporary_program_soc(60)
-
-    assert changed is None
-    assert set_time.await_args_list == [
-        call(
-            hass,
-            "time.program2_start",
-            start.time(),
-            entry=entry,
-            logger=ANY,
-            context=strategy.integration_context,
-        ),
-        call(
-            hass,
-            "time.program2_start",
-            datetime.strptime("03:30:00", "%H:%M:%S").time(),
-            entry=entry,
-            logger=ANY,
-            context=strategy.integration_context,
-        ),
-    ]
-    strategy._log_write_failure.assert_awaited_once_with("SOC write failed")
-
-
-@pytest.mark.asyncio
-async def test_morning_time_failure_prevents_soc_write(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Program 2 SOC is not written when its start-time update fails."""
-    entry = _entry(
-        {
-            CONF_PROG2_SOC_ENTITY: "number.program2_soc",
-            CONF_PROG2_TIME_START_ENTITY: "time.program2_start",
-        }
-    )
-    hass = _hass({"time.program2_start": "03:30:00"})
-    strategy = MorningChargeStrategy(hass, entry_id=entry.entry_id, margin=None)
-    strategy.entry = entry
-    strategy.config = entry.data
-    strategy.prog_soc_entity = "number.program2_soc"
-    strategy.prog_soc_value = 20
-    strategy.integration_context = Context()
-    start = dt_util.now().replace(hour=4, minute=0, second=0, microsecond=0)
-    strategy._resolve_completion_window = MagicMock(
-        return_value=(start, start + timedelta(hours=2))
-    )
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.set_program_start_time",
-        AsyncMock(side_effect=HomeAssistantError("time write failed")),
-    )
-    set_soc = AsyncMock()
-    monkeypatch.setattr(
-        "custom_components.energy_optimizer.decision_engine.morning_charge.set_program_soc",
-        set_soc,
-    )
-    strategy._log_write_failure = AsyncMock()
-
-    changed = await strategy._write_temporary_program_soc(60)
-
-    assert changed is None
-    set_soc.assert_not_awaited()
-    strategy._log_write_failure.assert_awaited_once_with("time write failed")
-
-
-@pytest.mark.asyncio
 async def test_morning_current_failure_restores_program_controls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -265,13 +165,14 @@ async def test_morning_current_failure_restores_program_controls(
 async def test_morning_completion_scheduled_when_target_is_already_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A temporary morning target is reset even without a fresh SOC write."""
+    """A program already at the temporary target is still reset to `min_soc`."""
     entry = _entry({CONF_PROG2_SOC_ENTITY: "number.program2_soc"})
     hass = _hass({"number.program2_soc": "60"})
     strategy = MorningChargeStrategy(hass, entry_id=entry.entry_id, margin=None)
     strategy.entry = entry
     strategy.config = entry.data
     strategy.bc = BatteryConfig(100, 50, 15, 15, 100, 100)
+    strategy._program_set = (_ProgramTarget(2, "number.program2_soc", 60.0),)
     start = dt_util.now().replace(hour=4, minute=0, second=0, microsecond=0)
     strategy._resolve_completion_window = MagicMock(
         return_value=(start, start + timedelta(hours=2))
@@ -287,6 +188,9 @@ async def test_morning_completion_scheduled_when_target_is_already_present(
 
     schedule.assert_awaited_once()
     assert schedule.await_args.kwargs["complete_at"] == start + timedelta(hours=2)
+    assert schedule.await_args.kwargs["restore_targets"] == {
+        "number.program2_soc": 15
+    }
 
 
 @pytest.mark.asyncio

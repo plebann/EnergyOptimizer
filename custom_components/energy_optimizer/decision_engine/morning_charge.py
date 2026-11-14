@@ -1,6 +1,7 @@
 """Morning grid charge decision logic."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, time
 import logging
 from typing import TYPE_CHECKING
@@ -20,14 +21,24 @@ from ..const import (
     CONF_GRID_CHARGE_CURRENT_ENTITY,
     CONF_ENABLE_HEAT_PUMP,
     CONF_MIN_ARBITRAGE_PRICE,
+    CONF_PROG1_SOC_ENTITY,
+    CONF_PROG1_TIME_START_ENTITY,
+    CONF_PROG2_SOC_ENTITY,
     CONF_PROG2_TIME_START_ENTITY,
+    CONF_PROG3_SOC_ENTITY,
+    CONF_PROG3_TIME_START_ENTITY,
+    CONF_PROG4_SOC_ENTITY,
+    CONF_PROG4_TIME_START_ENTITY,
+    CONF_PROG5_SOC_ENTITY,
+    CONF_PROG5_TIME_START_ENTITY,
+    CONF_PROG6_SOC_ENTITY,
+    CONF_PROG6_TIME_START_ENTITY,
     CONF_PV_FORECAST_TOMORROW,
     CONF_PV_FORECAST_REMAINING,
 )
 from ..controllers.inverter import (
     set_charge_current,
     set_program_soc,
-    set_program_start_time,
 )
 from ..decision_engine.common import (
     BatteryConfig,
@@ -48,13 +59,19 @@ from ..decision_engine.common import (
     resolve_entry,
 )
 from ..helpers import (
+    get_float_state_info,
     is_balancing_ongoing,
     set_balancing_ongoing,
 )
 from ..market_windows import MarketWindows
-from ..service_handlers.charge_completion import async_schedule_charge_completion
+from ..service_handlers.charge_completion import (
+    async_schedule_charge_completion,
+    get_charge_completion_plan,
+    plan_restore_targets,
+)
 from ..utils.decision_dump import active_decision_audit
 from ..utils.logging import DecisionOutcome, log_decision_unified
+from ..utils.programs import programs_overlapping_window
 from ..utils.time_window import build_hour_window
 from .charge_base import BaseChargeStrategy
 
@@ -64,9 +81,32 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 _PRICE_EQUALITY_TOLERANCE = 0.001
 
+_PROGRAM_CONFIG: dict[int, tuple[str, str]] = {
+    1: (CONF_PROG1_SOC_ENTITY, CONF_PROG1_TIME_START_ENTITY),
+    2: (CONF_PROG2_SOC_ENTITY, CONF_PROG2_TIME_START_ENTITY),
+    3: (CONF_PROG3_SOC_ENTITY, CONF_PROG3_TIME_START_ENTITY),
+    4: (CONF_PROG4_SOC_ENTITY, CONF_PROG4_TIME_START_ENTITY),
+    5: (CONF_PROG5_SOC_ENTITY, CONF_PROG5_TIME_START_ENTITY),
+    6: (CONF_PROG6_SOC_ENTITY, CONF_PROG6_TIME_START_ENTITY),
+}
+# Programs Morning Charge may write; every one must be fully configured.
+_MORNING_PROGRAMS = (6, 1, 2)
+
+
+@dataclass(frozen=True)
+class _ProgramTarget:
+    """A program Morning Charge may write and the SOC it holds now."""
+
+    number: int
+    soc_entity: str
+    value: float
+
 
 class MorningChargeStrategy(BaseChargeStrategy):
     """Morning charge strategy using BaseChargeStrategy template flow."""
+
+    _program_set: tuple[_ProgramTarget, ...] = ()
+    _written_programs: tuple[_ProgramTarget, ...] = ()
 
     @property
     def scenario_name(self) -> str:
@@ -210,106 +250,109 @@ class MorningChargeStrategy(BaseChargeStrategy):
         parsed_dt = dt_util.parse_datetime(str(state.state))
         return parsed_dt.time().replace(microsecond=0) if parsed_dt is not None else None
 
+    def _program_numbers(self) -> list[int]:
+        """Return the numbers of the programs in the Morning Charge Program Set."""
+        return [program.number for program in self._program_set]
+
+    async def _resolve_program_set(self) -> tuple[_ProgramTarget, ...] | None:
+        """Return the programs overlapping the Night Buy Window, in time order.
+
+        Programs 6, 1 and 2 must have both SOC and start-time controls readable;
+        any other configured program only bounds the intervals.
+        """
+        starts: list[tuple[int, time]] = []
+        targets: dict[int, _ProgramTarget] = {}
+        for number, (soc_key, time_key) in _PROGRAM_CONFIG.items():
+            required = number in _MORNING_PROGRAMS
+            soc_entity = self.config.get(soc_key)
+            time_entity = self.config.get(time_key)
+            if not soc_entity or not time_entity:
+                if required:
+                    await self._log_write_failure(
+                        f"Program {number} SOC or start-time control not configured"
+                    )
+                    return None
+                continue
+            start = self._current_program_start_time(str(time_entity))
+            if start is None:
+                if required:
+                    await self._log_write_failure(
+                        f"Program {number} start-time control unavailable or invalid"
+                    )
+                    return None
+                continue
+            starts.append((number, start))
+            if not required:
+                continue
+            value, _, error = get_float_state_info(self.hass, str(soc_entity))
+            if error is not None or value is None:
+                await self._log_write_failure(
+                    f"Program {number} SOC control unavailable or invalid"
+                )
+                return None
+            targets[number] = _ProgramTarget(number, str(soc_entity), value)
+
+        window_start, window_end = self._resolve_completion_window()
+        overlapping = programs_overlapping_window(
+            starts,
+            window_start=window_start,
+            window_end=window_end,
+            now=self.windows.now,
+        )
+        return tuple(targets[number] for number in overlapping if number in targets)
+
     async def _write_temporary_program_soc(
         self,
         target_soc: float,
     ) -> list[dict[str, float | str]] | None:
-        """Write Program 2 start time then SOC, rolling time back on SOC failure."""
-        self._temporary_start_entity: str | None = None
-        self._temporary_previous_start: time | None = None
-        self._temporary_soc_changed = False
-        if abs(target_soc - self.prog_soc_value) <= 0.01:
-            return []
-
-        start_entity = self.config.get(CONF_PROG2_TIME_START_ENTITY)
-        start_entity_id = str(start_entity) if start_entity else ""
-        previous_start = self._current_program_start_time(start_entity_id)
-        window_start, _ = self._resolve_completion_window()
-        if previous_start is None:
-            await self._log_write_failure(
-                "Program 2 start-time control unavailable or invalid"
-            )
+        """Write the target SOC to every Program Set member not already at it."""
+        self._program_set = ()
+        self._written_programs = ()
+        program_set = await self._resolve_program_set()
+        if program_set is None:
             return None
+        self._program_set = program_set
 
-        try:
-            await set_program_start_time(
-                self.hass,
-                start_entity_id,
-                window_start.time(),
-                entry=self.entry,
-                logger=_LOGGER,
-                context=self.integration_context,
-            )
-        except (HomeAssistantError, ValueError) as err:
-            await self._log_write_failure(str(err))
-            return None
-
-        try:
-            await set_program_soc(
-                self.hass,
-                self.prog_soc_entity,
-                target_soc,
-                entry=self.entry,
-                logger=_LOGGER,
-                context=self.integration_context,
-            )
-        except HomeAssistantError as err:
+        changed: list[dict[str, float | str]] = []
+        for program in program_set:
+            if abs(target_soc - program.value) <= 0.01:
+                continue
             try:
-                await set_program_start_time(
+                await set_program_soc(
                     self.hass,
-                    start_entity_id,
-                    previous_start,
+                    program.soc_entity,
+                    target_soc,
                     entry=self.entry,
                     logger=_LOGGER,
                     context=self.integration_context,
                 )
-            except (HomeAssistantError, ValueError) as rollback_err:
-                _LOGGER.error(
-                    "Morning charge failed to restore Program 2 start time: %s",
-                    rollback_err,
-                )
-            await self._log_write_failure(str(err))
-            return None
-
-        self._temporary_start_entity = start_entity_id
-        self._temporary_previous_start = previous_start
-        self._temporary_soc_changed = True
-        return [
-            {"entity_id": start_entity_id, "value": window_start.time().isoformat()},
-            {"entity_id": self.prog_soc_entity, "value": target_soc},
-        ]
+            except HomeAssistantError as err:
+                await self._rollback_temporary_program_soc()
+                await self._log_write_failure(str(err))
+                return None
+            self._written_programs += (program,)
+            changed.append({"entity_id": program.soc_entity, "value": target_soc})
+        return changed
 
     async def _rollback_temporary_program_soc(self) -> None:
-        """Restore Program 2 controls after a later Morning Charge write fails."""
-        if not self._temporary_soc_changed:
-            return
-
-        try:
-            await set_program_soc(
-                self.hass,
-                self.prog_soc_entity,
-                self.prog_soc_value,
-                entry=self.entry,
-                logger=_LOGGER,
-                context=self.integration_context,
-            )
-            if (
-                self._temporary_start_entity is not None
-                and self._temporary_previous_start is not None
-            ):
-                await set_program_start_time(
+        """Restore the programs already written when a later write fails."""
+        for program in reversed(self._written_programs):
+            try:
+                await set_program_soc(
                     self.hass,
-                    self._temporary_start_entity,
-                    self._temporary_previous_start,
+                    program.soc_entity,
+                    program.value,
                     entry=self.entry,
                     logger=_LOGGER,
                     context=self.integration_context,
                 )
-        except (HomeAssistantError, ValueError) as err:
-            _LOGGER.error(
-                "Morning charge failed to roll back Program 2 controls: %s",
-                err,
-            )
+            except HomeAssistantError as err:
+                _LOGGER.error(
+                    "Morning charge failed to roll back %s: %s",
+                    program.soc_entity,
+                    err,
+                )
+        self._written_programs = ()
 
     async def _log_write_failure(self, reason: str) -> None:
         """Emit an explicit morning charge write failure."""
@@ -336,10 +379,37 @@ class MorningChargeStrategy(BaseChargeStrategy):
         )
 
     async def _schedule_completion(self, target_soc: float) -> None:
-        """Schedule restoration of a temporary Program 2 target."""
-        if abs(target_soc - self.bc.min_soc) <= 0.01:
-            return
+        """Schedule restoration of every program holding a temporary target.
+
+        Each program returns to the value it held before Morning Charge changed
+        it. A program already recorded for this window keeps its first record,
+        so a repeated run never turns a temporary value into a restore target.
+        A program that already held the target with no record falls back to
+        `min_soc`.
+        """
         window_start, window_end = self._resolve_completion_window()
+        plan = get_charge_completion_plan(self.hass, self.entry, "morning")
+        recorded = (
+            plan_restore_targets(plan)
+            if plan is not None and plan.get("window_end") == window_end.isoformat()
+            else {}
+        )
+        written = {program.soc_entity for program in self._written_programs}
+        restore_targets = dict(recorded)
+        for program in self._program_set:
+            if program.soc_entity in restore_targets:
+                continue
+            if program.soc_entity in written:
+                restore_targets[program.soc_entity] = program.value
+            else:
+                restore_targets[program.soc_entity] = self.bc.min_soc
+        restore_targets = {
+            entity_id: soc
+            for entity_id, soc in restore_targets.items()
+            if entity_id in recorded or abs(soc - target_soc) > 0.01
+        }
+        if not restore_targets:
+            return
         await async_schedule_charge_completion(
             self.hass,
             self.entry,
@@ -348,6 +418,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
             window_start=window_start,
             window_end=window_end,
             window_source=self.windows.night_buy.source.value,
+            restore_targets=restore_targets,
         )
 
     async def _apply_charge_action(
@@ -471,6 +542,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
         outcome.details.update(
             {
                 "program_soc": action.target_soc,
+                "programs": self._program_numbers(),
                 "window_start": window_start.isoformat(),
                 "window_end": window_end.isoformat(),
                 "window_source": str(self.windows.night_buy.source),
@@ -490,7 +562,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
                 current_soc=self.current_soc,
                 target_soc=target_soc,
                 gap_kwh=self._total_gap_kwh,
-                program_number=2,
+                program_numbers=self._program_numbers(),
             )
 
     def _classify_sub_epsilon_gap(
@@ -578,6 +650,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
         outcome.details.update(
             {
                 "program_soc": target_soc,
+                "programs": self._program_numbers(),
                 "window_start": window_start.isoformat(),
                 "window_end": window_end.isoformat(),
                 "window_source": str(self.windows.night_buy.source),

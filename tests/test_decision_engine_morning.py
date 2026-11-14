@@ -20,8 +20,12 @@ from custom_components.energy_optimizer.const import (
     CONF_HEAT_PUMP_FORECAST_SERVICE,
     CONF_MAX_SOC,
     CONF_MIN_SOC,
+    CONF_PROG1_SOC_ENTITY,
+    CONF_PROG1_TIME_START_ENTITY,
     CONF_PROG2_SOC_ENTITY,
     CONF_PROG2_TIME_START_ENTITY,
+    CONF_PROG6_SOC_ENTITY,
+    CONF_PROG6_TIME_START_ENTITY,
     CONF_PV_EFFICIENCY,
     CONF_PV_FORECAST_SENSOR,
     CONF_HIGH_TARIFF_END_HOUR_SENSOR,
@@ -78,11 +82,29 @@ def _state(value: str | tuple[str, dict[str, object]]) -> MagicMock:
     return state
 
 
+# Morning Charge requires Programs 6, 1 and 2; tests that only describe Program 2
+# get the other two with a start layout of 22:00 / 01:30 / 04:00.
+_OUTER_PROGRAM_CONFIG = {
+    CONF_PROG6_SOC_ENTITY: "number.prog6_soc",
+    CONF_PROG6_TIME_START_ENTITY: "time.prog6_start",
+    CONF_PROG1_SOC_ENTITY: "number.prog1_soc",
+    CONF_PROG1_TIME_START_ENTITY: "time.prog1_start",
+}
+_OUTER_PROGRAM_STATES = {
+    "number.prog6_soc": "50",
+    "time.prog6_start": "22:00:00",
+    "number.prog1_soc": "50",
+    "time.prog1_start": "01:30:00",
+}
+
+
 def _setup_hass(
     config: dict[str, object],
     states: dict[str, str],
     windows: MarketWindows | None = None,
 ) -> MagicMock:
+    config = {**_OUTER_PROGRAM_CONFIG, **config}
+    states = {**_OUTER_PROGRAM_STATES, **states}
     hass = MagicMock()
     entry = MagicMock()
     entry.entry_id = "entry-1"
@@ -386,9 +408,12 @@ async def test_morning_charge_sets_program_when_deficit() -> None:
         for call in hass.services.async_call.call_args_list
         if call.args[0] in ("time", "input_datetime", "number")
     ]
-    assert control_calls[0].args[:2] == ("time", "set_value")
-    assert control_calls[1].args[:2] == ("number", "set_value")
-    assert control_calls[1].args[2]["entity_id"] == "number.prog2_soc"
+    assert {call.args[0] for call in control_calls} == {"number"}
+    assert [call.args[2]["entity_id"] for call in control_calls] == [
+        "number.prog6_soc",
+        "number.prog1_soc",
+        "number.prog2_soc",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1212,7 +1237,7 @@ def _stub_morning_balance(monkeypatch: pytest.MonkeyPatch, needed_reserve_kwh: f
 
 
 @pytest.mark.asyncio
-async def test_morning_secure_energy_writes_only_program_2_soc(
+async def test_morning_secure_energy_writes_the_program_set_soc(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Zero gap, reserve need above epsilon, target above SOC: secure_energy (#39)."""
@@ -1226,7 +1251,8 @@ async def test_morning_secure_energy_writes_only_program_2_soc(
     assert action_type == "secure_energy"
     assert details["target_soc"] == 30.0
     assert details["current_soc"] == 20.0
-    assert details["program_number"] == 2
+    assert details["program_numbers"] == [6, 1, 2]
+    assert "program_number" not in details
     assert details["grid_charge_kwh"] == 0.0
     assert "window_start" in details and "window_end" in details
     written = [
@@ -1234,8 +1260,11 @@ async def test_morning_secure_energy_writes_only_program_2_soc(
         for call in hass.services.async_call.call_args_list
         if call.args[0] in ("number", "time")
     ]
-    assert ("number.prog2_soc", 30) in written
-    assert {entity for entity, _ in written} == {"number.prog2_soc", "time.prog2_start"}
+    assert {entity: value for entity, value in written} == {
+        "number.prog6_soc": 30,
+        "number.prog1_soc": 30,
+        "number.prog2_soc": 30,
+    }
 
 
 @pytest.mark.asyncio
