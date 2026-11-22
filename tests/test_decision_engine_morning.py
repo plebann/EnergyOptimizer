@@ -688,6 +688,21 @@ def test_calculate_charge_current_respects_target_charge_time_hours() -> None:
     assert current == 2
 
 
+def test_calculate_charge_current_does_not_count_top_band_twice() -> None:
+    """The 70-90% band (18 A) must end at 90%, where the 11 A band begins."""
+    # 22% -> 100%: 28 kWh-scale fill that fits a 3 h window only when the
+    # 90-100% energy is counted once (T_max ~2.5 h, not ~3.0 h).
+    current = calculate_charge_current(
+        29.53,
+        current_soc=22.0,
+        capacity_ah=28420 / 384,
+        voltage=384,
+        target_charge_time_hours=3.0,
+    )
+
+    assert current == 26
+
+
 def _battery_config() -> decision_common.BatteryConfig:
     return decision_common.BatteryConfig(
         capacity_ah=200,

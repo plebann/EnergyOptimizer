@@ -206,7 +206,7 @@ def calculate_expected_charge_current(
     phase3_energy = 0.0
     if target_soc > lvl3_threshold:
         phase3_start = max(current_soc, lvl3_threshold)
-        phase3_end = target_soc
+        phase3_end = min(target_soc, lvl4_threshold)
         phase3_energy = energy_in_range(phase3_start, phase3_end)
 
     phase4_energy = 0.0
