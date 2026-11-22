@@ -172,6 +172,7 @@ async def _handle_balancing(
     days_since_balancing: int | None,
     prog1_soc: str | None,
     prog2_soc: str | None,
+    prog6_soc: str | None,
     max_soc: float,
     charge_current_entity: str | None,
     max_charge_current: int,
@@ -216,6 +217,14 @@ async def _handle_balancing(
         logger=_LOGGER,
         context=integration_context,
     )
+    await set_program_soc(
+        hass,
+        prog6_soc,
+        max_soc,
+        entry=entry,
+        logger=_LOGGER,
+        context=integration_context,
+    )
     await set_max_charge_current(
         hass,
         charge_current_entity,
@@ -242,6 +251,7 @@ async def _handle_balancing(
         entities_changed=[
             {"entity_id": prog1_soc, "value": max_soc},
             {"entity_id": prog2_soc, "value": max_soc},
+            {"entity_id": prog6_soc, "value": max_soc},
             {"entity_id": charge_current_entity, "value": max_charge_current},
         ],
     )
@@ -387,10 +397,10 @@ async def _handle_normal_restoration(
     sufficiency_reached: bool,
 ) -> bool:
     """Handle normal restoration scenario and return whether it was activated."""
-    del prog6_soc
     restore_targets = (
         (prog1_soc, min_soc, "Program 1"),
         (prog2_soc, min_soc - 4, "Program 2"),
+        (prog6_soc, min_soc, "Program 6"),
     )
     current_targets: list[tuple[str, float, str, float]] = []
     for entity_id, target, label in restore_targets:
@@ -879,6 +889,7 @@ async def _async_run_evening_behavior(
         days_since_balancing=balancing_data.days_since_balancing,
         prog1_soc=prog1_soc,
         prog2_soc=prog2_soc,
+        prog6_soc=prog6_soc,
         max_soc=bc.max_soc,
         charge_current_entity=charge_current_entity,
         max_charge_current=int(bc.max_charge_current),

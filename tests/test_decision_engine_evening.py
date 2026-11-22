@@ -107,7 +107,7 @@ async def test_evening_behavior_balancing_triggers_program_updates() -> None:
     entities = {call.args[2]["entity_id"] for call in number_calls}
     assert "number.prog1_soc" in entities
     assert "number.prog2_soc" in entities
-    assert "number.prog6_soc" not in entities
+    assert "number.prog6_soc" in entities
     assert "number.max_charge_current" in entities
 
     action_events = [
@@ -120,7 +120,7 @@ async def test_evening_behavior_balancing_triggers_program_updates() -> None:
         change["entity_id"]
         for change in action_events[-1]["entities_changed"]
     }
-    assert "number.prog6_soc" not in changed_entities
+    assert "number.prog6_soc" in changed_entities
 
 
 def _base_preservation_config() -> dict[str, object]:
@@ -401,7 +401,7 @@ async def test_handle_preservation_grid_assist_uses_morning_target_soc(
 
 
 @pytest.mark.asyncio
-async def test_normal_restoration_does_not_write_program_6(
+async def test_normal_restoration_returns_program_6_to_min_soc(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     hass = _setup_hass(
@@ -409,7 +409,7 @@ async def test_normal_restoration_does_not_write_program_6(
         {
             "number.prog1_soc": "50",
             "number.prog2_soc": "30",
-            "number.prog6_soc": "20",
+            "number.prog6_soc": "100",
             "sensor.pv_forecast": "5",
         },
     )
@@ -448,13 +448,19 @@ async def test_normal_restoration_does_not_write_program_6(
     )
 
     assert activated is True
-    assert set_program_soc_mock.await_count == 2
+    assert set_program_soc_mock.await_count == 3
     assert [call.args[1] for call in set_program_soc_mock.await_args_list] == [
         "number.prog1_soc",
         "number.prog2_soc",
+        "number.prog6_soc",
     ]
-    assert [call.args[2] for call in set_program_soc_mock.await_args_list] == [20.0, 16.0]
+    assert [call.args[2] for call in set_program_soc_mock.await_args_list] == [
+        20.0,
+        16.0,
+        20.0,
+    ]
     assert captured_outcomes[-1].entities_changed == [
         {"entity_id": "number.prog1_soc", "value": 20.0},
         {"entity_id": "number.prog2_soc", "value": 16.0},
+        {"entity_id": "number.prog6_soc", "value": 20.0},
     ]
