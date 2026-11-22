@@ -579,15 +579,7 @@ class MorningChargeStrategy(BaseChargeStrategy):
     ) -> ChargeAction:
         """Use the maximum safe night target when the extended plan is uncertain."""
         if not self._extended_horizon_fallback:
-            action = super()._calculate_charge_action(total_gap=total_gap, balance=balance)
-            if self._extended_horizon and action.target_soc >= self.bc.max_soc - 0.01:
-                return ChargeAction(
-                    gap_to_charge_kwh=action.gap_to_charge_kwh,
-                    soc_delta=action.soc_delta,
-                    target_soc=action.target_soc,
-                    charge_current=float(self.bc.max_charge_current),
-                )
-            return action
+            return super()._calculate_charge_action(total_gap=total_gap, balance=balance)
 
         del total_gap, balance
         gap_kwh = max(

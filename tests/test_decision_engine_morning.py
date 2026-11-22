@@ -231,6 +231,52 @@ def test_morning_charge_extends_horizon_when_night_buy_is_cheaper() -> None:
     assert strategy._extended_horizon_fallback is False
 
 
+def _extended_strategy(*, fallback: bool) -> MorningChargeStrategy:
+    """Extended-horizon strategy sized from the 2026-11-22 replay (3 h window)."""
+    strategy = _strategy(market_windows())
+    strategy._extended_horizon = True
+    strategy._extended_horizon_fallback = fallback
+    strategy.current_soc = 22.0
+    strategy.bc = decision_common.BatteryConfig(
+        capacity_ah=28420 / 384,
+        voltage=384.0,
+        min_soc=15.0,
+        min_soc_pv=20.0,
+        max_soc=100.0,
+        efficiency=94.0,
+        max_charge_current=32,
+    )
+    strategy._sufficiency = decision_common.SufficiencyResult(
+        required_kwh=31.57,
+        required_sufficiency_kwh=11.01,
+        pv_sufficiency_kwh=2.99,
+        sufficiency_hour=11,
+        sufficiency_reached=True,
+    )
+    strategy._resolve_charge_time_hours = lambda: 3.0
+    return strategy
+
+
+def test_extended_horizon_sizes_current_from_the_night_window() -> None:
+    """A full-battery target no longer forces max current outside the fallback."""
+    strategy = _extended_strategy(fallback=False)
+
+    action = strategy._calculate_charge_action(total_gap=23.05, balance=MagicMock())
+
+    assert action.target_soc == 100.0
+    assert action.charge_current == 23.0
+
+
+def test_extended_horizon_fallback_still_uses_max_current() -> None:
+    """Incomplete extended data keeps targeting max_soc at max current."""
+    strategy = _extended_strategy(fallback=True)
+
+    action = strategy._calculate_charge_action(total_gap=23.05, balance=MagicMock())
+
+    assert action.target_soc == 100.0
+    assert action.charge_current == 32.0
+
+
 def test_next_night_falls_back_to_following_midnight() -> None:
     """Before the next price rotation, the forecast boundary is next midnight."""
     night = window(22, 6, 0.2)
